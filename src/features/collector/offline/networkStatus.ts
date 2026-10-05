@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { newId } from './ids'
 import { OfflineQueue, indexedDbStorage, type QueuedWrite, type WriteResult } from './offlineQueue'
+import { syncOnlineState } from './onlineState'
 
 export type SyncStatus = 'online' | 'offline' | 'syncing' | 'synced' | 'error'
 
@@ -160,6 +161,7 @@ export function startCollectorSync(userId: string): void {
   _userId = userId
   if (!_started) {
     _started = true
+    syncOnlineState()
     window.addEventListener('online', () => {
       _online = true
       notify()
