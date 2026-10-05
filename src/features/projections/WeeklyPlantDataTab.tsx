@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { formatInteger, formatTwoDecimals } from '../../lib/format'
@@ -6,11 +6,13 @@ import { greenhouseIsoWeek } from '../collector/greenhouseWeek'
 import { useCrops } from '../crops/api'
 import { sortCrops, stemsPerM2 } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
-import { useSetHarvestCohorts, useWeeklyPlantData } from './api'
+import { useCohortAfw, useSaveCohortAfw, useSetHarvestCohorts, useWeeklyPlantData, type AfwChange } from './api'
 import {
   LADDER_AGES,
+  AFW_MAX_G,
   cellAtAge,
   cohortBand,
+  cohortCells,
   cohortCellTitle,
   cohortKey,
   cropYears,
@@ -21,6 +23,10 @@ import {
   formatRate,
   ladderAgesWithHarvests,
   lossTitle,
+  observedHarvestShare,
+  parseAfw,
+  pickedKg,
+  pickedKgTitle,
   summarize,
   weeksFromFirstSample,
   type CohortCell,
@@ -51,6 +57,12 @@ export function WeeklyPlantDataTab() {
 
   const weeks = useWeeklyPlantData(crop?.id, year)
   const cohorts = useSetHarvestCohorts(crop?.id, year)
+  const afw = useCohortAfw(crop?.id, year)
+  const saveAfw = useSaveCohortAfw(organization.id, crop?.id, year)
+  // Typed but unsaved AFWs, per crop · year · set week (text as typed).
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [justSaved, setJustSaved] = useState(false)
+  const tableRef = useRef<HTMLDivElement>(null)
   const cohortRows = useMemo(() => new Map((cohorts.data ?? []).map((row) => [row.iso_week, row])), [cohorts.data])
   // Presentation only: start at the first sampled week and show only the
   // cohort ages that have a harvest somewhere in the displayed weeks.
@@ -66,6 +78,57 @@ export function WeeklyPlantDataTab() {
     for (const row of cohorts.data ?? []) for (const cell of row.cells) byKey.set(cohortKey(cell.set_year, cell.set_week), summarize(cell))
     return byKey
   }, [cohorts.data])
+  // Each set week's cohort harvested so far (0–1), down its own diagonal.
+  const harvestShares = new Map<number, number>()
+  for (const w of shownWeeks) harvestShares.set(w.iso_week, observedHarvestShare(cohortCells(cohorts.data ?? [], year ?? 0, w.iso_week)))
+  const lastWeek = weeks.data?.at(-1)?.iso_week ?? 52
+  const draftKey = (week: number) => `${crop?.id}:${year}:${week}`
+  const savedAfw = (week: number) => afw.data?.get(week) ?? null
+  const afwText = (week: number) => drafts[draftKey(week)] ?? (savedAfw(week) === null ? '' : String(savedAfw(week)))
+  // What Picked kg uses: the typed value as soon as it's valid, else the saved one.
+  const afwValue = (week: number) => {
+    const parsed = parseAfw(afwText(week))
+    return parsed === 'invalid' ? savedAfw(week) : parsed
+  }
+  const changes: AfwChange[] = []
+  let invalid = 0
+  for (const w of shownWeeks) {
+    const text = drafts[draftKey(w.iso_week)]
+    if (text === undefined) continue
+    const parsed = parseAfw(text)
+    if (parsed === 'invalid') invalid++
+    else if (parsed !== savedAfw(w.iso_week)) changes.push({ setWeek: w.iso_week, afwG: parsed })
+  }
+  const unsaved = changes.length + invalid > 0
+  useEffect(() => {
+    if (!unsaved) return
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [unsaved])
+  const editAfw = (week: number, text: string) => {
+    setJustSaved(false)
+    setDrafts((d) => ({ ...d, [draftKey(week)]: text }))
+  }
+  const discardAfw = () => setDrafts((d) => Object.fromEntries(Object.entries(d).filter(([k]) => !k.startsWith(`${crop?.id}:${year}:`))))
+  const save = () =>
+    saveAfw.mutate(changes, {
+      onSuccess: () => {
+        discardAfw()
+        setJustSaved(true)
+      },
+    })
+  // Enter / Tab move down the AFW column (Shift goes up), so a season can be typed in one pass.
+  const moveAfw = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' && e.key !== 'Tab') return
+    const inputs = [...(tableRef.current?.querySelectorAll<HTMLInputElement>('input[data-afw]') ?? [])]
+    const next = inputs[inputs.indexOf(e.currentTarget) + (e.shiftKey ? -1 : 1)]
+    if (!next) return
+    e.preventDefault()
+    next.focus()
+    next.select()
+  }
+
   const active = locked ?? hovered
   const follow = {
     active,
@@ -73,7 +136,10 @@ export function WeeklyPlantDataTab() {
     toggle: (key: string) => setLocked((current) => (current === key ? null : key)),
   }
 
-  const select = (next: { crop?: string; year?: number }) =>
+  const select = (next: { crop?: string; year?: number }) => {
+    if (unsaved && !window.confirm('You have unsaved AFW changes. Discard them?')) return
+    discardAfw()
+    setJustSaved(false)
     setParams(
       (prev) => {
         const p = new URLSearchParams(prev)
@@ -86,6 +152,7 @@ export function WeeklyPlantDataTab() {
       },
       { replace: true },
     )
+  }
 
   if (crops.isPending) return <LoadingState />
   if (crops.error) return <ErrorState error={crops.error} />
@@ -155,6 +222,20 @@ export function WeeklyPlantDataTab() {
           <dd>From the baseline set cohort. Those peppers may have set before sampling began, so their real set → harvest delay may be longer.</dd>
         </div>
         <div>
+          <dt>AFW g</dt>
+          <dd>
+            Average fruit weight you expect for that set week's cohort, in grams per fruit (open and future weeks too). Type down the column — Enter or Tab
+            moves to the next week — then Save.
+          </dd>
+        </div>
+        <div>
+          <dt>Picked kg</dt>
+          <dd>
+            That cohort's harvest so far in kg for the whole crop ({formatInteger(crop.area_m2)} m²): Sets/m² × its harvested % down its ladder × AFW. Only
+            recorded harvests count; nothing is projected yet.
+          </dd>
+        </div>
+        <div>
           <dt>Loss</dt>
           <dd>Shown when a cohort's +10 window closes: aborted + pruned + timeout (not harvested by +10; a Harvested record at +11 or later still counts in Harvested/m²). — while the window is open.</dd>
         </div>
@@ -171,8 +252,29 @@ export function WeeklyPlantDataTab() {
         <EmptyState title={`No plant data for ${crop.name} in ${year}`} description="Weeks appear here once plants are recorded with the mobile collector." />
       ) : (
         <>
-        <FollowCaption summary={active ? summaries.get(active) : undefined} year={year} locked={locked !== null} onClear={() => setLocked(null)} />
-        <div className={styles.tableWrap} onKeyDown={(e) => e.key === 'Escape' && setLocked(null)}>
+        <div className={styles.captionRow}>
+          <FollowCaption summary={active ? summaries.get(active) : undefined} year={year} locked={locked !== null} onClear={() => setLocked(null)} />
+          <div className={styles.afwBar} aria-live="polite">
+            {saveAfw.error && <span className={styles.afwError}>Couldn’t save AFW: {saveAfw.error.message}</span>}
+            {invalid > 0 && <span className={styles.afwError}>{invalid} AFW {invalid === 1 ? 'value isn’t' : 'values aren’t'} a weight in grams (0.1–{AFW_MAX_G}).</span>}
+            {unsaved ? (
+              <>
+                <span className={styles.afwUnsaved}>
+                  {changes.length} unsaved AFW change{changes.length === 1 ? '' : 's'}
+                </span>
+                <button type="button" className="button button-secondary" onClick={discardAfw} disabled={saveAfw.isPending}>
+                  Discard
+                </button>
+                <button type="button" className="button button-primary" onClick={save} disabled={saveAfw.isPending || invalid > 0 || changes.length === 0}>
+                  {saveAfw.isPending ? 'Saving…' : 'Save AFW'}
+                </button>
+              </>
+            ) : (
+              justSaved && <span className={styles.afwSaved}>AFW saved ✓</span>
+            )}
+          </div>
+        </div>
+        <div ref={tableRef} className={styles.tableWrap} onKeyDown={(e) => e.key === 'Escape' && setLocked(null)}>
           <table className={styles.table}>
             <thead>
               <tr>
@@ -185,6 +287,8 @@ export function WeeklyPlantDataTab() {
                     +{d}
                   </th>
                 ))}
+                <th scope="col" className={styles.afwHead}>AFW g</th>
+                <th scope="col" className={styles.pickedHead}>Picked kg</th>
                 <th scope="col" className={styles.lossHead}>Loss</th>
                 {showDetail && (
                   <>
@@ -211,6 +315,29 @@ export function WeeklyPlantDataTab() {
                   {ages.map((d, i) => (
                     <CohortTd key={d} cell={cellAtAge(cohortRows.get(w.iso_week), d)} year={year} week={w.iso_week} showDetail={showDetail} divider={i === 0} follow={follow} />
                   ))}
+                  <td className={styles.afwCell}>
+                    <input
+                      data-afw
+                      className={[styles.afwInput, drafts[draftKey(w.iso_week)] !== undefined && parseAfw(afwText(w.iso_week)) !== savedAfw(w.iso_week) ? styles.afwDirty : ''].join(' ')}
+                      inputMode="decimal"
+                      value={afwText(w.iso_week)}
+                      placeholder="—"
+                      aria-label={`AFW W${w.iso_week} (grams per fruit)`}
+                      aria-invalid={parseAfw(afwText(w.iso_week)) === 'invalid'}
+                      onChange={(e) => editAfw(w.iso_week, e.target.value)}
+                      onKeyDown={moveAfw}
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                  </td>
+                  <PickedTd
+                    week={w.iso_week}
+                    setsPerM2={w.sets_per_m2}
+                    share={harvestShares.get(w.iso_week) ?? 0}
+                    afwG={afwValue(w.iso_week)}
+                    areaM2={crop.area_m2}
+                    crossesYearEnd={w.iso_week + 10 > lastWeek}
+                    active={follow.active === cohortKey(year, w.iso_week)}
+                  />
                   <LossTd row={cohortRows.get(w.iso_week)} year={year} follow={follow} />
                   {showDetail && (
                     <>
@@ -310,6 +437,16 @@ function CohortTd({ cell, year, week, showDetail, divider, follow }: { cell: Coh
           {cell.harvested}/{cell.cohort_sets}
         </span>
       )}
+    </td>
+  )
+}
+
+/** The row's own set cohort in kg: its harvested share so far × AFW, for the whole crop area. */
+function PickedTd({ week, setsPerM2, share, afwG, areaM2, crossesYearEnd, active }: { week: number; setsPerM2: number | null; share: number; afwG: number | null; areaM2: number; crossesYearEnd: boolean; active: boolean }) {
+  const kg = pickedKg(setsPerM2, share, afwG, areaM2)
+  return (
+    <td className={[styles.pickedCell, active ? styles.ladderActive : ''].filter(Boolean).join(' ')} title={pickedKgTitle(week, setsPerM2, share, afwG, areaM2, kg, crossesYearEnd)}>
+      {kg === null ? '—' : formatInteger(Math.round(kg))}
     </td>
   )
 }

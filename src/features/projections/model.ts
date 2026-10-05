@@ -165,3 +165,63 @@ export function cohortCellTitle(cell: CohortCell, harvestYear: number, harvestWe
   if (cell.percent === null) lines.push('This harvest week has not been sampled.')
   return lines.join('\n')
 }
+
+// ── Manual AFW and Picked kg (per set-week cohort) ─────────────────────────
+
+/** Average fruit weight bounds, grams (the database checks the same). */
+export const AFW_MIN_G = 0.1
+export const AFW_MAX_G = 2000
+
+/**
+ * A typed AFW: grams with at most one decimal. Blank clears the week's AFW
+ * (null); anything else that isn't a sensible positive weight is invalid.
+ */
+export function parseAfw(input: string): number | null | 'invalid' {
+  const s = input.trim().replace(',', '.')
+  if (s === '') return null
+  if (!/^\d+(\.\d)?$/.test(s)) return 'invalid'
+  const g = Number(s)
+  return g >= AFW_MIN_G && g <= AFW_MAX_G ? g : 'invalid'
+}
+
+/**
+ * Every cell of one set cohort: its diagonal through the year's harvest-week
+ * rows (row = harvest week; the cell at +N belongs to the cohort set N weeks
+ * earlier). Never cells of other cohorts that land in the same harvest week.
+ */
+export function cohortCells(rows: SetHarvestCohortRow[], setYear: number, setWeek: number): CohortCell[] {
+  const cells: CohortCell[] = []
+  for (const row of rows) for (const cell of row.cells) if (cell.set_year === setYear && cell.set_week === setWeek) cells.push(cell)
+  return cells.sort((a, b) => a.delay - b.delay)
+}
+
+/**
+ * The share of a cohort harvested so far (0–1): the sum of its observed,
+ * unrounded harvest percentages. Ages not reached yet, or in weeks that
+ * weren't sampled, have no percentage and add nothing — nothing is projected.
+ */
+export function observedHarvestShare(cells: CohortCell[]): number {
+  return cells.reduce((sum, c) => (c.percent === null ? sum : sum + Number(c.percent)), 0) / 100
+}
+
+/**
+ * Picked kg for a cohort, scaled to the crop's whole area:
+ *   setsPerM2 × harvested share × AFW g ÷ 1000 × crop area m²
+ * Null without an AFW or without Sets/m² (unsampled set week): never invented.
+ */
+export function pickedKg(setsPerM2: number | null, harvestShare: number, afwG: number | null, cropAreaM2: number): number | null {
+  if (afwG === null || setsPerM2 === null) return null
+  return ((setsPerM2 * harvestShare * afwG) / 1000) * cropAreaM2
+}
+
+/** Hover text for a Picked kg cell, showing the calculation. */
+export function pickedKgTitle(setWeek: number, setsPerM2: number | null, share: number, afwG: number | null, cropAreaM2: number, kg: number | null, crossesYearEnd: boolean): string {
+  if (setsPerM2 === null) return `W${setWeek} wasn't sampled, so there is no Sets/m² to convert.`
+  if (afwG === null) return `Enter W${setWeek}'s AFW (grams per fruit) to convert its harvest to kg.`
+  const lines = [
+    `W${setWeek} cohort: ${setsPerM2.toFixed(2)} sets/m² × ${(share * 100).toFixed(1)}% harvested so far × ${afwG} g × ${Math.round(cropAreaM2).toLocaleString('en-US')} m² = ${Math.round(kg ?? 0).toLocaleString('en-US')} kg`,
+    'Only harvests already recorded count; later ages are not projected.',
+  ]
+  if (crossesYearEnd) lines.push('Harvest weeks in the next year are not included in this year’s table.')
+  return lines.join('\n')
+}

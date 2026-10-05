@@ -4,6 +4,7 @@ import {
   cellAtAge,
   cohortBand,
   cohortCellTitle,
+  cohortCells,
   cohortKey,
   cropYears,
   defaultYear,
@@ -15,6 +16,10 @@ import {
   ladderAgesWithHarvests,
   lossTitle,
   normalizeWeek,
+  observedHarvestShare,
+  parseAfw,
+  pickedKg,
+  pickedKgTitle,
   summarize,
   weeksFromFirstSample,
   type ClosingCohort,
@@ -224,5 +229,82 @@ describe('ladder mapping with hidden ages', () => {
       }),
     )
     expect(path).toEqual(['W33+3', 'W34+4', 'W35+5', 'W36+6', 'W37+7', 'W38+8', 'W39+9', 'W40+10'])
+  })
+})
+
+describe('AFW and Picked kg (per set-week cohort)', () => {
+  // Built from Mathieu's W34-style numbers: a cohort harvested 2.777…% at +5,
+  // 16.071…% at +6, 32.773…% at +7 and 10% at +8 (unrounded, as the database sends them).
+  const cell = (setWeek: number, delay: number, percent: number | null, extra: Partial<CohortCell> = {}): CohortCell => ({
+    delay, set_year: 2026, set_week: setWeek, cohort_sets: 100, harvested: 0, percent, is_baseline_cohort: false,
+    cohort_harvested: 0, cohort_aborted: 0, cohort_pruned: 0, cohort_timeout: 0, cohort_on_plant: 0, cohort_closed: false, ...extra,
+  })
+  const harvestRow = (week: number, cells: CohortCell[]) => ({ iso_week: week, cells }) as unknown as SetHarvestCohortRow
+  // 4/144, 9/56, 39/119 and 5/50 of each cohort's sets, as percentages.
+  const PCTS = [(100 * 4) / 144, (100 * 9) / 56, (100 * 39) / 119, (100 * 5) / 50]
+  // Cohort W34's diagonal: +5 in W39 … +8 in W42; +9/+10 not reached yet (no percentage).
+  // Each harvest row also holds other cohorts' cells (W33 at +6 in W39, …) that must not be counted.
+  const rows = [
+    harvestRow(34, [cell(34, 0, 0)]),
+    harvestRow(39, [cell(34, 5, PCTS[0]), cell(33, 6, 40)]),
+    harvestRow(40, [cell(34, 6, PCTS[1]), cell(33, 7, 30)]),
+    harvestRow(41, [cell(34, 7, PCTS[2]), cell(32, 9, 5)]),
+    harvestRow(42, [cell(34, 8, PCTS[3])]),
+    harvestRow(43, [cell(34, 9, null)]),
+    harvestRow(44, [cell(34, 10, null)]),
+  ]
+  const SETS = Number('17.6037159582590990') // as PostgREST sends the numeric
+  const AREA = 11787
+
+  it('follows the cohort down its diagonal, not across a harvest-week row', () => {
+    expect(cohortCells(rows, 2026, 34).map((c) => c.delay)).toEqual([0, 5, 6, 7, 8, 9, 10])
+    expect(cohortCells(rows, 2026, 33).map((c) => c.delay)).toEqual([6, 7])
+  })
+
+  it('17.60 sets/m² × 61.7% × 200 g × 11,787 m² ≈ 25,600 kg, from unrounded values', () => {
+    const share = observedHarvestShare(cohortCells(rows, 2026, 34))
+    expect(share).toBeCloseTo(PCTS.reduce((a, b) => a + b) / 100, 12)
+    expect(share).toBeCloseTo(0.61622, 4) // 61.6%, not the 61.7% from adding rounded cells
+    const kg = pickedKg(SETS, share, 200, AREA)!
+    expect(kg).toBeCloseTo(SETS * share * 0.2 * AREA, 6)
+    expect(Math.round(kg / 100) * 100).toBe(25600)
+    // The rounded-display arithmetic from the example lands in the same place.
+    expect((17.6 * 0.617 * 200 / 1000) * AREA).toBeCloseTo(25599.5, 0)
+  })
+
+  it('changing AFW changes Picked kg proportionally', () => {
+    const share = observedHarvestShare(cohortCells(rows, 2026, 34))
+    expect(pickedKg(SETS, share, 100, AREA)! * 2).toBeCloseTo(pickedKg(SETS, share, 200, AREA)!, 6)
+  })
+
+  it('blank AFW or an unsampled set week gives no kg (never invented)', () => {
+    expect(pickedKg(SETS, 0.5, null, AREA)).toBeNull()
+    expect(pickedKg(null, 0.5, 200, AREA)).toBeNull()
+  })
+
+  it('a cohort with no harvest yet is 0 kg once it has an AFW', () => {
+    const open = [harvestRow(41, [cell(41, 0, 0)]), harvestRow(42, [cell(41, 1, null)])]
+    expect(pickedKg(SETS, observedHarvestShare(cohortCells(open, 2026, 41)), 200, AREA)).toBe(0)
+  })
+
+  it('future / unobserved ages are not counted as harvested', () => {
+    expect(observedHarvestShare([cell(34, 9, null), cell(34, 10, null)])).toBe(0)
+    expect(observedHarvestShare([cell(34, 5, 10), cell(34, 6, null)])).toBeCloseTo(0.1, 12)
+  })
+
+  it('reads AFW input as grams, rejecting nonsense', () => {
+    expect(parseAfw('200')).toBe(200)
+    expect(parseAfw(' 185.5 ')).toBe(185.5)
+    expect(parseAfw('185,5')).toBe(185.5)
+    expect(parseAfw('')).toBeNull()
+    for (const bad of ['-5', '0', '0.0', '2001', 'abc', '1.25', '200g']) expect(parseAfw(bad)).toBe('invalid')
+  })
+
+  it('explains the calculation on hover', () => {
+    const share = observedHarvestShare(cohortCells(rows, 2026, 34))
+    const kg = pickedKg(SETS, share, 200, AREA)
+    expect(pickedKgTitle(34, SETS, share, 200, AREA, kg, false)).toMatch(/^W34 cohort: 17\.60 sets\/m² × 61\.6% harvested so far × 200 g × 11,787 m² = 25,57\d kg/)
+    expect(pickedKgTitle(34, SETS, share, null, AREA, null, false)).toContain("Enter W34's AFW")
+    expect(pickedKgTitle(50, SETS, 0, 200, AREA, 0, true)).toContain('next year')
   })
 })

@@ -118,6 +118,20 @@ export type NodeAttentionRuleRow = {
   updated_at: string
 }
 
+// ---- Manual AFW per set-week cohort (20261015000000_cohort_afw.sql) ----
+
+/** Average fruit weight in grams per fruit, entered by hand for a crop's set week. */
+export type CohortAfwRow = {
+  organization_id: string
+  crop_id: string
+  set_year: number
+  set_week: number
+  afw_g: number
+  updated_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 // ---- Projections (20261007000000_weekly_plant_data.sql) ----
 
 /** One ISO week of observed stage entries on a crop's sampled plants. Per-m² values are null when unsampled. */
@@ -301,6 +315,12 @@ export type Database = {
             referencedColumns: ['organization_id', 'crop_id', 'id']
           },
         ]
+      }
+      cohort_afw: {
+        Row: CohortAfwRow
+        Insert: Pick<CohortAfwRow, 'organization_id' | 'crop_id' | 'set_year' | 'set_week' | 'afw_g'>
+        Update: Pick<CohortAfwRow, 'afw_g'>
+        Relationships: []
       }
       node_attention_rules: {
         Row: NodeAttentionRuleRow

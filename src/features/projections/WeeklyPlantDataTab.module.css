@@ -46,8 +46,7 @@
    * the page, so even fully scrolled its header row stays visible right under
    * them while scrolling through the weeks.
    */
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
   max-height: calc(100vh - var(--topbar-height) - 120px);
   max-height: calc(100dvh - var(--topbar-height) - 120px);
   min-height: 280px;
@@ -59,18 +58,27 @@
 }
 
 .table {
-  /* Natural column widths: extra screen space shouldn't stretch the columns. */
+  /*
+   * Fills the card's width; columns have a comfortable minimum width, so on a
+   * narrower screen the table scrolls sideways instead of squeezing them.
+   */
   width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
 
 .table th,
 .table td {
-  padding: 10px var(--space-5);
+  min-width: 104px;
+  padding: 11px var(--space-6);
   border-bottom: 1px solid var(--border);
   text-align: right;
   white-space: nowrap;
+}
+
+.table th:first-child {
+  min-width: 150px;
 }
 
 .table thead th {
@@ -291,4 +299,103 @@
 .lossHead,
 .lossCell {
   border-left: 1px solid var(--border-strong);
+}
+
+/* ---- Manual AFW and Picked kg ---- */
+
+.captionRow {
+  /* The caption and the AFW save bar share the sticky line above the table. */
+  position: sticky;
+  top: var(--topbar-height);
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: calc(-1 * var(--space-2));
+  background: var(--bg);
+}
+
+.captionRow .caption {
+  position: static;
+  margin-bottom: 0;
+}
+
+.afwBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-left: auto;
+  font-size: var(--text-sm);
+}
+
+.afwBar :global(.button) {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.afwUnsaved {
+  color: #8a5a00;
+  font-weight: 600;
+}
+
+.afwSaved {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.afwError {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.afwHead,
+.afwCell {
+  border-left: 1px solid var(--border-strong);
+}
+
+.table td.afwCell {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.afwInput {
+  width: 84px;
+  height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.afwInput::placeholder {
+  color: var(--text-muted);
+}
+
+.afwInput:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+/* Changed but not saved yet. */
+.afwInput.afwDirty {
+  border-color: #b7791f;
+  background: #fdf3dc;
+}
+
+.afwInput[aria-invalid='true'] {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.pickedCell {
+  font-weight: 600;
 }
