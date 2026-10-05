@@ -1,0 +1,116 @@
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbarInner {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-4);
+  max-width: var(--content-width);
+  height: 64px;
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.brandIcon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: var(--on-primary);
+  flex-shrink: 0;
+}
+
+.brandName {
+  font-weight: 700;
+  font-size: var(--text-lg);
+}
+
+.orgName {
+  padding-left: var(--space-3);
+  margin-left: var(--space-1);
+  border-left: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav {
+  display: flex;
+  gap: var(--space-1);
+  padding: 4px;
+  background: var(--surface-muted);
+  border-radius: var(--radius-full);
+}
+
+.navLink {
+  padding: 8px 20px;
+  border-radius: var(--radius-full);
+  color: var(--text-muted);
+  font-weight: 550;
+  text-decoration: none;
+  transition: color 0.15s, background 0.15s;
+}
+
+.navLink:hover {
+  color: var(--text);
+}
+
+.navLink.active {
+  background: var(--surface);
+  color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.signOut {
+  justify-self: end;
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-8) var(--gutter) var(--space-12);
+}
+
+@media (max-width: 760px) {
+  .topbarInner {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'brand signout'
+      'nav nav';
+    height: auto;
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
+    row-gap: var(--space-3);
+  }
+  .brand { grid-area: brand; }
+  .signOut { grid-area: signout; }
+  .nav { grid-area: nav; justify-content: space-between; }
+  .navLink { flex: 1; text-align: center; padding: 8px 12px; }
+  .orgName { display: none; }
+  .main { padding-top: var(--space-6); }
+}
