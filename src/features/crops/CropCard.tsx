@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom'
 import { formatDate } from '../../lib/dates'
-import { formatArea, formatInteger } from '../../lib/format'
+import { formatArea, formatInteger, formatTwoDecimals } from '../../lib/format'
 import { ColorDot, StatusBadge } from './CropBadges'
-import { cropDescription, cropStatus, type Crop } from './model'
+import { cropDescription, cropStatus, stemsPerM2, type Crop } from './model'
 import styles from './CropCard.module.css'
 
 export function CropCard({ crop }: { crop: Crop }) {
@@ -32,6 +32,8 @@ export function CropCard({ crop }: { crop: Crop }) {
           <dd>{formatInteger(crop.picking_stems)}</dd>
         </div>
       </dl>
+
+      <p className={styles.density}>Stems/m²: {formatTwoDecimals(stemsPerM2(crop))}</p>
 
       <p className={styles.dates}>
         {formatDate(crop.planting_date)} <span aria-label="to">→</span> {formatDate(crop.pullout_date)}

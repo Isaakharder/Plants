@@ -1,0 +1,1079 @@
+/*
+ * Mobile collector styles, extracted from CropLink client/src/styles.css
+ * (lines 1–40, 162–270, 635–706, 1289–2341) and scoped under .collector-app.
+ *
+ * Every selector is prefixed with .collector-app so nothing here can affect the
+ * Plants desktop; keep it that way when editing. In the extraction, CropLink's
+ * global reset became :where(.collector-app) * (same zero specificity), its
+ * :root variables and html/body font moved onto .collector-app (resetting the
+ * line-height and font smoothing inherited from Plants' body), .empty-state
+ * became .collector-empty (Plants has its own .empty-state), and rules for
+ * classes the collector doesn't use were dropped.
+ */
+
+:where(.collector-app) *,
+:where(.collector-app) *::before,
+:where(.collector-app) *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+.collector-app {
+  --green-600: #16a34a;
+  --green-700: #15803d;
+  --green-50: #f0fdf4;
+  --green-100: #dcfce7;
+  --green-200: #bbf7d0;
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca3af;
+  --gray-500: #6b7280;
+  --gray-600: #4b5563;
+  --gray-700: #374151;
+  --gray-800: #1f2937;
+  --gray-900: #111827;
+  --white: #ffffff;
+  --red-500: #ef4444;
+  --red-100: #fee2e2;
+  --yellow-500: #eab308;
+  --yellow-100: #fef9c3;
+  --blue-500: #3b82f6;
+  --blue-100: #dbeafe;
+}
+
+.collector-app {
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  font-size: 14px;
+  color: var(--gray-800);
+  background: var(--gray-100);
+  line-height: normal;
+  -webkit-font-smoothing: auto;
+}
+/* Cards */
+.collector-app .card {
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+/* Buttons */
+.collector-app .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  text-decoration: none;
+}
+
+.collector-app .btn-primary {
+  background: var(--green-600);
+  color: var(--white);
+}
+
+.collector-app .btn-primary:hover {
+  background: var(--green-700);
+}
+
+.collector-app .btn-secondary {
+  background: var(--white);
+  color: var(--gray-700);
+  border-color: var(--gray-300);
+}
+
+.collector-app .btn-secondary:hover {
+  background: var(--gray-50);
+}
+
+.collector-app .btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.collector-app .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Forms */
+.collector-app .form-group {
+  margin-bottom: 14px;
+}
+
+.collector-app .form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-600);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.collector-app .form-control {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--gray-300);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--gray-800);
+  background: var(--white);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.collector-app .form-control:focus {
+  border-color: var(--green-600);
+}
+
+.collector-app .form-control:disabled {
+  background: var(--gray-100);
+  color: var(--gray-500);
+}
+
+.collector-app select.form-control {
+  cursor: pointer;
+}
+
+/* Alert */
+.collector-app .alert {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.collector-app .alert-error {
+  background: var(--red-100);
+  color: var(--red-500);
+  border: 1px solid #fecaca;
+}
+
+/* Modal overlay */
+.collector-app .modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.collector-app .modal {
+  background: var(--white);
+  border-radius: 10px;
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.collector-app .modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gray-900);
+  margin-bottom: 16px;
+}
+
+.collector-app .modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+/* Loading */
+.collector-app .loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  color: var(--gray-400);
+}
+
+/* Empty state */
+.collector-app .collector-empty {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--gray-400);
+}
+
+/* Mobile measurements entry */
+.collector-app .mobile-page {
+  min-height: 100vh;
+  background: var(--gray-100);
+  padding-bottom: 86px;
+}
+
+.collector-app .mobile-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--white);
+  border-bottom: 1px solid var(--gray-200);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.collector-app .mobile-header h1 {
+  font-size: 18px;
+  color: var(--gray-900);
+  margin: 0;
+}
+
+.collector-app .mobile-header p {
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-top: 4px;
+}
+
+.collector-app .mobile-content {
+  padding: 16px;
+}
+
+.collector-app .mobile-control {
+  min-height: 46px;
+  font-size: 15px;
+}
+
+@media (max-width: 760px) {
+
+  .collector-app .mobile-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .collector-app .mobile-header .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ── Mobile variety section & row cards ─────────────────────────────── */
+
+.collector-app .variety-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.collector-app .variety-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.collector-app .variety-color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.collector-app .row-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.collector-app .row-card {
+  background: var(--white);
+  border: 2px solid var(--gray-200);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 104px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+}
+
+.collector-app .row-card:hover,
+.collector-app .row-card:active {
+  border-color: var(--green-600);
+  box-shadow: 0 2px 10px rgba(22, 163, 74, 0.15);
+}
+
+.collector-app .row-card-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--gray-900);
+  line-height: 1.2;
+}
+
+.collector-app .row-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--gray-500);
+  font-weight: 500;
+}
+
+.collector-app .row-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--gray-400);
+  margin-top: auto;
+}
+
+.collector-app .row-card-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+@media (max-width: 480px) {
+  .collector-app .row-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Row Canvas page ─────────────────────────────────────────────────── */
+
+.collector-app .row-canvas-page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--gray-100);
+  overflow: hidden;
+}
+
+.collector-app .row-canvas-header {
+  background: var(--white);
+  border-bottom: 1px solid var(--gray-200);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.collector-app .row-canvas-back {
+  background: none;
+  border: none;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--green-700);
+  cursor: pointer;
+  padding: 6px 8px 6px 0;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.collector-app .row-canvas-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.collector-app .row-canvas-variety {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-700);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collector-app .row-canvas-sep {
+  color: var(--gray-300);
+  font-size: 14px;
+}
+
+.collector-app .row-canvas-rowname {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gray-900);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collector-app .row-canvas-week {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--green-700);
+  background: var(--green-100);
+  border-radius: 999px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.collector-app .row-canvas-message {
+  background: var(--green-100);
+  color: var(--green-700);
+  border-bottom: 1px solid var(--green-200);
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── Stem navigation bar (← Stem N →) ───────────────────────────────── */
+
+.collector-app .stem-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+  padding: 8px 12px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.collector-app .stem-nav-arrow {
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--green-700);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.collector-app .stem-nav-arrow:not(:disabled):hover {
+  background: var(--green-50);
+  border-color: var(--green-600);
+}
+
+.collector-app .stem-nav-arrow:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.collector-app .stem-nav-name {
+  flex: 1;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gray-900);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collector-app .stem-nav-counter {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--gray-400);
+}
+
+/*
+ * Scrollable canvas. flex-direction: column so the empty-state child can use
+ * flex: 1 to fill and centre. overflow goes downward — normal scroll direction.
+ * The plant's column-reverse layout puts the newest (highest) node at the CSS
+ * top, so scrollTop=0 always shows the growing tip without hunting.
+ */
+.collector-app .row-canvas-area {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Inner wrapper for stem columns.
+ * margin: 0 auto centres the group horizontally when stems are fewer than the
+ * viewport width; when they overflow the auto margins collapse to 0 and the
+ * native scrollbar takes over — so left-side stems are never clipped.
+ */
+
+/* Single-stem wrapper — full width, centred in the canvas */
+.collector-app .stem-single {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 24px 0 32px;
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+/* Empty canvas — fills the scroll column and centres content */
+.collector-app .row-canvas-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-500);
+  font-size: 15px;
+  font-weight: 500;
+  text-align: center;
+  padding: 0 24px 40px;
+  min-height: 200px;
+}
+
+/* ── Stem column ─────────────────────────────────────────────────────── */
+
+/*
+ * flex-direction: column-reverse means the FIRST DOM child appears at the
+ * BOTTOM. Nodes are rendered sorted ascending (N1 first in DOM) so N1 sits
+ * at the bottom and the highest node is at the top — mimicking upward growth.
+ */
+.collector-app .stem-visual {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: stretch;
+  gap: 20px;
+  padding: 14px 0;
+  min-height: 60px;
+}
+
+/* Vertical green stem line — centred under the main-zone circles */
+.collector-app .stem-line {
+  position: absolute;
+  width: 4px;
+  top: 14px;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--green-600);
+  border-radius: 2px;
+  z-index: 0;
+}
+
+.collector-app .stem-no-nodes {
+  align-self: center;
+  font-size: 11px;
+  color: var(--gray-400);
+  text-align: center;
+  padding: 8px 0;
+}
+
+/*
+ * Row holding the main fruit/status stem beside the secondary Veg
+ * Measurement Stem. The main stem keeps its full layout and simply
+ * shrinks (min-width: 0) to make room for the narrow, fixed-width Veg
+ * column — it never wraps or causes horizontal overflow on mobile.
+ */
+.collector-app .stem-canvas-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.collector-app .stem-canvas-row .stem-visual {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Secondary Veg Measurement Stem — compact, fixed-width, visually subordinate */
+.collector-app .veg-stem-column {
+  flex: 0 0 auto;
+  width: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-left: 1px dashed var(--gray-200);
+  padding-left: 6px;
+}
+
+.collector-app .veg-stem-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gray-400);
+  margin-bottom: 2px;
+}
+
+.collector-app .veg-stem-visual {
+  position: relative;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 0;
+  min-height: 60px;
+  width: 100%;
+}
+
+.collector-app .veg-stem-line {
+  position: absolute;
+  width: 2px;
+  top: 14px;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #bfdbfe;
+  border-radius: 1px;
+  z-index: 0;
+}
+
+.collector-app .veg-stem-node-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.collector-app .veg-stem-node-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--white);
+  border: 2px solid #1d4ed8;
+}
+
+.collector-app .veg-stem-node-number {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--gray-600);
+  line-height: 1;
+}
+
+.collector-app .veg-stem-growth-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.collector-app .veg-stem-growth-value {
+  font-size: 9px;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* Circular node button — sits on top of the stem line */
+.collector-app .stem-node-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2px solid var(--gray-300);
+  background: var(--white);
+  color: var(--gray-600);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s;
+  line-height: 1;
+}
+
+.collector-app .stem-node-btn:active {
+  transform: scale(0.88);
+}
+
+/* Three-zone row: [left zone] [circle] [right zone] */
+.collector-app .stem-node-section {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+
+.collector-app .stem-side-zone {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.collector-app .stem-side-zone--left {
+  justify-content: flex-end;
+}
+
+.collector-app .stem-side-zone--right {
+  justify-content: flex-start;
+}
+
+.collector-app .stem-main-zone {
+  width: 54px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Main-stem node number, shown in the side zone opposite the side shoot */
+.collector-app .stem-node-number-label {
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--gray-600);
+  white-space: nowrap;
+  line-height: 1;
+}
+.collector-app .stem-side-zone--left .stem-node-number-label {
+  margin-right: 4px;
+}
+.collector-app .stem-side-zone--right .stem-node-number-label {
+  margin-left: 4px;
+}
+
+/* Short status label shown below the main node circle */
+.collector-app .stem-node-status-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--gray-500);
+  text-align: center;
+  white-space: nowrap;
+  max-width: 54px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1;
+}
+
+/* Small + button to add a side shoot */
+.collector-app .stem-side-add-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px dashed var(--gray-300);
+  background: transparent;
+  color: var(--gray-400);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  line-height: 1;
+  transition: border-color 0.1s, color 0.1s, background 0.1s;
+}
+
+.collector-app .stem-side-add-btn:hover {
+  border-color: var(--green-600);
+  color: var(--green-600);
+  background: var(--green-50);
+}
+
+/* Shoot item: [badge?][connector][circle] (left) or [circle][connector][badge?] (right) */
+
+/* Horizontal connector between shoot circle and main stem */
+.collector-app .shoot-connector {
+  width: 16px;
+  height: 2px;
+  background: var(--green-600);
+  flex-shrink: 0;
+}
+
+/* Smaller shoot circle */
+
+/* Side shoot status badge */
+
+/* Flex wrapper: [connector?, …icon-btns, +btn].
+   row-reverse on --left keeps connector adjacent to the main stem on both sides. */
+.collector-app .shoot-zone {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+.collector-app .shoot-zone--left {
+  flex-direction: row-reverse;
+}
+
+/* Small circular status icon for a single shoot */
+.collector-app .shoot-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--gray-300);
+  background: var(--white);
+  color: var(--gray-500);
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s;
+  padding: 0;
+  position: relative;
+  z-index: 2;
+}
+.collector-app .shoot-icon-btn:active {
+  transform: scale(0.88);
+}
+
+/* Column wrapper: shoot circle + short label below */
+.collector-app .shoot-node-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Side-shoot numbering label (e.g. "5+1"), shown above the shoot icon */
+.collector-app .shoot-number-label {
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--gray-600);
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* Short status label below a shoot circle */
+.collector-app .shoot-node-cell-label {
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--gray-500);
+  text-align: center;
+  white-space: nowrap;
+  max-width: 36px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1;
+}
+
+/* "+N" chip when shoots exceed MAX_VISIBLE */
+.collector-app .shoot-overflow-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gray-500);
+  background: var(--gray-100);
+  border-radius: 999px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+/* Status badge beside each node */
+
+/* Dash shown when the node has no recorded status this week */
+
+/* Badge variant that holds a 22px SVG icon instead of text */
+
+/* "+ Node" sits at the TOP of the stem — represents new growth */
+.collector-app .stem-add-node-btn {
+  align-self: center;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border: 2px dashed var(--green-600);
+  border-radius: 8px;
+  background: var(--green-50);
+  color: var(--green-700);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.collector-app .stem-add-node-btn:hover {
+  background: var(--green-100);
+  border-color: var(--green-700);
+}
+
+/* Tip action row: + Node and + Veg side by side */
+.collector-app .stem-tip-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.collector-app .stem-tip-actions .stem-add-node-btn {
+  margin-bottom: 0;
+}
+
+/* "+ Veg" button — vegetative growth entry */
+.collector-app .stem-veg-btn {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border: 2px dashed var(--blue-500);
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.collector-app .stem-veg-btn:hover {
+  background: var(--blue-100);
+  border-color: #1d4ed8;
+}
+
+/* Growth reading chip displayed above the stem nodes */
+.collector-app .stem-growth-chip {
+  align-self: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+/* ── Status picker grid ──────────────────────────────────────────────── */
+
+.collector-app .status-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.collector-app .status-picker-btn {
+  border: 1px solid var(--gray-200);
+  background: var(--white);
+  border-radius: 8px;
+  padding: 10px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-700);
+  cursor: pointer;
+  text-align: center;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.collector-app .status-picker-btn:hover {
+  border-color: var(--green-600);
+  background: var(--green-50);
+}
+
+.collector-app .status-picker-btn.active {
+  border-color: var(--green-600);
+  background: var(--green-100);
+  color: var(--green-700);
+}
+
+.collector-app .status-picker-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 400px) {
+  .collector-app .status-picker-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ── Offline status banner ───────────────────────────────────────────────── */
+
+.collector-app .offline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  border-bottom: 1px solid transparent;
+  transition: background 0.2s, color 0.2s;
+}
+
+.collector-app .offline-banner--offline {
+  background: #1f2937;
+  color: #f9fafb;
+  border-bottom-color: #374151;
+}
+
+.collector-app .offline-banner--pending {
+  background: var(--yellow-100);
+  color: #92400e;
+  border-bottom-color: #fde68a;
+}
+
+.collector-app .offline-banner--error {
+  background: var(--red-100);
+  color: var(--red-500);
+  border-bottom-color: #fca5a5;
+}
+
+.collector-app .offline-banner--synced {
+  background: var(--green-100);
+  color: var(--green-700);
+  border-bottom-color: var(--green-200);
+}
+
+.collector-app .offline-banner-text {
+  flex: 1;
+}
+
+.collector-app .offline-banner-sync-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 5px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.collector-app .offline-banner-sync-btn:hover {
+  opacity: 1;
+}
+
+.collector-app .offline-banner-sync-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

@@ -1,0 +1,25 @@
+.subtabs {
+  display: flex;
+  gap: var(--space-6);
+  margin: calc(-1 * var(--space-4)) 0 var(--space-6);
+  border-bottom: 1px solid var(--border);
+}
+
+.subtab {
+  padding: var(--space-3) 0;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.subtab:hover {
+  color: var(--text);
+}
+
+.subtab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}

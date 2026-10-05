@@ -54,14 +54,23 @@
   --shadow-md: 0 6px 20px rgba(28, 42, 32, 0.08);
   --shadow-lg: 0 24px 60px rgba(28, 42, 32, 0.2);
 
-  /* Layout */
-  --content-width: 1200px;
+  /* Layout: desktop pages use the full browser width, inside the gutter. */
+  --content-width: 100%;
   --gutter: 32px;
+  /* Height of the sticky top bar (AppLayout), for content that sticks below it. */
+  --topbar-height: 65px;
+}
+
+@media (min-width: 1600px) {
+  :root {
+    --gutter: 48px;
+  }
 }
 
 @media (max-width: 760px) {
   :root {
     --gutter: 16px;
+    --topbar-height: 121px; /* the nav wraps onto a second row */
     --text-2xl: 1.5rem;
     --text-3xl: 1.875rem;
   }

@@ -17,6 +17,12 @@ export const colorLabel = (color: CropColor) => CROP_COLORS.find((c) => c.value 
 /** "Red Bell Pepper", or "Bell Pepper" for Other. */
 export const cropDescription = (color: CropColor) => (color === 'other' ? 'Bell Pepper' : `${colorLabel(color)} Bell Pepper`)
 
+/**
+ * Planting density, derived from the stored area and picking stems (never
+ * stored, so it can't disagree with them). Both are > 0 in the database.
+ */
+export const stemsPerM2 = (crop: Pick<Crop, 'picking_stems' | 'area_m2'>) => crop.picking_stems / crop.area_m2
+
 // Status is derived from dates, never stored, so it can't go stale.
 export type CropStatus = 'planned' | 'active' | 'finished'
 

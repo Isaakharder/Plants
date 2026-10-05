@@ -39,7 +39,9 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   })
 
   return (
-    <OrganizationContext.Provider value={{ organization: query.data ?? null, loading: query.isPending, error: query.error }}>
+    // A failed refetch (e.g. no signal) doesn't hide an organization already
+    // known from the device's cached data.
+    <OrganizationContext.Provider value={{ organization: query.data ?? null, loading: query.isPending, error: query.data === undefined ? query.error : null }}>
       {children}
     </OrganizationContext.Provider>
   )

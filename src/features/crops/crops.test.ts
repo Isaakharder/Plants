@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { formatDate, isIsoDate } from '../../lib/dates'
-import { parseNumberInput } from '../../lib/format'
+import { formatTwoDecimals, parseNumberInput } from '../../lib/format'
 import { validateCropForm, type CropFormValues } from './cropValidation'
-import { cropStatus } from './model'
+import { cropStatus, stemsPerM2 } from './model'
 
 const cadalora: CropFormValues = {
   name: '  Cadalora ',
@@ -61,5 +61,16 @@ describe('dates and numbers', () => {
   it('parses grouped numbers', () => {
     expect(parseNumberInput('31,114')).toBe(31114)
     expect(parseNumberInput('1.2.3')).toBeNaN()
+  })
+})
+
+describe('stemsPerM2', () => {
+  it('divides picking stems by area', () => {
+    expect(formatTwoDecimals(stemsPerM2({ picking_stems: 80000, area_m2: 12000 }))).toBe('6.67')
+    expect(formatTwoDecimals(stemsPerM2({ picking_stems: 76000, area_m2: 31114 }))).toBe('2.44')
+  })
+
+  it('always shows two decimals', () => {
+    expect(formatTwoDecimals(stemsPerM2({ picking_stems: 24000, area_m2: 12000 }))).toBe('2.00')
   })
 })
