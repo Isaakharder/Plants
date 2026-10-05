@@ -62,7 +62,10 @@ export function mergeRowCanvas(data: RowCanvasData, rowId: string, queued: Queue
         if (a.record.measurement_row_id === rowId && !stems.some((s) => s.id === a.record.id)) stems.push({ ...a.record, ...stamp(a) })
         break
       case 'create_node':
-        if (stems.some((s) => s.id === a.record.measurement_stem_id) && !nodes.some((n) => n.id === a.record.id)) nodes.push({ ...a.record, ...stamp(a) })
+        if (stems.some((s) => s.id === a.record.measurement_stem_id) && !nodes.some((n) => n.id === a.record.id)) {
+          // The time the worker added it (older queued writes don't carry one: the queue time).
+          nodes.push({ ...a.record, ...stamp(a), created_at: a.record.created_at ?? stamp(a).created_at })
+        }
         break
       case 'deactivate_node':
         nodes = nodes.map((n) => (n.id === a.record.id ? { ...n, is_active: false } : n))

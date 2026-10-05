@@ -1077,3 +1077,93 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ── Attention badges (⚠ duplicate record, clock = overdue for an update) ── */
+.collector-app .attention-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.collector-app .attention-badge {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.collector-app .attention-badge svg {
+  width: 15px;
+  height: 15px;
+  filter: drop-shadow(0 0 1px #fff);
+}
+
+.collector-app .attention-badge--warning {
+  top: -9px;
+  left: -11px;
+}
+
+.collector-app .attention-badge--clock {
+  top: -9px;
+  right: -11px;
+}
+
+.collector-app .attention-anchor--shoot .attention-badge {
+  top: -9px;
+  width: 18px;
+  height: 18px;
+}
+
+.collector-app .attention-anchor--shoot .attention-badge svg {
+  width: 13px;
+  height: 13px;
+}
+
+.collector-app .attention-anchor--shoot .attention-badge--warning {
+  left: -9px;
+}
+
+.collector-app .attention-anchor--shoot .attention-badge--clock {
+  right: -9px;
+}
+
+.collector-app .attention-modal {
+  max-width: 380px;
+}
+
+.collector-app .attention-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-top: 1px solid var(--gray-100);
+}
+
+.collector-app .attention-item-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.collector-app .attention-line {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--gray-700);
+}
+
+.collector-app .attention-line--title {
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.collector-app .attention-line--muted {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--gray-500);
+}

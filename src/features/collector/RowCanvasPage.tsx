@@ -10,8 +10,9 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
+import { duplicateExplanation, rowAttention, useNow, type NodeAttention } from './attention';
 import { useOrganization } from '../organization/OrganizationProvider';
-import { NotOnDeviceError, useCollectorActions, useCollectorCrops, useRowCanvas } from './api';
+import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useRowCanvas } from './api';
 import { OfflineBanner } from './components/OfflineBanner';
 import { TextPromptModal } from './components/TextPromptModal';
 import { cropColorVar, type CanvasState } from './display';
@@ -80,6 +81,48 @@ function formatShootLabel(parentNodeNumber: number, order: number): string {
   return `${parentNodeNumber}+${order}`;
 }
 
+// ── Attention badges (⚠ duplicate record, clock = overdue for an update) ──
+// Small marks on the node's corner; tapping one explains it. They sit outside
+// the node button, so tapping the node still opens the status picker.
+
+function WarningIcon() {
+  return (
+    <svg viewBox="-6 -6 12 12" aria-hidden="true">
+      <path d="M0 -4.6 L4.6 3.6 L-4.6 3.6 Z" fill="#fff4ed" stroke="#c2410c" strokeWidth={1.2} strokeLinejoin="round" />
+      <path d="M0 -1.6 L0 1" stroke="#c2410c" strokeWidth={1.2} strokeLinecap="round" />
+      <circle cy={2.4} r={0.6} fill="#c2410c" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="-6 -6 12 12" aria-hidden="true">
+      <circle r={4.8} fill="#fdf3dc" stroke="#b7791f" strokeWidth={1.2} />
+      <path d="M0 -2.6 L0 0 L2 1.3" stroke="#b7791f" strokeWidth={1.1} fill="none" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AttentionBadges({ attention, onOpen }: { attention: NodeAttention | undefined; onOpen: () => void }) {
+  if (!attention) return null;
+  const open = (e: { stopPropagation: () => void }) => { e.stopPropagation(); onOpen(); };
+  return (
+    <>
+      {attention.duplicate && (
+        <button type="button" className="attention-badge attention-badge--warning" aria-label="Needs attention: duplicate record" onClick={open}>
+          <WarningIcon />
+        </button>
+      )}
+      {attention.clock && (
+        <button type="button" className="attention-badge attention-badge--clock" aria-label={attention.clock.kind === 'overdue' ? `Needs an update: last updated ${attention.clock.ageDays} days ago` : 'No status update recorded'} onClick={open}>
+          <ClockIcon />
+        </button>
+      )}
+    </>
+  );
+}
+
 const byNodeOrder = (a: PlantNode, b: PlantNode) => a.sort_order - b.sort_order || a.node_number - b.node_number;
 
 export function RowCanvasPage() {
@@ -107,6 +150,7 @@ export function RowCanvasPage() {
   const [activeStemIndex, setActiveStemIndex] = useState(0);
   const [addStemModal,    setAddStemModal]    = useState(false);
   const [statusPickerCtx, setStatusPickerCtx] = useState<{ stem: MeasurementStem; node: PlantNode; isNew?: boolean } | null>(null);
+  const [attentionCtx, setAttentionCtx] = useState<{ stem: MeasurementStem; node: PlantNode } | null>(null);
   const [saving,   setSaving]   = useState(false);
   const [message,  setMessage]  = useState('');
 
@@ -143,6 +187,15 @@ export function RowCanvasPage() {
     }
     return result;
   }, [canvasQuery.data]);
+
+  // Duplicate records and nodes overdue under the organization’s attention rules, from the same merged
+  // data (queued writes included), so a status saved offline clears its clock at once.
+  const now = useNow();
+  const { rules: attentionRules } = useAttentionRules(organization.id, userId);
+  const attentionByNode = useMemo(
+    () => rowAttention(canvasQuery.data?.nodes ?? [], canvasQuery.data?.statuses ?? [], now, attentionRules),
+    [canvasQuery.data, now, attentionRules],
+  );
 
   // This week's reading (shown on the chip and pre-filled in the Veg modal).
   const growthByStem = useMemo(() => {
@@ -500,6 +553,7 @@ export function RowCanvasPage() {
                       return (
                         <div key={shoot.id} className="shoot-node-cell">
                           <span className="shoot-number-label">{shootNumberLabel}</span>
+                          <span className="attention-anchor attention-anchor--shoot">
                           <button
                             type="button"
                             className="shoot-icon-btn"
@@ -521,6 +575,8 @@ export function RowCanvasPage() {
                                     {shoot.node_label ?? '?'}
                                   </span>}
                           </button>
+                          <AttentionBadges attention={attentionByNode.get(shoot.id)} onOpen={() => setAttentionCtx({ stem: activeStem!, node: shoot })} />
+                          </span>
                           <span className="shoot-node-cell-label">{cellLabel}</span>
                         </div>
                       );
@@ -548,6 +604,7 @@ export function RowCanvasPage() {
 
                     {/* Main zone: status icon inside circle + short label below */}
                     <div className="stem-main-zone">
+                      <span className="attention-anchor">
                       <button
                         type="button"
                         className="stem-node-btn"
@@ -567,6 +624,8 @@ export function RowCanvasPage() {
                               </span>
                             : node.node_number}
                       </button>
+                      <AttentionBadges attention={attentionByNode.get(node.id)} onOpen={() => setAttentionCtx({ stem: activeStem!, node })} />
+                      </span>
                       {nodeStatus && (
                         <span className="stem-node-status-label">
                           {shortStatusLabel(nodeStatus)}
@@ -673,6 +732,57 @@ export function RowCanvasPage() {
           </div>
         </div>
       )}
+
+      {/* ── Attention details ── */}
+      {attentionCtx && (() => {
+        const a = attentionByNode.get(attentionCtx.node.id);
+        const label = attentionCtx.node.is_side_shoot ? `Shoot ${attentionCtx.node.node_label ?? ''}` : `Node ${attentionCtx.node.node_number}`;
+        return (
+          <div className="modal-overlay" onClick={() => setAttentionCtx(null)}>
+            <div className="modal attention-modal" role="dialog" aria-label="Needs attention" onClick={e => e.stopPropagation()}>
+              <div className="modal-title">
+                {label}
+                <span style={{ fontWeight: 400, color: 'var(--gray-500)', marginLeft: 8 }}>{attentionCtx.stem.stem_name}</span>
+              </div>
+              {!a && <p className="attention-line">Nothing needs attention on this node now.</p>}
+              {a?.duplicate && (
+                <div className="attention-item">
+                  <span className="attention-item-icon"><WarningIcon /></span>
+                  <div>
+                    <p className="attention-line attention-line--title">Needs attention</p>
+                    <p className="attention-line">{duplicateExplanation(a.duplicate)}</p>
+                    <p className="attention-line attention-line--muted">Check on the plant which is which. This can’t be corrected from the phone yet.</p>
+                  </div>
+                </div>
+              )}
+              {a?.clock && (
+                <div className="attention-item">
+                  <span className="attention-item-icon"><ClockIcon /></span>
+                  <div>
+                    {a.clock.kind === 'overdue' ? (
+                      <>
+                        <p className="attention-line attention-line--title">Needs an update</p>
+                        <p className="attention-line">Last updated {a.clock.ageDays} days ago (W{a.clock.week})</p>
+                        <p className="attention-line attention-line--muted">{STATUS_CONFIG[a.clock.status].label} · update interval: {a.clock.intervalDays} days</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="attention-line attention-line--title">Needs an update</p>
+                        <p className="attention-line">No status update recorded for this node.</p>
+                        <p className="attention-line attention-line--muted">Added {a.clock.ageDays} days ago · update interval: {a.clock.intervalDays} days</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="modal-actions">
+                <button className="btn btn-secondary" onClick={() => setAttentionCtx(null)}>Close</button>
+                <button className="btn btn-primary" onClick={() => { setStatusPickerCtx(attentionCtx); setAttentionCtx(null); }}>Set status</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Status picker ── */}
       {statusPickerCtx && (

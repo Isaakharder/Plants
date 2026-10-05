@@ -103,6 +103,21 @@ type StemGrowthMeasurementRow = {
 
 type ServerManaged = 'created_by' | 'created_at' | 'updated_at'
 
+// ---- Mobile attention rules (20261013000000_node_attention_rules.sql) ----
+
+/** A node status, or 'NoStatus' for a node that has never been observed (not a node status). */
+export type AttentionRuleKey = NodeStatus | 'NoStatus'
+
+/** How many days a node may go without an update, by its latest status, before the collector shows its clock. */
+export type NodeAttentionRuleRow = {
+  organization_id: string
+  rule_key: AttentionRuleKey
+  max_days: number
+  updated_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 // ---- Projections (20261007000000_weekly_plant_data.sql) ----
 
 /** One ISO week of observed stage entries on a crop's sampled plants. Per-m² values are null when unsampled. */
@@ -239,7 +254,8 @@ export type Database = {
       }
       plant_nodes: {
         Row: PlantNodeRow
-        Insert: Omit<PlantNodeRow, ServerManaged>
+        // created_at: when the node was added on the phone (validated by the database).
+        Insert: Omit<PlantNodeRow, ServerManaged> & { created_at?: string }
         Update: Partial<Pick<PlantNodeRow, 'is_active'>>
         Relationships: [
           {
@@ -285,6 +301,12 @@ export type Database = {
             referencedColumns: ['organization_id', 'crop_id', 'id']
           },
         ]
+      }
+      node_attention_rules: {
+        Row: NodeAttentionRuleRow
+        Insert: Pick<NodeAttentionRuleRow, 'organization_id' | 'rule_key' | 'max_days'>
+        Update: Pick<NodeAttentionRuleRow, 'max_days'>
+        Relationships: []
       }
     }
     Views: {

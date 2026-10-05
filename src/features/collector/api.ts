@@ -10,6 +10,7 @@ import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../auth/AuthProvider'
 import { useOrganization } from '../organization/OrganizationProvider'
+import { DEFAULT_ATTENTION_RULES, rulesFromRows, type AttentionRules } from './attention'
 import { fetchAll, IncompleteReadError } from './fetchAll'
 import { currentGreenhouseWeek } from './greenhouseWeek'
 import { newId } from './offline/ids'
@@ -33,6 +34,7 @@ export const collectorKeys = {
   crops: (organizationId: string) => ['collector', 'crops', organizationId] as const,
   rowCards: (organizationId: string) => ['collector', 'rowCards', organizationId] as const,
   row: (rowId: string) => ['collector', 'row', rowId] as const,
+  attentionRules: (organizationId: string) => ['collector', 'attentionRules', organizationId] as const,
 }
 
 /** Offline, with nothing for this screen saved on the device. */
@@ -129,6 +131,35 @@ export function useCollectorCrops(organizationId: string, userId: string) {
       (base) => base,
     ),
   )
+}
+
+/** The organization's mobile attention rules (one small read; a few rows per organization). */
+export async function fetchAttentionRules(organizationId: string): Promise<AttentionRules> {
+  const res = await supabase.from('node_attention_rules').select('rule_key, max_days').eq('organization_id', organizationId)
+  return rulesFromRows(check(res))
+}
+
+/** Exported for tests. */
+export const attentionRulesQuery = (queryClient: QueryClient, organizationId: string, userId: string) => ({
+  ...collectorQuery<AttentionRules>(queryClient, collectorKeys.attentionRules(organizationId), userId, () => fetchAttentionRules(organizationId), (base) => base),
+  // One tiny request: re-check whenever the home screen or a row opens, so a
+  // change in Settings reaches the phone on its next sync, not 30 s later.
+  staleTime: 0,
+})
+
+/**
+ * The rules the clock badges use. Saved on the device with the other collector
+ * data, so offline the last downloaded rules apply. Only a device that has
+ * never downloaded them falls back to the documented defaults; those are never
+ * written into the saved copy, so they can't replace the organization's rules.
+ */
+export function useAttentionRules(organizationId: string, userId: string) {
+  return rulesOrDefaults(useQuery(attentionRulesQuery(useQueryClient(), organizationId, userId)).data)
+}
+
+/** The downloaded rules, or the defaults on a device that has never had them. */
+export function rulesOrDefaults(downloaded: AttentionRules | undefined): { rules: AttentionRules; source: 'organization' | 'defaults' } {
+  return downloaded ? { rules: downloaded, source: 'organization' } : { rules: DEFAULT_ATTENTION_RULES, source: 'defaults' }
 }
 
 async function fetchRowCards(organizationId: string): Promise<MobileRowCard[]> {
@@ -323,10 +354,11 @@ export function useCollectorActions() {
           node_label: node.node_label ?? null,
           side: node.side ?? null,
           is_active: true,
+          // When the worker added it, kept through the offline queue (the database checks it's plausible).
+          created_at: new Date().toISOString(),
         }
         await submit({ type: 'create_node', record })
-        const at = new Date().toISOString()
-        return { ...record, created_by: userId, created_at: at, updated_at: at }
+        return { ...record, created_by: userId, updated_at: record.created_at }
       },
 
       /** The status picker for a brand-new node was cancelled: remove the node. */

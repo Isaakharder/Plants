@@ -8,7 +8,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { cropStatus } from '../crops/model';
 import { useOrganization } from '../organization/OrganizationProvider';
-import { NotOnDeviceError, prefetchRowCanvases, useCollectorActions, useCollectorCrops, useRowCards } from './api';
+import { NotOnDeviceError, prefetchRowCanvases, useAttentionRules, useCollectorActions, useCollectorCrops, useRowCards } from './api';
 import { OfflineBanner } from './components/OfflineBanner';
 import { TextPromptModal } from './components/TextPromptModal';
 import { useGreenhouseWeek } from './greenhouseWeek';
@@ -26,6 +26,8 @@ export function CollectorHomePage() {
 
   const cropsQuery = useCollectorCrops(organization.id, userId);
   const rowCardsQuery = useRowCards(organization.id, userId);
+  // Download the attention rules up front so the rows have them offline.
+  useAttentionRules(organization.id, userId);
   const [addRowTarget, setAddRowTarget] = useState<CollectorCrop | null>(null);
 
   // Active plantings (between planting and pullout dates), by name — CropLink

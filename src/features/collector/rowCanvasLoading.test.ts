@@ -19,6 +19,7 @@ vi.mock('./offline/networkStatus', () => ({
 }))
 
 const { rowCanvasQuery, NotOnDeviceError } = await import('./api')
+const { rowAttention, DEFAULT_ATTENTION_RULES } = await import('./attention')
 
 // ── A row with 2,345 nodes (three 1,000-record pages) ──────────────────────
 
@@ -124,6 +125,16 @@ describe('row canvas loading with more than 1,000 nodes', () => {
     }
     expect(data.nodes.filter((n) => n.is_side_shoot)).toHaveLength(Object.keys(SHOOTS).length)
     expect([...PARENTS].every((p) => byId.has(db.expected.nodeId(p)))).toBe(true)
+  })
+
+  it('derives attention badges for every node of the row, past the 1,000-record pages', async () => {
+    const data = await load()
+    const attention = rowAttention(data.nodes, data.statuses, Date.parse('2026-10-05T12:00:00Z'), DEFAULT_ATTENTION_RULES)
+    // Every status is from June (> 49 days): each node whose status has a rule shows the clock, none other does.
+    const expected = db.expected.latest.filter((s) => DEFAULT_ATTENTION_RULES[s.status] != null).map((s) => s.plant_node_id)
+    expect(expected.length).toBeGreaterThan(1000)
+    expect(new Set([...attention].filter(([, a]) => a.clock).map(([id]) => id))).toEqual(new Set(expected))
+    expect(expected).toContain(db.expected.nodeId(NODE_COUNT - 2)) // a node on the third page
   })
 
   it('loads the latest status of every node (more than 1,000), each matching its node', async () => {

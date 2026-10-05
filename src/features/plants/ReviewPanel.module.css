@@ -1,0 +1,269 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(28, 42, 32, 0.28);
+}
+
+.panel {
+  position: fixed;
+  top: calc(var(--topbar-height) + 12px);
+  right: 16px;
+  bottom: 16px;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: min(1120px, calc(100vw - 32px));
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  overflow: auto;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 18px 50px rgba(28, 42, 32, 0.28);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.head h2 {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+
+.eyebrow {
+  margin: 0 0 2px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.diagnosis {
+  padding: var(--space-3) var(--space-4);
+  border-left: 4px solid #c2410c;
+  border-radius: var(--radius-md);
+  background: #fff4ed;
+}
+
+.diagnosis p {
+  margin: 0 0 4px;
+}
+
+.diagnosis p:last-child {
+  margin: 0;
+}
+
+.error {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.records {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.card h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.card code,
+.timeline code {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.removedTag,
+.emptyTag {
+  align-self: flex-start;
+  margin: 0;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.removedTag {
+  background: var(--border);
+  color: var(--text-muted);
+}
+
+.emptyTag {
+  background: #fdf3dc;
+  color: #8a5a12;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.facts dt {
+  color: var(--text-muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.child {
+  display: block;
+}
+
+.timelineWrap {
+  overflow-x: auto;
+}
+
+.timeline {
+  border-collapse: collapse;
+  font-size: var(--text-xs);
+}
+
+.timeline caption {
+  padding-bottom: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.timeline th,
+.timeline td {
+  min-width: 30px;
+  padding: 3px 2px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline tbody th {
+  padding-right: var(--space-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.timeline .shared {
+  background: #fff4ed;
+}
+
+.timeline thead .shared {
+  color: #c2410c;
+}
+
+.cell {
+  display: inline-block;
+  min-width: 24px;
+  padding: 2px 3px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.sFlower {
+  background: #fbf1c7;
+  color: #7a5d00;
+}
+
+.sSet {
+  background: #a6d27a;
+  color: #1f3d10;
+}
+
+.sMature {
+  background: #2e7a33;
+  color: #fff;
+}
+
+.sBreaker {
+  background: linear-gradient(#2e7a33, var(--pepper-red));
+  color: #fff;
+}
+
+.sResolved {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.key {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+
+.stemFacts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.stemFacts dt {
+  color: var(--text-muted);
+}
+
+.stemFacts dd {
+  margin: 0;
+}
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.strip span {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-variant-numeric: tabular-nums;
+}
+
+.strip .gap {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.strip .dup {
+  border-color: #c2410c;
+  background: #fff4ed;
+  color: #c2410c;
+  font-weight: 700;
+}
+
+.readOnly {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
