@@ -85,7 +85,17 @@ export function cohortBand(setYear: number, setWeek: number): 0 | 1 | 2 {
   return (((Math.round(isoWeekMondayDays(setYear, setWeek) / 7) % 3) + 3) % 3) as 0 | 1 | 2
 }
 
-/** A cohort cell: — when there's no cohort or the week wasn't sampled; 0% for an observed zero. */
+/**
+ * A +N cohort cell, as displayed: a whole percentage (32.8 → "33%"), — when
+ * there's no cohort or the week wasn't sampled. Display only: calculations
+ * (Picked kg, Loss, captions) always use the unrounded value.
+ */
+export function formatCohortPercent(value: number | null): string {
+  if (value === null) return '—'
+  return `${Math.round(Number(value))}%`
+}
+
+/** A percentage with one decimal (Loss): — when not available; 0% for an observed zero. */
 export function formatPercent(value: number | null): string {
   if (value === null) return '—'
   const n = Number(value)
@@ -160,7 +170,8 @@ export function cohortCellTitle(cell: CohortCell, harvestYear: number, harvestWe
   const cohort = cell.set_year === harvestYear ? `W${cell.set_week}` : `W${cell.set_week} ${cell.set_year}`
   if (cell.cohort_sets === 0) return `No peppers were set in ${cohort}.`
   if (cell.delay === 0) return `${cohort} cohort starts here: ${cell.cohort_sets} peppers first recorded as set (+0).`
-  const lines = [`${cell.harvested} of ${cell.cohort_sets} peppers set in ${cohort} were first harvested in W${harvestWeek} (+${cell.delay} wk).`]
+  const exact = cell.percent === null ? '' : ` (${Number(cell.percent).toFixed(1)}%)`
+  const lines = [`${cell.harvested} of ${cell.cohort_sets} peppers set in ${cohort} were first harvested in W${harvestWeek} (+${cell.delay} wk)${exact}.`]
   if (cell.is_baseline_cohort) lines.push('Baseline cohort: these peppers may have set before sampling began, so the delay may be longer.')
   if (cell.percent === null) lines.push('This harvest week has not been sampled.')
   return lines.join('\n')

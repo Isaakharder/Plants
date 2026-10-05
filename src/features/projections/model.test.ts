@@ -10,6 +10,7 @@ import {
   defaultYear,
   followCaption,
   formatLoss,
+  formatCohortPercent,
   formatPercent,
   formatRate,
   isoYearOfDate,
@@ -137,7 +138,7 @@ describe('Loss column', () => {
 
 describe('cohortCellTitle', () => {
   it('explains a harvest cell with its exact-age count of the original cohort', () => {
-    expect(cohortCellTitle(cell, 2026, 30)).toBe('42 of 61 peppers set in W23 were first harvested in W30 (+7 wk).')
+    expect(cohortCellTitle(cell, 2026, 30)).toBe('42 of 61 peppers set in W23 were first harvested in W30 (+7 wk) (68.8%).')
   })
 
   it('marks the cohort start at +0', () => {
@@ -306,5 +307,44 @@ describe('AFW and Picked kg (per set-week cohort)', () => {
     expect(pickedKgTitle(34, SETS, share, 200, AREA, kg, false)).toMatch(/^W34 cohort: 17\.60 sets\/m² × 61\.6% harvested so far × 200 g × 11,787 m² = 25,57\d kg/)
     expect(pickedKgTitle(34, SETS, share, null, AREA, null, false)).toContain("Enter W34's AFW")
     expect(pickedKgTitle(50, SETS, 0, 200, AREA, 0, true)).toContain('next year')
+  })
+})
+
+describe('whole-percent display vs. unrounded calculations', () => {
+  const cell = (delay: number, percent: number | null): CohortCell => ({
+    delay, set_year: 2026, set_week: 34, cohort_sets: 1000, harvested: 0, percent, is_baseline_cohort: false,
+    cohort_harvested: 0, cohort_aborted: 0, cohort_pruned: 0, cohort_timeout: 0, cohort_on_plant: 0, cohort_closed: false,
+  })
+
+  it('shows +N cells as whole percentages (normal rounding)', () => {
+    expect([50.2, 32.8, 16.1, 2.8, 0, 100, 99.5, 0.4].map(formatCohortPercent)).toEqual(['50%', '33%', '16%', '3%', '0%', '100%', '100%', '0%'])
+    expect(formatCohortPercent(null)).toBe('—')
+    // Loss keeps one decimal.
+    expect(formatPercent(32.8)).toBe('32.8%')
+  })
+
+  it('a 32.8% cell displays 33% but Picked kg uses 0.328, not 0.33', () => {
+    const cells = [cell(6, 32.8)]
+    expect(formatCohortPercent(cells[0].percent)).toBe('33%')
+    const share = observedHarvestShare(cells)
+    expect(share).toBeCloseTo(0.328, 12)
+    expect(pickedKg(10, share, 200, 10_000)).toBeCloseTo(10 * 0.328 * 0.2 * 10_000, 6) // 6,560 kg
+    expect(pickedKg(10, share, 200, 10_000)).not.toBeCloseTo(10 * 0.33 * 0.2 * 10_000, 0) // not 6,600 kg
+  })
+
+  it('a multi-age cohort never sums the displayed, rounded percentages', () => {
+    // Three ages at 2.4% display as 2% each (6% if added up), but the cohort harvested 7.2%.
+    const cells = [cell(5, 2.4), cell(6, 2.4), cell(7, 2.4), cell(8, 32.8)]
+    expect(cells.map((c) => formatCohortPercent(c.percent))).toEqual(['2%', '2%', '2%', '33%'])
+    const share = observedHarvestShare(cells)
+    expect(share).toBeCloseTo(0.4, 12) // 2.4 × 3 + 32.8 = 40.0%
+    const displayedSum = cells.reduce((s, c) => s + Number(formatCohortPercent(c.percent).replace('%', '')), 0) / 100
+    expect(displayedSum).toBeCloseTo(0.39, 12)
+    expect(pickedKg(17.6, share, 200, 11_787)).toBeCloseTo(17.6 * 0.4 * 0.2 * 11_787, 6)
+    expect(pickedKg(17.6, share, 200, 11_787)).not.toBeCloseTo(17.6 * displayedSum * 0.2 * 11_787, 0)
+  })
+
+  it('the hover text keeps the exact percentage', () => {
+    expect(cohortCellTitle({ ...cell(6, 32.8), harvested: 328 }, 2026, 40)).toContain('(32.8%)')
   })
 })

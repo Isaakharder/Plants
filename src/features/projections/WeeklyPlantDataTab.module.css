@@ -59,8 +59,9 @@
 
 .table {
   /*
-   * Fills the card's width; columns have a comfortable minimum width, so on a
-   * narrower screen the table scrolls sideways instead of squeezing them.
+   * Fills the card's width with compact columns, so the whole ladder (through
+   * Loss) fits a normal desktop screen; on narrower screens it scrolls
+   * sideways instead of squeezing them.
    */
   width: max-content;
   min-width: 100%;
@@ -70,15 +71,17 @@
 
 .table th,
 .table td {
-  min-width: 104px;
-  padding: 11px var(--space-6);
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   text-align: right;
   white-space: nowrap;
 }
 
-.table th:first-child {
-  min-width: 150px;
+/* +N cohort columns: whole percentages ("0%" … "100%") need little room. */
+.table .age {
+  min-width: 56px;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .table thead th {
@@ -96,6 +99,21 @@
 
 .table th:first-child {
   text-align: left;
+}
+
+/*
+ * Week: only as wide as "W22 BASELINE" (shrinks to fit; extra width goes to
+ * the data columns). The longer "In progress" tag wraps under its week.
+ */
+.table tr > th:first-child {
+  width: 1%;
+  min-width: 136px;
+  padding-left: 12px;
+  padding-right: 10px;
+}
+
+.table tbody tr > th:first-child {
+  white-space: normal;
 }
 
 /* Keep the week visible while the wide table scrolls sideways. */
@@ -160,12 +178,12 @@
 
 .tag {
   display: inline-block;
-  margin-left: var(--space-2);
-  padding: 2px 8px;
+  margin-left: 6px;
+  padding: 1px 6px;
   border-radius: var(--radius-full);
   background: var(--surface-muted);
   color: var(--text-muted);
-  font-size: var(--text-xs);
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -358,12 +376,11 @@
 }
 
 .table td.afwCell {
-  padding-top: 5px;
-  padding-bottom: 5px;
+  padding: 5px 10px;
 }
 
 .afwInput {
-  width: 84px;
+  width: 72px;
   height: 34px;
   padding: 0 var(--space-2);
   border: 1px solid var(--border-strong);

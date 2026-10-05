@@ -19,7 +19,7 @@ import {
   defaultYear,
   followCaption,
   formatLoss,
-  formatPercent,
+  formatCohortPercent,
   formatRate,
   ladderAgesWithHarvests,
   lossTitle,
@@ -283,7 +283,7 @@ export function WeeklyPlantDataTab() {
                 <th scope="col">Breakers/m²</th>
                 <th scope="col">Harvested/m²</th>
                 {ages.map((d, i) => (
-                  <th key={d} scope="col" className={i === 0 ? styles.firstDelay : undefined}>
+                  <th key={d} scope="col" className={[styles.age, i === 0 ? styles.firstDelay : ''].filter(Boolean).join(' ')}>
                     +{d}
                   </th>
                 ))}
@@ -409,9 +409,10 @@ function SetsTd({ row, value, follow }: { row: SetHarvestCohortRow | undefined; 
 function CohortTd({ cell, year, week, showDetail, divider, follow }: { cell: CohortCell | undefined; year: number; week: number; showDetail: boolean; divider: boolean; follow: Follow }) {
   // The cohort's start (+0) shows a marker instead of a percentage.
   const first = cell?.delay === 0
-  if (!cell || cell.cohort_sets === 0) return <td className={divider ? styles.firstDelay : undefined}>—</td>
+  if (!cell || cell.cohort_sets === 0) return <td className={[styles.age, divider ? styles.firstDelay : ''].filter(Boolean).join(' ')}>—</td>
   const key = cohortKey(cell.set_year, cell.set_week)
   const classes = [
+    styles.age,
     divider ? styles.firstDelay : '',
     BAND_CLASS[cohortBand(cell.set_year, cell.set_week)],
     follow.active === key ? styles.ladderActive : '',
@@ -430,7 +431,7 @@ function CohortTd({ cell, year, week, showDetail, divider, follow }: { cell: Coh
   return (
     <td className={classes} title={cohortCellTitle(cell, year, week)} {...followHandlers(key, follow)}>
       <span className={[cell.percent === 0 ? styles.zero : '', cell.is_baseline_cohort && cell.percent !== null ? styles.baselineCell : ''].filter(Boolean).join(' ') || undefined}>
-        {formatPercent(cell.percent)}
+        {formatCohortPercent(cell.percent)}
       </span>
       {showDetail && cell.percent !== null && (
         <span className={styles.cellDetail}>
