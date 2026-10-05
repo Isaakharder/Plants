@@ -1105,14 +1105,15 @@
   filter: drop-shadow(0 0 1px #fff);
 }
 
+/* Within the node's own 54 px column, so they never cover a side shoot's "+" */
 .collector-app .attention-badge--warning {
   top: -9px;
-  left: -11px;
+  left: -8px;
 }
 
 .collector-app .attention-badge--clock {
   top: -9px;
-  right: -11px;
+  right: -8px;
 }
 
 .collector-app .attention-anchor--shoot .attention-badge {
@@ -1166,4 +1167,10 @@
   margin-top: 2px;
   font-size: 12px;
   color: var(--gray-500);
+}
+
+/* Status picker: the same status artwork as on the plant canvas */
+.collector-app .status-picker-art {
+  display: inline-flex;
+  flex-shrink: 0;
 }

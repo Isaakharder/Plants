@@ -11,6 +11,9 @@ import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { duplicateExplanation, rowAttention, useNow, type NodeAttention } from './attention';
+import { COLORS } from '../plantArt/colors';
+import { statusTone } from '../plantArt/frames';
+import { StatusIcon } from '../plantArt/StatusArt';
 import { useOrganization } from '../organization/OrganizationProvider';
 import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useRowCanvas } from './api';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -18,27 +21,6 @@ import { TextPromptModal } from './components/TextPromptModal';
 import { cropColorVar, type CanvasState } from './display';
 import { useGreenhouseWeek } from './greenhouseWeek';
 import type { LatestNodeStatus, MeasurementStem, NodeStatus, PlantNode, StemGrowthMeasurement } from './types';
-
-// Load all crop status icons eagerly; presence in the map determines whether to show an icon.
-const _statusIconModules = import.meta.glob<string>(
-  './assets/crop-status-icons/*.svg',
-  { eager: true, import: 'default' }
-);
-
-// Explicit mapping from DB status value → SVG filename stem (no lowercasing assumed).
-const STATUS_TO_ICON_FILE: Record<NodeStatus, string> = {
-  Aborted:      'aborted',
-  Pruned:       'pruned',
-  Flower:       'flower',
-  SetFruit:     'set-fruit',
-  MatureGreen:  'mature-green',
-  BreakerFruit: 'breaker-fruit',
-  Harvested:    'harvested',
-};
-
-function getStatusIcon(status: NodeStatus): string | undefined {
-  return _statusIconModules[`./assets/crop-status-icons/${STATUS_TO_ICON_FILE[status]}.svg`];
-}
 
 const STATUS_OPTIONS: { value: NodeStatus; label: string }[] = [
   { value: 'Aborted',      label: 'Aborted' },
@@ -50,14 +32,14 @@ const STATUS_OPTIONS: { value: NodeStatus; label: string }[] = [
   { value: 'Harvested',    label: 'Harvested' },
 ];
 
-const STATUS_CONFIG: Record<NodeStatus, { color: string; bg: string; label: string }> = {
-  Aborted:      { color: '#ef4444', bg: '#fee2e2', label: 'Aborted' },
-  Pruned:       { color: '#6b7280', bg: '#f3f4f6', label: 'Pruned' },
-  Flower:       { color: '#ec4899', bg: '#fdf2f8', label: 'Flower' },
-  SetFruit:     { color: '#8b5cf6', bg: '#f5f3ff', label: 'Set Fruit' },
-  MatureGreen:  { color: '#16a34a', bg: '#dcfce7', label: 'Mature Green' },
-  BreakerFruit: { color: '#f97316', bg: '#fff7ed', label: 'Breaker Fruit' },
-  Harvested:    { color: '#1d4ed8', bg: '#dbeafe', label: 'Harvested' },
+const STATUS_LABEL: Record<NodeStatus, string> = {
+  Aborted:      'Aborted',
+  Pruned:       'Pruned',
+  Flower:       'Flower',
+  SetFruit:     'Set Fruit',
+  MatureGreen:  'Mature Green',
+  BreakerFruit: 'Breaker Fruit',
+  Harvested:    'Harvested',
 };
 
 const SHORT_STATUS_LABEL: Record<NodeStatus, string> = {
@@ -146,6 +128,8 @@ export function RowCanvasPage() {
   const rowName      = row?.row_name ?? ctx.rowName ?? 'Row';
   const varietyName  = crop?.name ?? ctx.varietyName ?? 'Variety';
   const varietyColor = crop ? cropColorVar(crop.color) : ctx.varietyColor ?? null;
+  // Breaker artwork and harvest scars use the variety's colour, as on the Plants page.
+  const artVariety  = varietyColor ?? COLORS.matureGreen;
 
   const [activeStemIndex, setActiveStemIndex] = useState(0);
   const [addStemModal,    setAddStemModal]    = useState(false);
@@ -270,7 +254,7 @@ export function RowCanvasPage() {
       const nodeLabel = statusPickerCtx.node.is_side_shoot
         ? (statusPickerCtx.node.node_label ?? 'Shoot')
         : `Node ${statusPickerCtx.node.node_number}`;
-      setMessage(`${nodeLabel}: ${STATUS_CONFIG[status].label}`);
+      setMessage(`${nodeLabel}: ${STATUS_LABEL[status]}`);
       setStatusPickerCtx(null);
     } catch (err: unknown) {
       setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
@@ -518,7 +502,7 @@ export function RowCanvasPage() {
               {mainNodes.map(node => {
                 const statusRec  = activeStatuses.find(s => s.plant_node_id === node.id);
                 const nodeStatus = statusRec?.status ?? null;
-                const cfg = nodeStatus ? STATUS_CONFIG[nodeStatus] : null;
+                const tone = statusTone(nodeStatus, artVariety);
 
                 // Odd node_number → shoot on right, badge on left
                 // Even node_number → shoot on left, badge on right
@@ -532,8 +516,6 @@ export function RowCanvasPage() {
                     return nA - nB;
                   });
 
-                const mainIcon = nodeStatus ? getStatusIcon(nodeStatus) : undefined;
-
                 // Shoot zone: one icon-circle per shoot + always-visible add button.
                 // DOM order is [connector?, …icons, +btn]; shoot-zone--left reverses via
                 // row-reverse so the connector always sits closest to the main stem.
@@ -546,8 +528,7 @@ export function RowCanvasPage() {
                     {visibleShoots.map((shoot, shootIdx) => {
                       const sr        = activeStatuses.find(s => s.plant_node_id === shoot.id);
                       const srStatus  = sr?.status ?? null;
-                      const sc        = srStatus ? STATUS_CONFIG[srStatus] : null;
-                      const shootIcon = srStatus ? getStatusIcon(srStatus) : undefined;
+                      const shootTone = statusTone(srStatus, artVariety);
                       const cellLabel = srStatus ? shortStatusLabel(srStatus) : (shoot.node_label ?? '?');
                       const shootNumberLabel = shoot.node_label ?? formatShootLabel(node.node_number, shootIdx + 1);
                       return (
@@ -558,22 +539,18 @@ export function RowCanvasPage() {
                             type="button"
                             className="shoot-icon-btn"
                             style={{
-                              borderColor: sc?.color ?? 'var(--gray-300)',
-                              background:  sc?.bg    ?? 'var(--white)',
-                              color:       sc?.color ?? 'var(--gray-500)',
+                              borderColor: srStatus ? shootTone.ring : 'var(--gray-300)',
+                              background:  srStatus ? shootTone.background : 'var(--white)',
+                              color:       'var(--gray-500)',
                             }}
                             title={shoot.node_label ?? 'Tap to set status'}
                             onClick={e => { e.stopPropagation(); setStatusPickerCtx({ stem: activeStem!, node: shoot }); }}
                           >
-                            {shootIcon
-                              ? <img src={shootIcon} alt="" width={20} height={20} />
-                              : srStatus
-                                ? <span style={{ fontSize: 9, fontWeight: 700, lineHeight: 1 }}>
-                                    {shortStatusLabel(srStatus).slice(0, 3)}
-                                  </span>
-                                : <span style={{ fontSize: 9, color: 'var(--gray-400)', lineHeight: 1 }}>
-                                    {shoot.node_label ?? '?'}
-                                  </span>}
+                            {srStatus
+                              ? <StatusIcon status={srStatus} size={22} variety={artVariety} />
+                              : <span style={{ fontSize: 9, color: 'var(--gray-400)', lineHeight: 1 }}>
+                                  {shoot.node_label ?? '?'}
+                                </span>}
                           </button>
                           <AttentionBadges attention={attentionByNode.get(shoot.id)} onOpen={() => setAttentionCtx({ stem: activeStem!, node: shoot })} />
                           </span>
@@ -609,20 +586,16 @@ export function RowCanvasPage() {
                         type="button"
                         className="stem-node-btn"
                         style={{
-                          borderColor: cfg?.color ?? 'var(--gray-300)',
-                          background:  cfg?.bg    ?? 'var(--white)',
-                          color:       cfg?.color ?? 'var(--gray-600)',
+                          borderColor: nodeStatus ? tone.ring : 'var(--gray-300)',
+                          background:  nodeStatus ? tone.background : 'var(--white)',
+                          color:       'var(--gray-600)',
                         }}
-                        title={cfg ? cfg.label : 'Tap to set status'}
+                        title={nodeStatus ? STATUS_LABEL[nodeStatus] : 'Tap to set status'}
                         onClick={() => setStatusPickerCtx({ stem: activeStem!, node })}
                       >
-                        {mainIcon
-                          ? <img src={mainIcon} alt="" width={24} height={24} />
-                          : nodeStatus
-                            ? <span style={{ fontSize: 9, fontWeight: 700, lineHeight: 1 }}>
-                                {shortStatusLabel(nodeStatus).slice(0, 3)}
-                              </span>
-                            : node.node_number}
+                        {nodeStatus
+                          ? <StatusIcon status={nodeStatus} size={30} variety={artVariety} />
+                          : node.node_number}
                       </button>
                       <AttentionBadges attention={attentionByNode.get(node.id)} onOpen={() => setAttentionCtx({ stem: activeStem!, node })} />
                       </span>
@@ -763,7 +736,7 @@ export function RowCanvasPage() {
                       <>
                         <p className="attention-line attention-line--title">Needs an update</p>
                         <p className="attention-line">Last updated {a.clock.ageDays} days ago (W{a.clock.week})</p>
-                        <p className="attention-line attention-line--muted">{STATUS_CONFIG[a.clock.status].label} · update interval: {a.clock.intervalDays} days</p>
+                        <p className="attention-line attention-line--muted">{STATUS_LABEL[a.clock.status]} · update interval: {a.clock.intervalDays} days</p>
                       </>
                     ) : (
                       <>
@@ -811,21 +784,20 @@ export function RowCanvasPage() {
             )}
             <div className="status-picker-grid">
               {STATUS_OPTIONS.map(opt => {
-                const cfg = STATUS_CONFIG[opt.value];
+                const tone = statusTone(opt.value, artVariety);
                 const currentRec = (statusesByStem[statusPickerCtx.stem.id] ?? []).find(
                   s => s.plant_node_id === statusPickerCtx.node.id,
                 );
                 const isActive = currentRec?.status === opt.value;
-                const icon = getStatusIcon(opt.value);
                 return (
                   <button
                     key={opt.value}
                     className={`status-picker-btn${isActive ? ' active' : ''}`}
-                    style={isActive ? { borderColor: cfg.color, background: cfg.bg, color: cfg.color } : {}}
+                    style={isActive ? { borderColor: tone.ring, background: tone.background } : {}}
                     onClick={() => !saving && handleSaveStatus(opt.value)}
                     disabled={saving}
                   >
-                    {icon && <img src={icon} alt="" width={32} height={32} style={{ flexShrink: 0 }} />}
+                    <span className="status-picker-art"><StatusIcon status={opt.value} size={34} variety={artVariety} /></span>
                     <span>{opt.label}</span>
                   </button>
                 );

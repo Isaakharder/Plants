@@ -1,6 +1,7 @@
 import { memo, type MouseEvent } from 'react'
-import { COLORS } from './colors'
-import { DuplicateBadge, Leaf, StaleBadge, StatusGlyph } from './Glyphs'
+import { COLORS } from '../plantArt/colors'
+import { BreakerGradient, StatusGlyph } from '../plantArt/StatusArt'
+import { DuplicateBadge, Leaf, StaleBadge } from './Glyphs'
 import { BRACKET_X, NODE_SPACING, STEM_WIDTH, nodeY, type GrowthBracket, type TwinNode, type TwinStem } from './twin'
 
 export type NodeHandler = (node: TwinNode, stem: TwinStem, event: MouseEvent) => void
@@ -35,10 +36,7 @@ export const PlantSvg = memo(function PlantSvg({ stem, height, baseY, maxNodeNum
       aria-label={`${stem.name}: ${stem.mainNodes.length} main-stem nodes, ${stem.shootCount} side shoots`}
     >
       <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0.3" stopColor={COLORS.matureGreen} />
-          <stop offset="0.85" style={{ stopColor: variety }} />
-        </linearGradient>
+        <BreakerGradient id={gradientId} variety={variety} />
       </defs>
 
       {/* Soil and node-number ruler (every 5 nodes), shared by all stems. */}

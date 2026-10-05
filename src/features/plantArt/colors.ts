@@ -1,4 +1,4 @@
-/** The digital twin's palette (stems, fruit stages, annotations). */
+/** The Plants palette: stems, fruit stages and annotations. Shared by the digital twin and the mobile collector. */
 export const COLORS = {
   stem: '#4f8a3a',
   stemDark: '#2f5f24',
