@@ -118,14 +118,14 @@ export type NodeAttentionRuleRow = {
   updated_at: string
 }
 
-// ---- Manual AFW per set-week cohort (20261015000000_cohort_afw.sql) ----
+// ---- Manual AFW per harvest week (20261015000000_cohort_afw.sql, renamed in 20261016000000_weekly_harvest_afw.sql) ----
 
-/** Average fruit weight in grams per fruit, entered by hand for a crop's set week. */
-export type CohortAfwRow = {
+/** Average grams per pepper harvested in one ISO week (year, week) of a crop, entered by hand. */
+export type WeeklyHarvestAfwRow = {
   organization_id: string
   crop_id: string
-  set_year: number
-  set_week: number
+  year: number
+  week: number
   afw_g: number
   updated_by: string | null
   created_at: string
@@ -316,10 +316,10 @@ export type Database = {
           },
         ]
       }
-      cohort_afw: {
-        Row: CohortAfwRow
-        Insert: Pick<CohortAfwRow, 'organization_id' | 'crop_id' | 'set_year' | 'set_week' | 'afw_g'>
-        Update: Pick<CohortAfwRow, 'afw_g'>
+      weekly_harvest_afw: {
+        Row: WeeklyHarvestAfwRow
+        Insert: Pick<WeeklyHarvestAfwRow, 'organization_id' | 'crop_id' | 'year' | 'week' | 'afw_g'>
+        Update: Pick<WeeklyHarvestAfwRow, 'afw_g'>
         Relationships: []
       }
       node_attention_rules: {

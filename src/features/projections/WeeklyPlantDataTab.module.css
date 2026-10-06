@@ -416,3 +416,16 @@
 .pickedCell {
   font-weight: 600;
 }
+
+/* Picked kg by calendar week vs. today: grey for history, a warm tint for now and ahead. */
+.pickedPast {
+  background: #f0f1ed;
+}
+
+.pickedCurrent {
+  background: #fcf0d6;
+}
+
+.pickedFuture {
+  background: #fef9ee;
+}

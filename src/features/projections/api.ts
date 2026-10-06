@@ -34,43 +34,44 @@ export function useSetHarvestCohorts(cropId: string | undefined, year: number | 
   })
 }
 
-// ── Manual AFW per set-week cohort (cohort_afw) ────────────────────────────
+// ── Manual AFW per harvest week (weekly_harvest_afw) ───────────────────────
+// AFW for week W = average grams per pepper harvested in week W.
 
 const afwKey = (cropId: string | undefined, year: number | undefined) => ['projections', 'afw', cropId, year] as const
 
-/** The crop's saved AFW (grams per fruit) for each set week of the year. */
-export function useCohortAfw(cropId: string | undefined, year: number | undefined) {
+/** The crop's saved AFW (average grams per pepper harvested that week) for each week of the year. */
+export function useWeeklyHarvestAfw(cropId: string | undefined, year: number | undefined) {
   return useQuery({
     queryKey: afwKey(cropId, year),
     enabled: Boolean(cropId && year),
     queryFn: async (): Promise<Map<number, number>> => {
-      const { data, error } = await supabase.from('cohort_afw').select('set_week, afw_g').eq('crop_id', cropId!).eq('set_year', year!)
+      const { data, error } = await supabase.from('weekly_harvest_afw').select('week, afw_g').eq('crop_id', cropId!).eq('year', year!)
       if (error) throw error
-      return new Map(data.map((r) => [r.set_week, Number(r.afw_g)]))
+      return new Map(data.map((r) => [r.week, Number(r.afw_g)]))
     },
   })
 }
 
-export type AfwChange = { setWeek: number; afwG: number | null }
+export type AfwChange = { week: number; afwG: number | null }
 
 /** Saves changed AFWs in one go: new and edited values are upserted, cleared ones removed. */
-export async function saveCohortAfw(organizationId: string, cropId: string, year: number, changes: AfwChange[]): Promise<void> {
-  const upserts = changes.filter((c) => c.afwG !== null).map((c) => ({ organization_id: organizationId, crop_id: cropId, set_year: year, set_week: c.setWeek, afw_g: c.afwG! }))
-  const cleared = changes.filter((c) => c.afwG === null).map((c) => c.setWeek)
+export async function saveWeeklyHarvestAfw(organizationId: string, cropId: string, year: number, changes: AfwChange[]): Promise<void> {
+  const upserts = changes.filter((c) => c.afwG !== null).map((c) => ({ organization_id: organizationId, crop_id: cropId, year, week: c.week, afw_g: c.afwG! }))
+  const cleared = changes.filter((c) => c.afwG === null).map((c) => c.week)
   if (upserts.length) {
-    const { error } = await supabase.from('cohort_afw').upsert(upserts, { onConflict: 'crop_id,set_year,set_week' })
+    const { error } = await supabase.from('weekly_harvest_afw').upsert(upserts, { onConflict: 'crop_id,year,week' })
     if (error) throw new Error(error.message)
   }
   if (cleared.length) {
-    const { error } = await supabase.from('cohort_afw').delete().eq('crop_id', cropId).eq('set_year', year).in('set_week', cleared)
+    const { error } = await supabase.from('weekly_harvest_afw').delete().eq('crop_id', cropId).eq('year', year).in('week', cleared)
     if (error) throw new Error(error.message)
   }
 }
 
-export function useSaveCohortAfw(organizationId: string, cropId: string | undefined, year: number | undefined) {
+export function useSaveWeeklyHarvestAfw(organizationId: string, cropId: string | undefined, year: number | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (changes: AfwChange[]) => saveCohortAfw(organizationId, cropId!, year!, changes),
+    mutationFn: (changes: AfwChange[]) => saveWeeklyHarvestAfw(organizationId, cropId!, year!, changes),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: afwKey(cropId, year) }),
   })
 }
