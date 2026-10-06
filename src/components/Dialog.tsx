@@ -5,10 +5,12 @@ type DialogProps = {
   title: string
   onClose: () => void
   children: ReactNode
+  /** Extra class on the <dialog>, e.g. a wider or scrolling variant. */
+  className?: string
 }
 
 /** Thin wrapper around the native <dialog>, which handles focus trapping and Escape. */
-export function Dialog({ open, title, onClose, children }: DialogProps) {
+export function Dialog({ open, title, onClose, children, className }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null)
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export function Dialog({ open, title, onClose, children }: DialogProps) {
   return (
     <dialog
       ref={ref}
-      className="dialog"
+      className={className ? `dialog ${className}` : 'dialog'}
       aria-labelledby="dialog-title"
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()}

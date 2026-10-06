@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
-import { formatInteger, formatTwoDecimals } from '../../lib/format'
+import { formatInteger } from '../../lib/format'
 import { greenhouseIsoWeek, useGreenhouseWeek } from '../collector/greenhouseWeek'
 import { useCrops } from '../crops/api'
 import { sortCrops, stemsPerM2 } from '../crops/model'
@@ -34,6 +34,8 @@ import {
   type WeeklyFruitLossRow,
   type WeekTiming,
 } from './model'
+import { SamplingDetail } from './SamplingDetail'
+import { WeeklyPlantDataHelp } from './WeeklyPlantDataHelp'
 import styles from './WeeklyPlantDataTab.module.css'
 
 /**
@@ -45,7 +47,8 @@ export function WeeklyPlantDataTab() {
   const organization = useOrganization()
   const crops = useCrops(organization.id)
   const [params, setParams] = useSearchParams()
-  const [showDetail, setShowDetail] = useState(false)
+  const [showSampling, setShowSampling] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   // The followed cohort: a click locks it, hovering previews one while nothing is locked.
   const [locked, setLocked] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
@@ -183,78 +186,40 @@ export function WeeklyPlantDataTab() {
             ))}
           </select>
         </label>
-        <label className={styles.detailToggle}>
-          <input type="checkbox" checked={showDetail} onChange={(e) => setShowDetail(e.target.checked)} />
-          Show sampling detail
-        </label>
+        <div className={styles.controlButtons}>
+          <button
+            type="button"
+            className={`button button-secondary ${styles.helpButton}`}
+            onClick={() => setShowSampling(true)}
+            disabled={shownWeeks.length === 0}
+            aria-haspopup="dialog"
+          >
+            Sampling detail
+          </button>
+          <button type="button" className={`button button-secondary ${styles.helpButton}`} onClick={() => setShowHelp(true)} aria-haspopup="dialog">
+            <span className={styles.helpIcon} aria-hidden="true">?</span>
+            Help
+          </button>
+        </div>
       </div>
+      <SamplingDetail
+        open={showSampling}
+        onClose={() => setShowSampling(false)}
+        year={year}
+        weeks={shownWeeks}
+        cohortRows={cohorts.data ?? []}
+        ages={ages}
+        stemsPerM2={stemsPerM2(crop)}
+      />
+      <WeeklyPlantDataHelp
+        open={showHelp}
+        onClose={() => setShowHelp(false)}
+        stemsPerM2={stemsPerM2(crop)}
+        areaM2={crop.area_m2}
+        hiddenAges={hiddenAges.length < LADDER_AGES.length ? hiddenAges : []}
+        startMarker={ages.includes(0)}
+      />
 
-      <p className={styles.explainer}>
-        Peppers on the sampled plants that entered each stage that week, per sampled m². Each pepper counts once per
-        stage, in the first week it was recorded there. Sampled m² = sampled stems ÷ {formatTwoDecimals(stemsPerM2(crop))} stems/m².{' '}
-        <strong>+0 … +10</strong>: every set week starts its own cohort at +0 and moves one row down and one column right each
-        week; a cell is the share of that original cohort first harvested at exactly that age. <strong>Fruit Loss %</strong>: of
-        the fruit on the plants at the start of the week, the share aborted or pruned that week. Click a week's Sets/m² to follow
-        its cohort and see its Cohort Loss.{hiddenAges.length > 0 && hiddenAges.length < LADDER_AGES.length && (
-          <> Ages with no harvests in this year are hidden ({hiddenAges.map((a) => `+${a}`).join(', ')}).</>
-        )}
-      </p>
-
-      {/* Above the table: nothing follows the table on the page, so its frozen header can't scroll under the top bar. */}
-      <dl className={styles.legend}>
-        <div>
-          <dt>—</dt>
-          <dd>Not sampled that week.</dd>
-        </div>
-        <div>
-          <dt><span className={styles.tag}>Baseline</span></dt>
-          <dd>First sampling week. There was no earlier visit, so it can include stages reached before sampling began.</dd>
-        </div>
-        <div>
-          <dt>Sets/m²</dt>
-          <dd>
-            Click a week's Sets/m²{ages.includes(0) && <> (or its <span className={styles.startSample}>●</span> at +0)</>} to highlight that cohort's ladder; click again or press
-            Esc to release.
-          </dd>
-        </div>
-        <div>
-          <dt><span className={styles.baselineSample}>12.3%</span></dt>
-          <dd>From the baseline set cohort. Those peppers may have set before sampling began, so their real set → harvest delay may be longer.</dd>
-        </div>
-        <div>
-          <dt>AFW g</dt>
-          <dd>
-            Harvest-week AFW: the average weight, in grams, of the peppers harvested in that calendar week (whichever week they set). It can be entered
-            for future weeks too, but that alone creates no Picked kg. Type down the column — Enter or Tab moves to the next week — then Save.
-          </dd>
-        </div>
-        <div>
-          <dt>Picked kg</dt>
-          <dd>
-            Estimated kg picked in that calendar week for the whole crop: Harvested/m² × {formatInteger(crop.area_m2)} m² × that week's AFW ÷ 1000. Only
-            recorded harvests count; — until the week has been sampled, and nothing is projected. The in-progress week may be incomplete.
-          </dd>
-        </div>
-        <div>
-          <dt>Fruit Loss %</dt>
-          <dd>
-            Fruit lost that calendar week ÷ fruit on the plants at its start. Fruit counts from the week after it sets, until it is harvested or
-            lost; each lost fruit counts once, in the week it was first recorded Aborted or Pruned (an Aborted later followed by a live record is a
-            correction, not a loss). Flowers lost before setting fruit are not included. — when the week hasn't been sampled.
-          </dd>
-        </div>
-        <div>
-          <dt>Cohort Loss</dt>
-          <dd>
-            Shown when following a cohort: of the peppers set that week, the share aborted, pruned or still unresolved by +10, once its +10 window
-            closes. A Harvested record at +11 or later still counts in Harvested/m².
-          </dd>
-        </div>
-        <div>
-          <dt><span className={`${styles.tag} ${styles.provisional}`}>In progress</span></dt>
-          <dd>The current greenhouse week. Sampling may not be complete, so its values can still change.</dd>
-        </div>
-      </dl>
       {weeks.isPending || cohorts.isPending || fruitLoss.isPending ? (
         <LoadingState />
       ) : weeks.error || cohorts.error || fruitLoss.error ? (
@@ -301,15 +266,6 @@ export function WeeklyPlantDataTab() {
                 <th scope="col" className={styles.afwHead} title="Harvest-week AFW: average grams per pepper harvested that week">AFW g</th>
                 <th scope="col" className={styles.pickedHead} title="Estimated kg picked that calendar week: Harvested/m² × crop area × that week's AFW">Picked kg</th>
                 <th scope="col" className={styles.lossHead} title="Fruit lost that calendar week ÷ fruit on the plants at the start of the week">Fruit Loss %</th>
-                {showDetail && (
-                  <>
-                    <th scope="col" className={styles.detail}>Sampled stems</th>
-                    <th scope="col" className={styles.detail}>Sampled m²</th>
-                    <th scope="col" className={styles.detail}>New sets</th>
-                    <th scope="col" className={styles.detail}>New breakers</th>
-                    <th scope="col" className={styles.detail}>Harvested</th>
-                  </>
-                )}
               </tr>
             </thead>
             <tbody>
@@ -324,7 +280,7 @@ export function WeeklyPlantDataTab() {
                   <td>{formatRate(w.breakers_per_m2)}</td>
                   <td>{formatRate(w.harvested_per_m2)}</td>
                   {ages.map((d, i) => (
-                    <CohortTd key={d} cell={cellAtAge(cohortRows.get(w.iso_week), d)} year={year} week={w.iso_week} showDetail={showDetail} divider={i === 0} follow={follow} />
+                    <CohortTd key={d} cell={cellAtAge(cohortRows.get(w.iso_week), d)} year={year} week={w.iso_week} divider={i === 0} follow={follow} />
                   ))}
                   <td className={styles.afwCell}>
                     <input
@@ -348,15 +304,6 @@ export function WeeklyPlantDataTab() {
                     timing={weekTiming(year, w.iso_week, today)}
                   />
                   <FruitLossTd week={w.iso_week} row={fruitLossRows.get(w.iso_week)} />
-                  {showDetail && (
-                    <>
-                      <td className={styles.detail}>{w.is_sampled ? formatInteger(w.sampled_stems) : '—'}</td>
-                      <td className={styles.detail}>{w.sampled_m2 === null ? '—' : formatTwoDecimals(w.sampled_m2)}</td>
-                      <td className={styles.detail}>{w.is_sampled ? formatInteger(w.new_sets) : '—'}</td>
-                      <td className={styles.detail}>{w.is_sampled ? formatInteger(w.new_breakers) : '—'}</td>
-                      <td className={styles.detail}>{w.is_sampled ? formatInteger(w.new_harvested) : '—'}</td>
-                    </>
-                  )}
                 </tr>
               ))}
             </tbody>
@@ -415,7 +362,7 @@ function SetsTd({ row, value, follow }: { row: SetHarvestCohortRow | undefined; 
   )
 }
 
-function CohortTd({ cell, year, week, showDetail, divider, follow }: { cell: CohortCell | undefined; year: number; week: number; showDetail: boolean; divider: boolean; follow: Follow }) {
+function CohortTd({ cell, year, week, divider, follow }: { cell: CohortCell | undefined; year: number; week: number; divider: boolean; follow: Follow }) {
   // The cohort's start (+0) shows a marker instead of a percentage.
   const first = cell?.delay === 0
   if (!cell || cell.cohort_sets === 0) return <td className={[styles.age, divider ? styles.firstDelay : ''].filter(Boolean).join(' ')}>—</td>
@@ -433,7 +380,6 @@ function CohortTd({ cell, year, week, showDetail, divider, follow }: { cell: Coh
         <button type="button" className={styles.startMarker} title={cohortCellTitle(cell, year, week)} aria-pressed={follow.active === key} {...followHandlers(key, follow)}>
           ●
         </button>
-        {showDetail && <span className={styles.cellDetail}>{cell.cohort_sets} set</span>}
       </td>
     )
   }
@@ -442,11 +388,6 @@ function CohortTd({ cell, year, week, showDetail, divider, follow }: { cell: Coh
       <span className={[cell.percent === 0 ? styles.zero : '', cell.is_baseline_cohort && cell.percent !== null ? styles.baselineCell : ''].filter(Boolean).join(' ') || undefined}>
         {formatCohortPercent(cell.percent)}
       </span>
-      {showDetail && cell.percent !== null && (
-        <span className={styles.cellDetail}>
-          {cell.harvested}/{cell.cohort_sets}
-        </span>
-      )}
     </td>
   )
 }
