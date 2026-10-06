@@ -132,6 +132,25 @@ export type WeeklyHarvestAfwRow = {
   updated_at: string
 }
 
+// ---- Fruit Loss % per calendar week (20261017000000_weekly_fruit_loss.sql) ----
+
+/** One ISO week: fruit lost that week ÷ fruit on the plant at its start. Percent and per-m² are null when unsampled. */
+export type WeeklyFruitLossRow = {
+  iso_week: number
+  /** Fruit on the plant at the start of the week (set before it, not yet harvested or lost, on a sampled stem). */
+  fruit_at_start: number
+  /** Of those, confirmed lost this week (fruit_aborted + fruit_pruned). */
+  fruit_lost: number
+  fruit_aborted: number
+  fruit_pruned: number
+  /** Losses of nodes never recorded as fruit (flowers); not part of Fruit Loss %. */
+  flower_lost: number
+  fruit_lost_per_m2: number | null
+  fruit_loss_percent: number | null
+  is_sampled: boolean
+  is_provisional: boolean
+}
+
 // ---- Projections (20261007000000_weekly_plant_data.sql) ----
 
 /** One ISO week of observed stage entries on a crop's sampled plants. Per-m² values are null when unsampled. */
@@ -347,6 +366,10 @@ export type Database = {
       set_harvest_cohorts: {
         Args: { p_crop_id: string; p_year: number; p_as_of?: string }
         Returns: SetHarvestCohortRow[]
+      }
+      weekly_fruit_loss: {
+        Args: { p_crop_id: string; p_year: number; p_as_of?: string }
+        Returns: WeeklyFruitLossRow[]
       }
     }
     Enums: Record<string, never>

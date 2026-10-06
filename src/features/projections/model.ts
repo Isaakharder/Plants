@@ -1,8 +1,8 @@
-import type { ClosingCohort, CohortCell, SetHarvestCohortRow, WeeklyPlantDataRow } from '../../lib/database.types'
+import type { ClosingCohort, CohortCell, SetHarvestCohortRow, WeeklyFruitLossRow, WeeklyPlantDataRow } from '../../lib/database.types'
 import type { IsoDate } from '../../lib/dates'
 import { formatTwoDecimals } from '../../lib/format'
 
-export type { ClosingCohort, CohortCell, SetHarvestCohortRow, WeeklyPlantDataRow }
+export type { ClosingCohort, CohortCell, SetHarvestCohortRow, WeeklyFruitLossRow, WeeklyPlantDataRow }
 
 /** ISO week-numbering year of a calendar date ("2025-12-29" → 2026). */
 export function isoYearOfDate(iso: IsoDate): number {
@@ -37,6 +37,12 @@ export function normalizeWeek(row: WeeklyPlantDataRow): WeeklyPlantDataRow {
     breakers_per_m2: num(row.breakers_per_m2),
     harvested_per_m2: num(row.harvested_per_m2),
   }
+}
+
+/** weekly_fruit_loss() numerics arrive as numbers or strings; normalise them. */
+export function normalizeFruitLoss(row: WeeklyFruitLossRow): WeeklyFruitLossRow {
+  const num = (v: number | null) => (v === null ? null : Number(v))
+  return { ...row, fruit_lost_per_m2: num(row.fruit_lost_per_m2), fruit_loss_percent: num(row.fruit_loss_percent) }
 }
 
 /** The cohort clock: +0 is the SetFruit week, +10 the last week a harvest counts (+11 is outside the window). */
@@ -141,7 +147,9 @@ const share = (n: number, of: number) => `${((100 * n) / of).toFixed(1)}%`
 /**
  * The caption shown while following a cohort. An open cohort reports only what
  * is recorded so far: Aborted + Pruned as "Lost so far", the rest as still on
- * the plant (Timeout doesn't exist until the +10 window closes).
+ * the plant (Timeout doesn't exist until the +10 window closes). A closed
+ * cohort reports its Cohort Loss; its timeouts are shown as unresolved by +10,
+ * not as confirmed losses (forecasting must not treat them as such).
  */
 export function followCaption(c: CohortSummary, viewedYear: number): string {
   const name = c.setYear === viewedYear ? `W${c.setWeek}` : `W${c.setWeek} ${c.setYear}`
@@ -150,7 +158,7 @@ export function followCaption(c: CohortSummary, viewedYear: number): string {
     const loss = c.aborted + c.pruned + c.timeout
     return (
       `Following ${name} cohort (closed after +10): ${c.sets} sets · Harvested ${share(c.harvested, c.sets)} · ` +
-      `Loss ${share(loss, c.sets)} (Aborted ${share(c.aborted, c.sets)} · Pruned ${share(c.pruned, c.sets)} · Timeout ${share(c.timeout, c.sets)})`
+      `Cohort Loss ${share(loss, c.sets)} (Aborted ${share(c.aborted, c.sets)} · Pruned ${share(c.pruned, c.sets)} · Unresolved by +10 ${share(c.timeout, c.sets)})`
     )
   }
   return (
@@ -159,18 +167,42 @@ export function followCaption(c: CohortSummary, viewedYear: number): string {
   )
 }
 
-/** The Loss column: — until the closing cohort's window has closed. */
-export const formatLoss = (closing: ClosingCohort) => formatPercent(closing.closed && closing.sets > 0 ? closing.loss_percent : null)
+/**
+ * Cohort Loss of a closing cohort (set_harvest_cohorts().closing): aborted +
+ * pruned + unresolved by +10, over its sets; — until its window has closed.
+ * Kept for projections; the table's loss column shows Fruit Loss % instead.
+ */
+export const formatCohortLoss = (closing: ClosingCohort) => formatPercent(closing.closed && closing.sets > 0 ? closing.loss_percent : null)
 
-/** Hover text for the Loss column. */
-export function lossTitle(closing: ClosingCohort, harvestYear: number): string {
+/** Explains a closing cohort's Cohort Loss. */
+export function cohortLossTitle(closing: ClosingCohort, harvestYear: number): string {
   const name = closing.set_year === harvestYear ? `W${closing.set_week}` : `W${closing.set_week} ${closing.set_year}`
   if (closing.sets === 0) return `No peppers were set in ${name}, so no cohort closes this week.`
   if (!closing.closed) return `${name} cohort's +10 window closes at the end of this week; its loss is not final yet.`
   return (
     `${name} cohort closed: ${closing.sets} sets, ${closing.harvested} harvested within +10. ` +
-    `Loss: ${closing.aborted} aborted, ${closing.pruned} pruned, ${closing.timeout} timeout (unresolved after +10).`
+    `Cohort Loss: ${closing.aborted} aborted, ${closing.pruned} pruned, ${closing.timeout} unresolved by +10.`
   )
+}
+
+// ── Fruit Loss % (per calendar week) ───────────────────────────────────────
+
+/** A week's Fruit Loss % with one decimal; — when the week wasn't sampled or had no fruit on the plant. */
+export const formatFruitLoss = (row: WeeklyFruitLossRow | undefined) => formatPercent(row?.is_sampled ? row.fruit_loss_percent : null)
+
+/** Hover text for a Fruit Loss % cell, showing the calculation. */
+export function fruitLossTitle(week: number, row: WeeklyFruitLossRow | undefined): string {
+  if (!row || !row.is_sampled) return `W${week} hasn't been sampled, so there is no fruit loss to report. Nothing is projected.`
+  const lines =
+    row.fruit_at_start === 0
+      ? [`W${week}: no fruit was on the sampled plants at the start of the week.`]
+      : [
+          `W${week} fruit loss: ${row.fruit_lost} of ${row.fruit_at_start} fruit on the plant at the start of the week = ${formatPercent(row.fruit_loss_percent)}`,
+          `${row.fruit_aborted} aborted, ${row.fruit_pruned} pruned (${(row.fruit_lost_per_m2 ?? 0).toFixed(2)} fruit/m²). Fruit that set this week isn't counted until next week.`,
+        ]
+  if (row.flower_lost > 0) lines.push(`Not included: ${row.flower_lost} flower${row.flower_lost === 1 ? '' : 's'} lost before setting fruit.`)
+  if (row.is_provisional) lines.push('In progress: this week’s sampling may not be complete.')
+  return lines.join('\n')
 }
 
 /** Hover text for a cohort cell, with the counts behind the percentage. */

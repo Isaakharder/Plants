@@ -10,13 +10,16 @@ import {
   cropYears,
   defaultYear,
   followCaption,
-  formatLoss,
+  formatCohortLoss,
+  formatFruitLoss,
+  fruitLossTitle,
   formatCohortPercent,
   formatPercent,
   formatRate,
   isoYearOfDate,
   ladderAgesWithHarvests,
-  lossTitle,
+  cohortLossTitle,
+  normalizeFruitLoss,
   normalizeWeek,
   observedHarvestShare,
   parseAfw,
@@ -28,6 +31,7 @@ import {
   type ClosingCohort,
   type CohortCell,
   type SetHarvestCohortRow,
+  type WeeklyFruitLossRow,
   type WeeklyPlantDataRow,
 } from './model'
 
@@ -101,9 +105,9 @@ const cell: CohortCell = {
 }
 
 describe('followCaption', () => {
-  it('reports a closed cohort as Harvested + Loss with its reasons', () => {
+  it('reports a closed cohort as Harvested + Cohort Loss, with timeouts as unresolved by +10', () => {
     expect(followCaption(summarize({ ...cell, set_week: 25, cohort_sets: 21, cohort_harvested: 13, cohort_aborted: 6, cohort_pruned: 0, cohort_timeout: 2 }), 2026)).toBe(
-      'Following W25 cohort (closed after +10): 21 sets · Harvested 61.9% · Loss 38.1% (Aborted 28.6% · Pruned 0.0% · Timeout 9.5%)',
+      'Following W25 cohort (closed after +10): 21 sets · Harvested 61.9% · Cohort Loss 38.1% (Aborted 28.6% · Pruned 0.0% · Unresolved by +10 9.5%)',
     )
   })
 
@@ -117,24 +121,24 @@ describe('followCaption', () => {
   })
 })
 
-describe('Loss column', () => {
+describe('Cohort Loss (closing cohort; kept for projections)', () => {
   const closing: ClosingCohort = {
     set_year: 2026, set_week: 24, sets: 57, harvested: 47, aborted: 8, pruned: 1, timeout: 1, on_plant: 0, closed: true,
     is_baseline_cohort: false, loss_percent: 17.543859649122808,
   }
 
-  it('shows the closed cohort’s loss, and — while its window is open', () => {
-    expect(formatLoss(closing)).toBe('17.5%')
-    expect(formatLoss({ ...closing, closed: false, loss_percent: null, timeout: 0, on_plant: 7 })).toBe('—')
-    expect(formatLoss({ ...closing, sets: 0, loss_percent: null })).toBe('—')
-    expect(formatLoss({ ...closing, aborted: 0, pruned: 0, timeout: 0, loss_percent: 0 })).toBe('0%')
+  it('is the closed cohort’s +10 loss (timeouts included), and — while its window is open', () => {
+    expect(formatCohortLoss(closing)).toBe('17.5%')
+    expect(formatCohortLoss({ ...closing, closed: false, loss_percent: null, timeout: 0, on_plant: 7 })).toBe('—')
+    expect(formatCohortLoss({ ...closing, sets: 0, loss_percent: null })).toBe('—')
+    expect(formatCohortLoss({ ...closing, aborted: 0, pruned: 0, timeout: 0, loss_percent: 0 })).toBe('0%')
   })
 
   it('explains the loss reasons on hover', () => {
-    expect(lossTitle(closing, 2026)).toBe(
-      'W24 cohort closed: 57 sets, 47 harvested within +10. Loss: 8 aborted, 1 pruned, 1 timeout (unresolved after +10).',
+    expect(cohortLossTitle(closing, 2026)).toBe(
+      'W24 cohort closed: 57 sets, 47 harvested within +10. Cohort Loss: 8 aborted, 1 pruned, 1 unresolved by +10.',
     )
-    expect(lossTitle({ ...closing, closed: false }, 2026)).toContain('not final yet')
+    expect(cohortLossTitle({ ...closing, closed: false }, 2026)).toContain('not final yet')
   })
 })
 
@@ -408,5 +412,41 @@ describe('whole-percent display vs. unrounded calculations', () => {
 
   it('the hover text keeps the exact percentage', () => {
     expect(cohortCellTitle({ ...cell(6, 32.8), harvested: 328 }, 2026, 40)).toContain('(32.8%)')
+  })
+})
+
+describe('Fruit Loss % (per calendar week)', () => {
+  // Mathieu W36 as weekly_fruit_loss() returns it (numerics as strings from PostgREST).
+  const w36 = {
+    iso_week: 36, fruit_at_start: 621, fruit_lost: 100, fruit_aborted: 87, fruit_pruned: 13, flower_lost: 43,
+    fruit_lost_per_m2: '12.1404900631609950' as unknown as number, fruit_loss_percent: '16.1030595813204509' as unknown as number,
+    is_sampled: true, is_provisional: false,
+  } satisfies WeeklyFruitLossRow
+  const row = normalizeFruitLoss(w36)
+
+  it('normalises numerics and shows one decimal from the unrounded percentage', () => {
+    expect(row.fruit_loss_percent).toBeCloseTo((100 * 100) / 621, 12)
+    expect(formatFruitLoss(row)).toBe('16.1%')
+  })
+
+  it('— when the week wasn’t sampled, had no fruit on the plant, or has no row', () => {
+    expect(formatFruitLoss({ ...row, is_sampled: false, fruit_loss_percent: null, fruit_lost_per_m2: null })).toBe('—')
+    expect(formatFruitLoss({ ...row, fruit_at_start: 0, fruit_lost: 0, fruit_loss_percent: null })).toBe('—')
+    expect(formatFruitLoss(undefined)).toBe('—')
+  })
+
+  it('an observed week with fruit but no losses is 0%', () => {
+    expect(formatFruitLoss({ ...row, fruit_lost: 0, fruit_aborted: 0, fruit_pruned: 0, fruit_loss_percent: 0 })).toBe('0%')
+  })
+
+  it('explains the calculation, keeps flowers out, and flags the in-progress week', () => {
+    const title = fruitLossTitle(36, row)
+    expect(title).toMatch(/^W36 fruit loss: 100 of 621 fruit on the plant at the start of the week = 16\.1%/)
+    expect(title).toContain('87 aborted, 13 pruned (12.14 fruit/m²)')
+    expect(title).toContain('Not included: 43 flowers lost before setting fruit.')
+    expect(title).not.toContain('In progress')
+    expect(fruitLossTitle(41, { ...row, iso_week: 41, is_provisional: true })).toContain('In progress')
+    expect(fruitLossTitle(42, undefined)).toContain('hasn\'t been sampled')
+    expect(fruitLossTitle(22, { ...row, fruit_at_start: 0, fruit_lost: 0, flower_lost: 16, fruit_loss_percent: 0 })).toContain('no fruit was on the sampled plants')
   })
 })

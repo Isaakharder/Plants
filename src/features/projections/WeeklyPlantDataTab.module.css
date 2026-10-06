@@ -314,9 +314,21 @@
   outline-offset: 2px;
 }
 
+/* The in-progress week's Fruit Loss %: sampling may not be complete. */
+.incomplete {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .lossHead,
 .lossCell {
   border-left: 1px solid var(--border-strong);
+}
+
+/* "Fruit Loss %" is the widest header: a little less padding keeps the table inside 1280 px. */
+.table .lossHead,
+.table .lossCell {
+  padding-left: 10px;
 }
 
 /* ---- Manual AFW and Picked kg ---- */

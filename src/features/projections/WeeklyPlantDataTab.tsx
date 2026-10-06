@@ -6,7 +6,7 @@ import { greenhouseIsoWeek, useGreenhouseWeek } from '../collector/greenhouseWee
 import { useCrops } from '../crops/api'
 import { sortCrops, stemsPerM2 } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
-import { useSaveWeeklyHarvestAfw, useSetHarvestCohorts, useWeeklyHarvestAfw, useWeeklyPlantData, type AfwChange } from './api'
+import { useSaveWeeklyHarvestAfw, useSetHarvestCohorts, useWeeklyFruitLoss, useWeeklyHarvestAfw, useWeeklyPlantData, type AfwChange } from './api'
 import {
   LADDER_AGES,
   AFW_MAX_G,
@@ -17,11 +17,11 @@ import {
   cropYears,
   defaultYear,
   followCaption,
-  formatLoss,
   formatCohortPercent,
+  formatFruitLoss,
+  fruitLossTitle,
   formatRate,
   ladderAgesWithHarvests,
-  lossTitle,
   parseAfw,
   pickedKg,
   pickedKgTitle,
@@ -31,6 +31,7 @@ import {
   type CohortCell,
   type CohortSummary,
   type SetHarvestCohortRow,
+  type WeeklyFruitLossRow,
   type WeekTiming,
 } from './model'
 import styles from './WeeklyPlantDataTab.module.css'
@@ -58,12 +59,14 @@ export function WeeklyPlantDataTab() {
 
   const weeks = useWeeklyPlantData(crop?.id, year)
   const cohorts = useSetHarvestCohorts(crop?.id, year)
+  const fruitLoss = useWeeklyFruitLoss(crop?.id, year)
   const afw = useWeeklyHarvestAfw(crop?.id, year)
   const saveAfw = useSaveWeeklyHarvestAfw(organization.id, crop?.id, year)
   // Typed but unsaved AFWs, per crop · year · harvest week (text as typed).
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [justSaved, setJustSaved] = useState(false)
   const tableRef = useRef<HTMLDivElement>(null)
+  const fruitLossRows = useMemo(() => new Map((fruitLoss.data ?? []).map((row) => [row.iso_week, row])), [fruitLoss.data])
   const cohortRows = useMemo(() => new Map((cohorts.data ?? []).map((row) => [row.iso_week, row])), [cohorts.data])
   // Presentation only: start at the first sampled week and show only the
   // cohort ages that have a harvest somewhere in the displayed weeks.
@@ -190,9 +193,9 @@ export function WeeklyPlantDataTab() {
         Peppers on the sampled plants that entered each stage that week, per sampled m². Each pepper counts once per
         stage, in the first week it was recorded there. Sampled m² = sampled stems ÷ {formatTwoDecimals(stemsPerM2(crop))} stems/m².{' '}
         <strong>+0 … +10</strong>: every set week starts its own cohort at +0 and moves one row down and one column right each
-        week; a cell is the share of that original cohort first harvested at exactly that age. <strong>Loss</strong>: aborted,
-        pruned and unresolved-after-+10 peppers of the cohort whose window closes that week (a first harvest at +11 or later is outside the window). Click a week's Sets/m² to
-        follow its cohort.{hiddenAges.length > 0 && hiddenAges.length < LADDER_AGES.length && (
+        week; a cell is the share of that original cohort first harvested at exactly that age. <strong>Fruit Loss %</strong>: of
+        the fruit on the plants at the start of the week, the share aborted or pruned that week. Click a week's Sets/m² to follow
+        its cohort and see its Cohort Loss.{hiddenAges.length > 0 && hiddenAges.length < LADDER_AGES.length && (
           <> Ages with no harvests in this year are hidden ({hiddenAges.map((a) => `+${a}`).join(', ')}).</>
         )}
       </p>
@@ -233,18 +236,29 @@ export function WeeklyPlantDataTab() {
           </dd>
         </div>
         <div>
-          <dt>Loss</dt>
-          <dd>Shown when a cohort's +10 window closes: aborted + pruned + timeout (not harvested by +10; a Harvested record at +11 or later still counts in Harvested/m²). — while the window is open.</dd>
+          <dt>Fruit Loss %</dt>
+          <dd>
+            Fruit lost that calendar week ÷ fruit on the plants at its start. Fruit counts from the week after it sets, until it is harvested or
+            lost; each lost fruit counts once, in the week it was first recorded Aborted or Pruned (an Aborted later followed by a live record is a
+            correction, not a loss). Flowers lost before setting fruit are not included. — when the week hasn't been sampled.
+          </dd>
+        </div>
+        <div>
+          <dt>Cohort Loss</dt>
+          <dd>
+            Shown when following a cohort: of the peppers set that week, the share aborted, pruned or still unresolved by +10, once its +10 window
+            closes. A Harvested record at +11 or later still counts in Harvested/m².
+          </dd>
         </div>
         <div>
           <dt><span className={`${styles.tag} ${styles.provisional}`}>In progress</span></dt>
           <dd>The current greenhouse week. Sampling may not be complete, so its values can still change.</dd>
         </div>
       </dl>
-      {weeks.isPending || cohorts.isPending ? (
+      {weeks.isPending || cohorts.isPending || fruitLoss.isPending ? (
         <LoadingState />
-      ) : weeks.error || cohorts.error ? (
-        <ErrorState error={weeks.error ?? cohorts.error} />
+      ) : weeks.error || cohorts.error || fruitLoss.error ? (
+        <ErrorState error={weeks.error ?? cohorts.error ?? fruitLoss.error} />
       ) : shownWeeks.length === 0 ? (
         <EmptyState title={`No plant data for ${crop.name} in ${year}`} description="Weeks appear here once plants are recorded with the mobile collector." />
       ) : (
@@ -286,7 +300,7 @@ export function WeeklyPlantDataTab() {
                 ))}
                 <th scope="col" className={styles.afwHead} title="Harvest-week AFW: average grams per pepper harvested that week">AFW g</th>
                 <th scope="col" className={styles.pickedHead} title="Estimated kg picked that calendar week: Harvested/m² × crop area × that week's AFW">Picked kg</th>
-                <th scope="col" className={styles.lossHead}>Loss</th>
+                <th scope="col" className={styles.lossHead} title="Fruit lost that calendar week ÷ fruit on the plants at the start of the week">Fruit Loss %</th>
                 {showDetail && (
                   <>
                     <th scope="col" className={styles.detail}>Sampled stems</th>
@@ -333,7 +347,7 @@ export function WeeklyPlantDataTab() {
                     areaM2={crop.area_m2}
                     timing={weekTiming(year, w.iso_week, today)}
                   />
-                  <LossTd row={cohortRows.get(w.iso_week)} year={year} follow={follow} />
+                  <FruitLossTd week={w.iso_week} row={fruitLossRows.get(w.iso_week)} />
                   {showDetail && (
                     <>
                       <td className={styles.detail}>{w.is_sampled ? formatInteger(w.sampled_stems) : '—'}</td>
@@ -449,15 +463,11 @@ function PickedTd({ week, harvestedPerM2, afwG, areaM2, timing }: { week: number
   )
 }
 
-/** Loss of the cohort whose +10 window closes in this row's week (the end of its ladder). */
-function LossTd({ row, year, follow }: { row: SetHarvestCohortRow | undefined; year: number; follow: Follow }) {
-  const closing = row?.closing
-  if (!closing || closing.sets === 0) return <td className={styles.lossCell}>—</td>
-  const key = cohortKey(closing.set_year, closing.set_week)
-  const classes = [styles.lossCell, BAND_CLASS[cohortBand(closing.set_year, closing.set_week)], follow.active === key ? styles.ladderActive : ''].join(' ')
+/** Fruit lost in the row's calendar week ÷ fruit on the plant at its start. Not part of any cohort, so never highlighted. */
+function FruitLossTd({ week, row }: { week: number; row: WeeklyFruitLossRow | undefined }) {
   return (
-    <td className={classes} title={lossTitle(closing, year)} {...followHandlers(key, follow)}>
-      <span className={closing.is_baseline_cohort && closing.closed ? styles.baselineCell : undefined}>{formatLoss(closing)}</span>
+    <td className={[styles.lossCell, row?.is_provisional ? styles.incomplete : ''].filter(Boolean).join(' ')} title={fruitLossTitle(week, row)}>
+      {formatFruitLoss(row)}
     </td>
   )
 }
