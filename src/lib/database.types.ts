@@ -118,6 +118,18 @@ export type NodeAttentionRuleRow = {
   updated_at: string
 }
 
+// ---- Mobile status options (20261018000000_mobile_status_options.sql) ----
+
+/** Whether the mobile collector offers a status for new entries (no row = offered). Never affects recorded statuses. */
+export type MobileStatusOptionRow = {
+  organization_id: string
+  status: NodeStatus
+  enabled: boolean
+  updated_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 // ---- Manual AFW per harvest week (20261015000000_cohort_afw.sql, renamed in 20261016000000_weekly_harvest_afw.sql) ----
 
 /** Average grams per pepper harvested in one ISO week (year, week) of a crop, entered by hand. */
@@ -345,6 +357,12 @@ export type Database = {
         Row: NodeAttentionRuleRow
         Insert: Pick<NodeAttentionRuleRow, 'organization_id' | 'rule_key' | 'max_days'>
         Update: Pick<NodeAttentionRuleRow, 'max_days'>
+        Relationships: []
+      }
+      mobile_status_options: {
+        Row: MobileStatusOptionRow
+        Insert: Pick<MobileStatusOptionRow, 'organization_id' | 'status' | 'enabled'>
+        Update: Pick<MobileStatusOptionRow, 'enabled'>
         Relationships: []
       }
     }

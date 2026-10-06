@@ -15,22 +15,13 @@ import { COLORS } from '../plantArt/colors';
 import { statusTone } from '../plantArt/frames';
 import { StatusIcon } from '../plantArt/StatusArt';
 import { useOrganization } from '../organization/OrganizationProvider';
-import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useRowCanvas } from './api';
+import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRowCanvas } from './api';
+import { pickerOptions } from './statusOptions';
 import { OfflineBanner } from './components/OfflineBanner';
 import { TextPromptModal } from './components/TextPromptModal';
 import { cropColorVar, type CanvasState } from './display';
 import { useGreenhouseWeek } from './greenhouseWeek';
 import type { LatestNodeStatus, MeasurementStem, NodeStatus, PlantNode, StemGrowthMeasurement } from './types';
-
-const STATUS_OPTIONS: { value: NodeStatus; label: string }[] = [
-  { value: 'Aborted',      label: 'Aborted' },
-  { value: 'Pruned',       label: 'Pruned' },
-  { value: 'Flower',       label: 'Flower' },
-  { value: 'SetFruit',     label: 'Set Fruit' },
-  { value: 'MatureGreen',  label: 'Mature Green' },
-  { value: 'BreakerFruit', label: 'Breaker Fruit' },
-  { value: 'Harvested',    label: 'Harvested' },
-];
 
 const STATUS_LABEL: Record<NodeStatus, string> = {
   Aborted:      'Aborted',
@@ -176,6 +167,7 @@ export function RowCanvasPage() {
   // data (queued writes included), so a status saved offline clears its clock at once.
   const now = useNow();
   const { rules: attentionRules } = useAttentionRules(organization.id, userId);
+  const { enabled: enabledStatuses } = useMobileStatusOptions(organization.id, userId);
   const attentionByNode = useMemo(
     () => rowAttention(canvasQuery.data?.nodes ?? [], canvasQuery.data?.statuses ?? [], now, attentionRules),
     [canvasQuery.data, now, attentionRules],
@@ -783,25 +775,29 @@ export function RowCanvasPage() {
               </div>
             )}
             <div className="status-picker-grid">
-              {STATUS_OPTIONS.map(opt => {
-                const tone = statusTone(opt.value, artVariety);
+              {(() => {
                 const currentRec = (statusesByStem[statusPickerCtx.stem.id] ?? []).find(
                   s => s.plant_node_id === statusPickerCtx.node.id,
                 );
+                // Only the organization's enabled statuses; a hidden current status still shows, but can't be chosen.
+                return pickerOptions(enabledStatuses, currentRec?.status).map(opt => {
+                const tone = statusTone(opt.value, artVariety);
                 const isActive = currentRec?.status === opt.value;
                 return (
                   <button
                     key={opt.value}
                     className={`status-picker-btn${isActive ? ' active' : ''}`}
                     style={isActive ? { borderColor: tone.ring, background: tone.background } : {}}
-                    onClick={() => !saving && handleSaveStatus(opt.value)}
-                    disabled={saving}
+                    onClick={() => !saving && !opt.hidden && handleSaveStatus(opt.value)}
+                    disabled={saving || opt.hidden}
+                    title={opt.hidden ? 'Current status. Not offered for new entries (Settings › Mobile status options).' : undefined}
                   >
                     <span className="status-picker-art"><StatusIcon status={opt.value} size={34} variety={artVariety} /></span>
                     <span>{opt.label}</span>
                   </button>
                 );
-              })}
+                });
+              })()}
             </div>
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => handleCancelStatusPicker()}>Cancel</button>

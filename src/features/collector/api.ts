@@ -12,6 +12,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { useOrganization } from '../organization/OrganizationProvider'
 import { DEFAULT_ATTENTION_RULES, rulesFromRows, type AttentionRules } from './attention'
 import { fetchAll, IncompleteReadError } from './fetchAll'
+import { enabledFromRows, statusOptionsOrDefaults, type EnabledStatuses } from './statusOptions'
 import { currentGreenhouseWeek } from './greenhouseWeek'
 import { newId } from './offline/ids'
 import { collectorQueue, triggerSync } from './offline/networkStatus'
@@ -35,6 +36,7 @@ export const collectorKeys = {
   rowCards: (organizationId: string) => ['collector', 'rowCards', organizationId] as const,
   row: (rowId: string) => ['collector', 'row', rowId] as const,
   attentionRules: (organizationId: string) => ['collector', 'attentionRules', organizationId] as const,
+  statusOptions: (organizationId: string) => ['collector', 'statusOptions', organizationId] as const,
 }
 
 /** Offline, with nothing for this screen saved on the device. */
@@ -160,6 +162,27 @@ export function useAttentionRules(organizationId: string, userId: string) {
 /** The downloaded rules, or the defaults on a device that has never had them. */
 export function rulesOrDefaults(downloaded: AttentionRules | undefined): { rules: AttentionRules; source: 'organization' | 'defaults' } {
   return downloaded ? { rules: downloaded, source: 'organization' } : { rules: DEFAULT_ATTENTION_RULES, source: 'defaults' }
+}
+
+/** The statuses the organization offers for new entries (one small read; seven rows per organization). */
+export async function fetchMobileStatusOptions(organizationId: string): Promise<EnabledStatuses> {
+  const res = await supabase.from('mobile_status_options').select('status, enabled').eq('organization_id', organizationId)
+  return enabledFromRows(check(res))
+}
+
+/** Exported for tests. Saved on the device and refreshed like the attention rules. */
+export const mobileStatusOptionsQuery = (queryClient: QueryClient, organizationId: string, userId: string) => ({
+  ...collectorQuery<EnabledStatuses>(queryClient, collectorKeys.statusOptions(organizationId), userId, () => fetchMobileStatusOptions(organizationId), (base) => base),
+  staleTime: 0,
+})
+
+/**
+ * The statuses the picker offers. Offline (or if the read fails) the last
+ * downloaded choice applies; a device that has never downloaded it offers
+ * every status, without saving that as the organization's choice.
+ */
+export function useMobileStatusOptions(organizationId: string, userId: string) {
+  return statusOptionsOrDefaults(useQuery(mobileStatusOptionsQuery(useQueryClient(), organizationId, userId)).data)
 }
 
 async function fetchRowCards(organizationId: string): Promise<MobileRowCard[]> {
