@@ -170,6 +170,11 @@ connection; retries never create duplicates.
   observations and stages are never changed).
 - **Desktop:** **Photos** page: front/back pairs per variety and period, full-size originals, manual
   colour %, node corrections.
+- **Framing:** the photo step shows "Centre ONE pepper in the photo. Keep the whole pepper visible. Move
+  leaves aside and avoid other peppers, hands and people in the background." Each photo records the
+  guidance version in `capture_meta.guidance`. Convention for colour analysis: the target pepper is the
+  centred fruit, but centring does not guarantee identification (neighbouring peppers can overlap), so
+  analysis must segment the target pepper from neighbouring fruit.
 - **Switch:** build with `VITE_BREAKER_PHOTOS=off` to hide the camera step (Breaker recorded without
   photos, as before). Photos already queued on phones still upload. Use this to turn the feature off;
   don't redeploy an older build while phones may still hold queued photos (older builds can't send them).

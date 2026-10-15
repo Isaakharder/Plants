@@ -1189,6 +1189,17 @@
   margin: 0;
 }
 
+.collector-app .breaker-capture-guidance {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green-600);
+  background: var(--green-50);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--gray-900);
+}
+
 .collector-app .breaker-capture-slots {
   display: grid;
   grid-template-columns: 1fr 1fr;

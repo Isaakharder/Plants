@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PhotoSide } from '../../lib/database.types';
 import { captureDrafts, draftKey, type CaptureDraft } from './offline/captureDrafts';
-import { preparePhoto, requestPersistentStorage, type PreparedPhoto } from './photos';
+import { PHOTO_GUIDANCE, preparePhoto, requestPersistentStorage, type PreparedPhoto } from './photos';
 
 type Shot = PreparedPhoto & { url: string };
 
@@ -116,9 +116,9 @@ export function BreakerCapture({
   return (
     <div className="breaker-capture">
       <p className="breaker-capture-intro">
-        Photograph <strong>{nodeLabel}</strong>: the front, then the back. Fill the frame with the pepper, avoid direct sun and keep the
-        whole fruit in view.
+        <strong>{nodeLabel}</strong>: photograph the front, then the back.
       </p>
+      <p className="breaker-capture-guidance">{PHOTO_GUIDANCE}</p>
       {restored && <div className="alert alert-info">The photos you took earlier for {nodeLabel} were kept on this phone.</div>}
       <div className="breaker-capture-slots">
         {SIDES.map(({ side, label, hint }) => {

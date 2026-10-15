@@ -30,7 +30,7 @@ describe('Breaker photos on the device', () => {
     await expect(preparePhoto('front', new Blob([], { type: 'image/jpeg' }))).rejects.toThrow(/empty/)
     const p = await preparePhoto('back', new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }))
     expect(p).toMatchObject({ side: 'back', contentType: 'image/jpeg', bytes: 3, width: null, height: null, preview: null })
-    expect(p.captureMeta).toMatchObject({ source: 'camera', collector: 'breaker-photos-1' })
+    expect(p.captureMeta).toMatchObject({ source: 'camera', collector: 'breaker-photos-1', guidance: 'centre-one-pepper-v1' })
     expect(p.sha256).toMatch(/^[0-9a-f]{64}$/)
   })
 })

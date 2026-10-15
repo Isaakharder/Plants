@@ -17,6 +17,20 @@ export const PREVIEW_MAX_PX = 640
 export const COLLECTOR_RELEASE = 'breaker-photos-1'
 
 /**
+ * The framing guidance shown on the photo step (approved 2026-10-15). Its
+ * version is recorded with every photo, so analyses can tell photos taken
+ * with it from earlier ones.
+ *
+ * Convention for colour analysis: the target pepper is the CENTRED fruit.
+ * Centring alone does not guarantee the right fruit is identified:
+ * neighbouring peppers can overlap the target, so analysis must segment the
+ * target pepper from the fruit around it (e.g. a segmentation prompted at the
+ * image centre), never simply measure the centre of the frame.
+ */
+export const PHOTO_GUIDANCE = 'Centre ONE pepper in the photo. Keep the whole pepper visible. Move leaves aside and avoid other peppers, hands and people in the background.'
+export const PHOTO_GUIDANCE_VERSION = 'centre-one-pepper-v1'
+
+/**
  * Camera-first Breaker recording is on unless the build sets
  * VITE_BREAKER_PHOTOS=off. Turning it off only hides the camera step (Breaker
  * is then recorded without photos, as before); photos already waiting on a
@@ -114,6 +128,7 @@ export async function preparePhoto(side: PhotoSide, file: Blob): Promise<Prepare
     captureMeta: {
       source: 'camera',
       collector: COLLECTOR_RELEASE,
+      guidance: PHOTO_GUIDANCE_VERSION,
       userAgent: typeof navigator === 'undefined' ? null : navigator.userAgent.slice(0, 200),
       fileName: named.name ? named.name.slice(0, 120) : null,
       fileLastModified: named.lastModified ? new Date(named.lastModified).toISOString() : null,
