@@ -23,3 +23,12 @@ export function LeafIcon({ size = 20 }: { size?: number }) {
     </svg>
   )
 }
+
+/** Chevron for previous/next steppers. direction 'left' points to the previous option. */
+export function ChevronIcon({ direction, size = 20 }: { direction: 'left' | 'right'; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {direction === 'left' ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 18l6-6-6-6" />}
+    </svg>
+  )
+}

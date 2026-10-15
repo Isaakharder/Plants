@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { NavLink, useSearchParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { formatInteger } from '../../lib/format'
 import { greenhouseIsoWeek, useGreenhouseWeek } from '../collector/greenhouseWeek'
@@ -165,27 +165,35 @@ export function WeeklyPlantDataTab() {
 
   return (
     <section className={styles.section} aria-label="Weekly Plant Data">
-      <div className={styles.controls}>
-        <label className={`field ${styles.control}`}>
-          <span className="field-label">Variety</span>
-          <select className="input" value={crop.id} onChange={(e) => select({ crop: e.target.value })}>
-            {sorted.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className={`field ${styles.yearControl}`}>
-          <span className="field-label">Year</span>
-          <select className="input" value={year} onChange={(e) => select({ year: Number(e.target.value) })}>
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
-        </label>
+      {/* One compact toolbar: tab on the left, Variety/Year centred, actions on the right. */}
+      <div className={styles.toolbar}>
+        <nav className={styles.subtabs} aria-label="Projections">
+          <NavLink to="/projections/weekly-plant-data" className={({ isActive }) => `${styles.subtab} ${isActive ? styles.active : ''}`}>
+            Weekly Plant Data
+          </NavLink>
+        </nav>
+        <div className={styles.selectors}>
+          <label className={`field ${styles.control}`}>
+            <span className="field-label">Variety</span>
+            <select className="input" value={crop.id} onChange={(e) => select({ crop: e.target.value })}>
+              {sorted.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={`field ${styles.yearControl}`}>
+            <span className="field-label">Year</span>
+            <select className="input" value={year} onChange={(e) => select({ year: Number(e.target.value) })}>
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className={styles.controlButtons}>
           <button
             type="button"

@@ -1,20 +1,10 @@
-import { NavLink, Outlet } from 'react-router-dom'
-import { PageHeader } from '../components/PageHeader'
-import styles from './ProjectionsPage.module.css'
-
-const SUBTABS = [{ to: 'weekly-plant-data', label: 'Weekly Plant Data' }]
+import { Outlet } from 'react-router-dom'
 
 export function ProjectionsPage() {
   return (
     <>
-      <PageHeader title="Projections" description="What am I going to harvest?" />
-      <nav className={styles.subtabs} aria-label="Projections">
-        {SUBTABS.map((tab) => (
-          <NavLink key={tab.to} to={tab.to} className={({ isActive }) => `${styles.subtab} ${isActive ? styles.active : ''}`}>
-            {tab.label}
-          </NavLink>
-        ))}
-      </nav>
+      {/* No visible page header: the toolbar inside the tab is the page's top. Keep an h1 for screen readers only. */}
+      <h1 className="visually-hidden">Projections</h1>
       <Outlet />
     </>
   )

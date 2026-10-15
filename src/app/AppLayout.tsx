@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { LeafIcon } from '../components/CenteredPanel'
 import { signOut } from '../features/auth/AuthProvider'
 import { useOrganization } from '../features/organization/OrganizationProvider'
@@ -12,6 +12,9 @@ const NAV_ITEMS = [
 
 export function AppLayout() {
   const organization = useOrganization()
+  // Projections and Plants have no page header, so they sit closer under the top bar.
+  const { pathname } = useLocation()
+  const compact = pathname.startsWith('/projections') || pathname.startsWith('/plants')
 
   return (
     <div className={styles.shell}>
@@ -36,7 +39,7 @@ export function AppLayout() {
           </button>
         </div>
       </header>
-      <main className={styles.main}>
+      <main className={`${styles.main} ${compact ? styles.mainCompact : ''}`}>
         <Outlet />
       </main>
     </div>

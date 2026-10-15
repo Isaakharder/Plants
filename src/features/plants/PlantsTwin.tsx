@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { ChevronIcon } from '../../components/CenteredPanel'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { currentGreenhouseWeek } from '../collector/greenhouseWeek'
 import { cropColorVar } from '../collector/display'
@@ -59,6 +60,8 @@ export function PlantsTwin() {
   const plants = usePlantsRow(row?.id)
 
   const [zoom, setZoom] = useState<'fit' | 'full'>('fit')
+  const varietySelectId = useId()
+  const rowSelectId = useId()
   const [pinned, setPinned] = useState<Pinned | null>(null)
   const [hover, setHover] = useState<Hover | null>(null)
   const [review, setReview] = useState<Review | null>(null)
@@ -114,29 +117,86 @@ export function PlantsTwin() {
   const pinnedNode = pinnedStem && pinned?.nodeId ? allNodes(pinnedStem).find((n) => n.id === pinned.nodeId) ?? null : null
   const updated = plants.dataUpdatedAt ? new Date(plants.dataUpdatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : null
 
+  // Previous/next stepping, in the same order as each dropdown. No wrap-around.
+  const cropIndex = sorted.findIndex((c) => c.id === crop.id)
+  const prevCrop = cropIndex > 0 ? sorted[cropIndex - 1] : null
+  const nextCrop = cropIndex >= 0 && cropIndex < sorted.length - 1 ? sorted[cropIndex + 1] : null
+  const rowList = rows.data ?? []
+  const rowIndex = rowList.findIndex((r) => r.id === row?.id)
+  const prevRow = rowIndex > 0 ? rowList[rowIndex - 1] : null
+  // With no row selected, "next" picks the first available row.
+  const nextRow = rowIndex === -1 ? (rowList[0] ?? null) : rowIndex < rowList.length - 1 ? rowList[rowIndex + 1] : null
+
   return (
     <section className={styles.section} aria-label="Plants digital twin">
       <div className={styles.controls}>
-        <label className={`field ${styles.control}`}>
-          <span className="field-label">Variety</span>
-          <select className="input" value={crop.id} onChange={(e) => select({ crop: e.target.value })}>
-            {sorted.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className={`field ${styles.control}`}>
-          <span className="field-label">Row</span>
-          <select className="input" value={row?.id ?? ''} onChange={(e) => select({ row: e.target.value })} disabled={!rows.data?.length}>
-            {(rows.data ?? []).map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.row_name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className={styles.controlsSpacer} aria-hidden="true" />
+        <div className={styles.selectorsCenter}>
+          <div className={styles.selectorGroup}>
+            <div className={`field ${styles.control}`}>
+              <label className="field-label" htmlFor={varietySelectId}>Variety</label>
+              <span className={styles.stepper}>
+                <button
+                  type="button"
+                  className={`icon-button ${styles.stepButton}`}
+                  aria-label="Previous variety"
+                  disabled={!prevCrop}
+                  onClick={() => prevCrop && select({ crop: prevCrop.id })}
+                >
+                  <ChevronIcon direction="left" />
+                </button>
+                <select id={varietySelectId} className="input" value={crop.id} onChange={(e) => select({ crop: e.target.value })}>
+                  {sorted.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className={`icon-button ${styles.stepButton}`}
+                  aria-label="Next variety"
+                  disabled={!nextCrop}
+                  onClick={() => nextCrop && select({ crop: nextCrop.id })}
+                >
+                  <ChevronIcon direction="right" />
+                </button>
+              </span>
+            </div>
+          </div>
+          <div className={styles.selectorGroup}>
+            <div className={`field ${styles.control}`}>
+              <label className="field-label" htmlFor={rowSelectId}>Row</label>
+              <span className={styles.stepper}>
+                <button
+                  type="button"
+                  className={`icon-button ${styles.stepButton}`}
+                  aria-label="Previous row"
+                  disabled={!prevRow}
+                  onClick={() => prevRow && select({ row: prevRow.id })}
+                >
+                  <ChevronIcon direction="left" />
+                </button>
+                <select id={rowSelectId} className="input" value={row?.id ?? ''} onChange={(e) => select({ row: e.target.value })} disabled={!rowList.length}>
+                  {rowList.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.row_name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className={`icon-button ${styles.stepButton}`}
+                  aria-label="Next row"
+                  disabled={!nextRow}
+                  onClick={() => nextRow && select({ row: nextRow.id })}
+                >
+                  <ChevronIcon direction="right" />
+                </button>
+              </span>
+            </div>
+          </div>
+        </div>
         <div className={styles.toolbar}>
           <span className={styles.updated}>
             {plants.isFetching ? 'Updating…' : updated ? `Updated ${updated}` : ''}
