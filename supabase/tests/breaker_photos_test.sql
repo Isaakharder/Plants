@@ -179,9 +179,14 @@ begin
   update storage.objects set name = name || 'x' where bucket_id = 'node-photos';
   get diagnostics n = row_count;
   if n <> 0 then raise exception 'FAIL: a stored photo was renamed'; end if;
-  delete from storage.objects where bucket_id = 'node-photos';
-  get diagnostics n = row_count;
-  if n <> 0 then raise exception 'FAIL: a stored photo was deleted'; end if;
+  -- No delete policy: 0 rows. (Real Supabase also refuses any direct delete from storage tables.)
+  begin
+    delete from storage.objects where bucket_id = 'node-photos';
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL: a stored photo was deleted'; end if;
+  exception when insufficient_privilege then
+    null; -- Supabase's storage.protect_delete(): direct deletes are refused outright.
+  end;
   if (select count(*) from storage.objects where bucket_id = 'node-photos') <> 1 then raise exception 'FAIL: own photo not readable'; end if;
 end $$;
 
