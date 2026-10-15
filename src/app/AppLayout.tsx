@@ -7,6 +7,7 @@ import styles from './AppLayout.module.css'
 const NAV_ITEMS = [
   { to: '/projections', label: 'Projections' },
   { to: '/plants', label: 'Plants' },
+  { to: '/photos', label: 'Photos' },
   { to: '/settings', label: 'Settings' },
 ]
 

@@ -15,6 +15,7 @@ import { fetchAll, IncompleteReadError } from './fetchAll'
 import { enabledFromRows, statusOptionsOrDefaults, type EnabledStatuses } from './statusOptions'
 import { currentGreenhouseWeek } from './greenhouseWeek'
 import { newId } from './offline/ids'
+import { photoPath, previewPath, type PreparedPhoto } from './photos'
 import { collectorQueue, triggerSync } from './offline/networkStatus'
 import type { QueuedAction, QueuedWrite } from './offline/offlineQueue'
 import { mergeRowCanvas, mergeRowCards } from './offline/optimisticStore'
@@ -336,6 +337,23 @@ export function useCollectorActions() {
       void triggerSync()
     }
 
+    const recordStatus = async (node: PlantNode, status: NodeStatus): Promise<LatestNodeStatus> => {
+      // The week is taken now, at save time, not when the page was opened.
+      const { year, week } = currentGreenhouseWeek()
+      const record = {
+        id: newId(),
+        organization_id: node.organization_id,
+        crop_id: node.crop_id,
+        plant_node_id: node.id,
+        year,
+        week_number: week,
+        status,
+        observed_at: new Date().toISOString(),
+      }
+      await submit({ type: 'record_status', record })
+      return record
+    }
+
     return {
       async createRow(cropId: string, rowName: string, sortOrder: number): Promise<MeasurementRow> {
         const record = { id: newId(), organization_id: organizationId, crop_id: cropId, row_name: rowName, sort_order: sortOrder, is_active: true }
@@ -396,21 +414,44 @@ export function useCollectorActions() {
         await submit({ type: 'deactivate_node', record: { id: node.id, organization_id: node.organization_id, measurement_stem_id: node.measurement_stem_id } })
       },
 
-      async recordStatus(node: PlantNode, status: NodeStatus): Promise<LatestNodeStatus> {
-        // The week is taken now, at save time, not when the page was opened.
-        const { year, week } = currentGreenhouseWeek()
-        const record = {
-          id: newId(),
-          organization_id: node.organization_id,
-          crop_id: node.crop_id,
-          plant_node_id: node.id,
-          year,
-          week_number: week,
-          status,
-          observed_at: new Date().toISOString(),
+      recordStatus,
+
+      /**
+       * Camera-first Breaker: records the node as BreakerFruit, then queues its
+       * front and back photos (original + preview), tied to that exact
+       * observation record. Everything is kept on the device and sent in
+       * order: the observation first, then each photo.
+       */
+      async recordBreakerWithPhotos(node: PlantNode, photos: PreparedPhoto[], timing?: { captureSeconds: number }): Promise<LatestNodeStatus> {
+        if (photos.map((p) => p.side).sort().join(',') !== 'back,front') throw new Error('Camera mode needs a front and a back photo.')
+        const observation = await recordStatus(node, 'BreakerFruit')
+        for (const p of photos) {
+          const id = newId()
+          await submit({
+            type: 'upload_photo',
+            image: p.image,
+            preview: p.preview,
+            record: {
+              id,
+              organization_id: node.organization_id,
+              crop_id: node.crop_id,
+              plant_node_id: node.id,
+              node_observation_id: observation.id,
+              side: p.side,
+              storage_path: photoPath(node.organization_id, node.crop_id, node.id, id, p.contentType),
+              preview_path: p.preview ? previewPath(node.organization_id, node.crop_id, node.id, id) : null,
+              content_type: p.contentType,
+              bytes: p.bytes,
+              width: p.width,
+              height: p.height,
+              sha256: p.sha256,
+              taken_at: p.takenAt,
+              // captureSeconds: how long photographing this Breaker took (photo step opened → saved).
+              capture_meta: { ...p.captureMeta, captureSeconds: timing?.captureSeconds ?? null },
+            },
+          })
         }
-        await submit({ type: 'record_status', record })
-        return record
+        return observation
       },
 
       async saveGrowth(stem: MeasurementStem, growthCm: number, notes: string | null, topNodeNumber: number | null, existing: StemGrowthMeasurement | null): Promise<StemGrowthMeasurement> {

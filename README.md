@@ -150,3 +150,28 @@ supabase/
   migrations/     SQL schema (source of truth)
   tests/          SQL checks for RLS and constraints
 ```
+
+## Breaker photos
+
+When a worker records a node as **Breaker** in the mobile collector, Plants asks for two photos with
+the rear camera: the **front** and the **back** of the pepper (preview and Retake on each). **Record
+without photos** keeps the manual workflow. Photos are saved on the phone first (in the offline queue,
+with a ~640 px preview made on the phone) and upload after the Breaker record when there is a
+connection; retries never create duplicates.
+
+- **Storage:** private Supabase Storage bucket `node-photos` (25 MB per image, images only), one folder
+  per organization: `<org>/<crop>/<node>/<photo>.<ext>` and `<photo>.preview.jpg`. Members read and add
+  their organization's photos; nothing can be overwritten or deleted through the API. No public URLs:
+  the desktop viewer downloads with the user's session.
+- **Records** (`20261019000000_breaker_photos.sql`, all append-only): `node_photos` (tied to the exact
+  BreakerFruit observation; the database copies the row, stem, node number and target colour at
+  capture), `photo_colour_analyses` (manual colour %, corrections supersede), `photo_pair_corrections`
+  (reassign a pair to the node really photographed, mark it unusable, or restore it; photos,
+  observations and stages are never changed).
+- **Desktop:** **Photos** page: front/back pairs per variety and period, full-size originals, manual
+  colour %, node corrections.
+- **Switch:** build with `VITE_BREAKER_PHOTOS=off` to hide the camera step (Breaker recorded without
+  photos, as before). Photos already queued on phones still upload. Use this to turn the feature off;
+  don't redeploy an older build while phones may still hold queued photos (older builds can't send them).
+- **Rollback of the schema:** `supabase/rollback/20261019000000_breaker_photos_down.sql`, by hand, only
+  when no photo exists (it refuses otherwise).

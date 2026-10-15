@@ -8,7 +8,10 @@
 //     temp IDs to remap and replaying a write after a lost response is a no-op.
 //   * Each entry remembers the user who made it and is only replayed under that
 //     user's session; organization_id is inside the record itself.
-//   * Vegetative growth and node deactivation are queued too.
+//   * Vegetative growth, node deactivation and Breaker photos are queued too. A
+//     photo's image (and preview) are stored in the queue entry itself
+//     (IndexedDB keeps Blobs), so they survive reloads and offline days until
+//     they have been uploaded.
 
 import type { Database } from '../../../lib/database.types'
 
@@ -21,6 +24,11 @@ export type QueuedWrite =
   | { type: 'deactivate_node'; record: { id: string; organization_id: string; measurement_stem_id: string } }
   | { type: 'record_status'; record: Insert<'node_observations'> }
   | { type: 'upsert_growth'; record: Insert<'stem_growth_measurements'> }
+  /**
+   * A Breaker photo: the original image and its small preview, kept on the
+   * device until uploaded, and its record. Queued after its observation.
+   */
+  | { type: 'upload_photo'; record: Insert<'node_photos'>; image: Blob; preview: Blob | null }
 
 export type QueuedAction = QueuedWrite & {
   id: string
@@ -244,6 +252,8 @@ function dependsOnNode(action: QueuedAction, nodeId: string): boolean {
       return action.record.plant_node_id === nodeId
     case 'deactivate_node':
       return action.record.id === nodeId
+    case 'upload_photo':
+      return action.record.plant_node_id === nodeId
     default:
       return false
   }

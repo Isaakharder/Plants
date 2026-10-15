@@ -2,11 +2,13 @@ import { useSyncExternalStore } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { newId } from './ids'
 import { OfflineQueue, indexedDbStorage, type QueuedWrite, type WriteResult } from './offlineQueue'
+import { PHOTO_BUCKET, sendPhoto, type PhotoUploader } from './photoUpload'
 import { syncOnlineState } from './onlineState'
 
 export type SyncStatus = 'online' | 'offline' | 'syncing' | 'synced' | 'error'
 
-type State = { status: SyncStatus; pending: number; error: string | null }
+/** pending: writes not yet in the database (pending + failed); photos: of those, Breaker photos waiting to upload. */
+type State = { status: SyncStatus; pending: number; photos: number; error: string | null }
 
 // ── Queue singleton (created on first use, so tests can import this module) ──
 
@@ -21,7 +23,17 @@ export function collectorQueue(): OfflineQueue {
 // 401 = expired access token, fixed by the next token refresh.
 const isRetryableStatus = (status: number) => status === 0 || status === 401 || status === 408 || status === 429 || status >= 500
 
+/** Breaker photos: the private bucket, then the record (see photoUpload.ts). */
+const photoUploader: PhotoUploader = {
+  upload: (path, body, contentType) => supabase.storage.from(PHOTO_BUCKET).upload(path, body, { contentType, upsert: false }),
+  insertRecord: async (record) => {
+    const res = await supabase.from('node_photos').upsert(record as never, { onConflict: 'id', ignoreDuplicates: true })
+    return { error: res.error, status: res.status }
+  },
+}
+
 export async function executeWrite(write: QueuedWrite): Promise<WriteResult> {
+  if (write.type === 'upload_photo') return sendPhoto(photoUploader, write.record, write.image, write.preview)
   // Inserts use ON CONFLICT (id) DO NOTHING: replaying a write whose response
   // was lost leaves exactly one record.
   const insertOnce = { onConflict: 'id', ignoreDuplicates: true } as const
@@ -53,7 +65,7 @@ let _online = typeof navigator === 'undefined' ? true : navigator.onLine
 let _syncing = false
 let _justSynced = false
 let _lastError: string | null = null
-let _state: State = { status: 'online', pending: 0, error: null }
+let _state: State = { status: 'online', pending: 0, photos: 0, error: null }
 
 const listeners = new Set<() => void>()
 const syncedListeners = new Set<() => void>()
@@ -68,12 +80,13 @@ function computeState(): State {
   else if (_justSynced && unsynced === 0) status = 'synced'
   else status = 'online'
   const error = failed > 0 ? `${failed} change${failed !== 1 ? 's' : ''} failed to sync${_lastError ? `: ${_lastError}` : ''}` : null
-  return { status, pending: unsynced, error }
+  const photos = _userId ? collectorQueue().list(_userId).filter((a) => a.type === 'upload_photo').length : 0
+  return { status, pending: unsynced, photos, error }
 }
 
 function notify() {
   const next = computeState()
-  if (next.status !== _state.status || next.pending !== _state.pending || next.error !== _state.error) {
+  if (next.status !== _state.status || next.pending !== _state.pending || next.photos !== _state.photos || next.error !== _state.error) {
     _state = next
     listeners.forEach((fn) => fn())
   }

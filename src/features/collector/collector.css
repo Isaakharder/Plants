@@ -1174,3 +1174,131 @@
   display: inline-flex;
   flex-shrink: 0;
 }
+
+/* ── Camera-first Breaker (status picker) ─────────────────────────────── */
+
+.collector-app .breaker-capture {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.collector-app .breaker-capture-intro {
+  font-size: 13px;
+  color: var(--gray-700);
+  margin: 0;
+}
+
+.collector-app .breaker-capture-slots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.collector-app .breaker-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 150px;
+  padding: 8px;
+  border: 2px dashed var(--gray-300, #d1d5db);
+  border-radius: 10px;
+  background: var(--gray-50);
+  cursor: pointer;
+  text-align: center;
+  overflow: hidden;
+}
+
+.collector-app .breaker-slot--taken {
+  border-style: solid;
+  border-color: var(--green-600);
+  background: var(--white);
+}
+
+.collector-app .breaker-slot input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.collector-app .breaker-slot img {
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.collector-app .breaker-slot-empty {
+  font-size: 34px;
+}
+
+.collector-app .breaker-slot-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.collector-app .breaker-slot-hint {
+  font-size: 11px;
+  color: var(--gray-500);
+}
+
+.collector-app .breaker-capture-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collector-app .breaker-save {
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.collector-app .breaker-capture-secondary {
+  display: flex;
+  gap: 8px;
+}
+
+.collector-app .breaker-capture-secondary .btn {
+  flex: 1;
+}
+
+.collector-app .breaker-drafts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  flex-shrink: 0;
+}
+
+.collector-app .breaker-draft {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: #92400e;
+}
+
+.collector-app .breaker-discard {
+  align-self: center;
+  background: none;
+  border: none;
+  color: var(--gray-500);
+  font-size: 13px;
+  text-decoration: underline;
+  padding: 6px;
+}
+
+.collector-app .alert-info {
+  background: var(--green-50);
+  color: var(--green-700);
+  border: 1px solid var(--green-200);
+}

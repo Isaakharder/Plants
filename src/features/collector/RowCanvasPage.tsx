@@ -7,7 +7,7 @@
 //     deep link no longer shows "Variety / Row"
 //   * legacy CropLink statuses (GolfBall, Harvestable, …) are not carried over
 
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { duplicateExplanation, rowAttention, useNow, type NodeAttention } from './attention';
@@ -17,6 +17,9 @@ import { StatusIcon } from '../plantArt/StatusArt';
 import { useOrganization } from '../organization/OrganizationProvider';
 import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRowCanvas } from './api';
 import { pickerOptions } from './statusOptions';
+import { BreakerCapture } from './BreakerCapture';
+import { BREAKER_PHOTOS_ENABLED, type PreparedPhoto } from './photos';
+import { captureDrafts, draftKey, freshDrafts, type CaptureDraft } from './offline/captureDrafts';
 import { OfflineBanner } from './components/OfflineBanner';
 import { TextPromptModal } from './components/TextPromptModal';
 import { cropColorVar, type CanvasState } from './display';
@@ -127,6 +130,15 @@ export function RowCanvasPage() {
   const [statusPickerCtx, setStatusPickerCtx] = useState<{ stem: MeasurementStem; node: PlantNode; isNew?: boolean } | null>(null);
   const [attentionCtx, setAttentionCtx] = useState<{ stem: MeasurementStem; node: PlantNode } | null>(null);
   const [saving,   setSaving]   = useState(false);
+  // Camera-first Breaker: the picker shows the photo step instead of saving straight away.
+  const [breakerCapture, setBreakerCapture] = useState(false);
+  // Breaker photos taken on this phone but not saved yet (e.g. the page reloaded after the camera).
+  const [drafts, setDrafts] = useState<CaptureDraft[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void freshDrafts(captureDrafts(), userId).then(d => !cancelled && setDrafts(d)).catch(() => {});
+    return () => { cancelled = true; };
+  }, [userId, statusPickerCtx]);
   const [message,  setMessage]  = useState('');
 
   const [vegModal,     setVegModal]     = useState(false);
@@ -238,6 +250,28 @@ export function RowCanvasPage() {
     setStatusPickerCtx({ stem: activeStem, node: created, isNew: true });
   }
 
+  /** Breaker with its front and back photos (kept on the phone until they upload). */
+  async function handleSaveBreakerPhotos(photos: PreparedPhoto[], timing: { captureSeconds: number }) {
+    if (!statusPickerCtx) return;
+    setSaving(true);
+    try {
+      await actions.recordBreakerWithPhotos(statusPickerCtx.node, photos, timing);
+      // The photos are queued now: the draft is no longer needed.
+      await captureDrafts().delete(draftKey(userId, statusPickerCtx.node.id)).catch(() => {});
+      setDrafts(d => d.filter(x => x.nodeId !== statusPickerCtx.node.id));
+      const nodeLabel = statusPickerCtx.node.is_side_shoot
+        ? (statusPickerCtx.node.node_label ?? 'Shoot')
+        : `Node ${statusPickerCtx.node.node_number}`;
+      setMessage(`${nodeLabel}: ${STATUS_LABEL.BreakerFruit} · 2 photos saved on this phone${navigator.onLine ? '' : ' (they upload when the connection returns)'}`);
+      setBreakerCapture(false);
+      setStatusPickerCtx(null);
+    } catch (err: unknown) {
+      setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSaveStatus(status: NodeStatus) {
     if (!statusPickerCtx) return;
     setSaving(true);
@@ -247,6 +281,7 @@ export function RowCanvasPage() {
         ? (statusPickerCtx.node.node_label ?? 'Shoot')
         : `Node ${statusPickerCtx.node.node_number}`;
       setMessage(`${nodeLabel}: ${STATUS_LABEL[status]}`);
+      setBreakerCapture(false);
       setStatusPickerCtx(null);
     } catch (err: unknown) {
       setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
@@ -423,6 +458,36 @@ export function RowCanvasPage() {
           </button>
         </div>
       )}
+
+      {/* ── Breaker photos taken but not saved (e.g. the page reloaded after the camera) ── */}
+      {(() => {
+        const here = drafts
+          .map(d => ({ d, stemIndex: stems.findIndex(s => s.id === d.stemId), node: (nodesByStem[d.stemId] ?? []).find(n => n.id === d.nodeId) }))
+          .filter(x => x.stemIndex >= 0 && x.node);
+        if (here.length === 0) return null;
+        return (
+          <div className="breaker-drafts" role="status">
+            {here.map(({ d, stemIndex, node }) => (
+              <div key={d.key} className="breaker-draft">
+                <span>
+                  Unsaved Breaker photos: <strong>{node!.is_side_shoot ? (node!.node_label ?? 'Shoot') : `Node ${node!.node_number}`}</strong> · {stems[stemIndex].stem_name}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    setActiveStemIndex(stemIndex);
+                    setStatusPickerCtx({ stem: stems[stemIndex], node: node! });
+                    setBreakerCapture(true);
+                  }}
+                >
+                  Finish
+                </button>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* ── Flash message ── */}
       {message && (
@@ -751,7 +816,7 @@ export function RowCanvasPage() {
 
       {/* ── Status picker ── */}
       {statusPickerCtx && (
-        <div className="modal-overlay" onClick={() => handleCancelStatusPicker()}>
+        <div className="modal-overlay" onClick={() => { if (!saving) { setBreakerCapture(false); handleCancelStatusPicker(); } }}>
           <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
             <div className="modal-title">
               {pickerNodeLabel}
@@ -766,7 +831,8 @@ export function RowCanvasPage() {
                   className="form-control mobile-control"
                   value={statusPickerCtx.node.node_number}
                   onChange={e => handlePickerNodeSwitch(Number(e.target.value))}
-                  disabled={saving}
+                  // Photos belong to the node shown: go Back to change it.
+                  disabled={saving || breakerCapture}
                 >
                   {Array.from({ length: 100 }, (_, i) => i + 1).map(n => (
                     <option key={n} value={n}>Node {n}</option>
@@ -774,6 +840,22 @@ export function RowCanvasPage() {
                 </select>
               </div>
             )}
+            {breakerCapture ? (
+              <BreakerCapture
+                userId={userId}
+                nodeId={statusPickerCtx.node.id}
+                stemId={statusPickerCtx.stem.id}
+                nodeLabel={pickerNodeLabel}
+                saving={saving}
+                onSave={(photos, timing) => void handleSaveBreakerPhotos(photos, timing)}
+                onManual={() => {
+                  // Recorded without photos: any photos kept for this node are no longer wanted.
+                  void captureDrafts().delete(draftKey(userId, statusPickerCtx.node.id)).catch(() => {});
+                  void handleSaveStatus('BreakerFruit');
+                }}
+                onBack={() => setBreakerCapture(false)}
+              />
+            ) : (
             <div className="status-picker-grid">
               {(() => {
                 const currentRec = (statusesByStem[statusPickerCtx.stem.id] ?? []).find(
@@ -788,7 +870,12 @@ export function RowCanvasPage() {
                     key={opt.value}
                     className={`status-picker-btn${isActive ? ' active' : ''}`}
                     style={isActive ? { borderColor: tone.ring, background: tone.background } : {}}
-                    onClick={() => !saving && !opt.hidden && handleSaveStatus(opt.value)}
+                    onClick={() => {
+                      if (saving || opt.hidden) return;
+                      // Breaker: photograph front and back first (manual entry stays available).
+                      if (opt.value === 'BreakerFruit' && BREAKER_PHOTOS_ENABLED) setBreakerCapture(true);
+                      else void handleSaveStatus(opt.value);
+                    }}
                     disabled={saving || opt.hidden}
                     title={opt.hidden ? 'Current status. Not offered for new entries (Settings › Mobile status options).' : undefined}
                   >
@@ -799,8 +886,9 @@ export function RowCanvasPage() {
                 });
               })()}
             </div>
+            )}
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => handleCancelStatusPicker()}>Cancel</button>
+              <button className="btn btn-secondary" disabled={saving} onClick={() => { setBreakerCapture(false); handleCancelStatusPicker(); }}>Cancel</button>
             </div>
           </div>
         </div>

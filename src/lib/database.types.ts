@@ -235,6 +235,75 @@ export type SetHarvestCohortRow = {
   closing: ClosingCohort
 }
 
+// ---- Breaker photos (20261019000000_breaker_photos.sql) ----
+// Append-only. Images are in the private Storage bucket 'node-photos'.
+
+export type PhotoSide = 'front' | 'back'
+
+export type NodePhotoRow = {
+  id: string
+  organization_id: string
+  crop_id: string
+  plant_node_id: string
+  node_observation_id: string
+  side: PhotoSide
+  /** Where the node was, and the crop's ripe colour, at capture (filled in by the database). */
+  measurement_stem_id: string
+  measurement_row_id: string
+  node_number: number
+  node_label: string | null
+  is_side_shoot: boolean
+  target_colour: CropColor
+  year: number
+  week_number: number
+  storage_path: string
+  /** A small JPEG made on the phone (null when the phone couldn't make one). */
+  preview_path: string | null
+  content_type: string
+  bytes: number
+  width: number | null
+  height: number | null
+  sha256: string
+  taken_at: string
+  recorded_at: string
+  capture_meta: Record<string, unknown>
+  created_by: string | null
+}
+
+export type PhotoColourAnalysisRow = {
+  id: string
+  organization_id: string
+  crop_id: string
+  node_observation_id: string
+  front_photo_id: string | null
+  back_photo_id: string | null
+  kind: 'automatic' | 'manual' | 'correction'
+  method: string
+  model_version: string
+  target_colour: CropColor
+  front_percent: number | null
+  back_percent: number | null
+  combined_percent: number
+  confidence: number | null
+  details: unknown
+  supersedes_id: string | null
+  note: string | null
+  created_at: string
+  created_by: string | null
+}
+
+export type PhotoPairCorrectionRow = {
+  id: string
+  organization_id: string
+  crop_id: string
+  node_observation_id: string
+  kind: 'reassign_node' | 'unusable' | 'restore'
+  corrected_node_id: string | null
+  note: string | null
+  created_at: string
+  created_by: string | null
+}
+
 export type Database = {
   public: {
     Tables: {
@@ -357,6 +426,38 @@ export type Database = {
         Row: NodeAttentionRuleRow
         Insert: Pick<NodeAttentionRuleRow, 'organization_id' | 'rule_key' | 'max_days'>
         Update: Pick<NodeAttentionRuleRow, 'max_days'>
+        Relationships: []
+      }
+      node_photos: {
+        Row: NodePhotoRow
+        Insert: Pick<NodePhotoRow, 'id' | 'organization_id' | 'crop_id' | 'plant_node_id' | 'node_observation_id' | 'side' | 'storage_path' | 'content_type' | 'bytes' | 'sha256' | 'taken_at'> & {
+          preview_path?: string | null
+          width?: number | null
+          height?: number | null
+          capture_meta?: Record<string, unknown>
+        }
+        Update: never
+        Relationships: [
+          {
+            foreignKeyName: 'node_photos_node_observation_id_fkey'
+            columns: ['node_observation_id']
+            isOneToOne: false
+            referencedRelation: 'node_observations'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      photo_colour_analyses: {
+        Row: PhotoColourAnalysisRow
+        Insert: Pick<PhotoColourAnalysisRow, 'organization_id' | 'crop_id' | 'node_observation_id' | 'kind' | 'method' | 'model_version' | 'target_colour' | 'combined_percent'> &
+          Partial<Pick<PhotoColourAnalysisRow, 'id' | 'front_photo_id' | 'back_photo_id' | 'front_percent' | 'back_percent' | 'confidence' | 'supersedes_id' | 'note'>>
+        Update: never
+        Relationships: []
+      }
+      photo_pair_corrections: {
+        Row: PhotoPairCorrectionRow
+        Insert: Pick<PhotoPairCorrectionRow, 'organization_id' | 'crop_id' | 'node_observation_id' | 'kind'> & Partial<Pick<PhotoPairCorrectionRow, 'corrected_node_id' | 'note'>>
+        Update: never
         Relationships: []
       }
       mobile_status_options: {

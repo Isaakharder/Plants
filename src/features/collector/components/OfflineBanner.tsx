@@ -1,7 +1,7 @@
 import { retryAll, useNetworkStatus } from '../offline/networkStatus';
 
 export function OfflineBanner() {
-  const { status, pending, error } = useNetworkStatus();
+  const { status, pending, photos, error } = useNetworkStatus();
 
   if (status === 'online' && pending === 0) return null;
 
@@ -30,6 +30,9 @@ export function OfflineBanner() {
   } else if (pending > 0) {
     message = `${pending} change${pending !== 1 ? 's' : ''} pending sync`;
   }
+
+  // Photos take longest to send: say how many are still on this phone.
+  if (photos > 0 && !isSynced) message += ` · ${photos} photo${photos !== 1 ? 's' : ''} waiting to upload`;
 
   return (
     <div className={bannerClass} role="status" aria-live="polite">
