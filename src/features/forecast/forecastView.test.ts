@@ -54,9 +54,10 @@ describe('viewFromRun', () => {
     observed_cutoff: cutoff, recorded_cutoff: cutoff, locked_at: cutoff, locked_by: null, first_target_starts: cutoff, horizon: 8, marketing_weeks: 5,
     engine_version: 'stage-8w-test', confidence: 'experimental', confidence_reasons: ['Experimental: …'], model: { inventoryFate: result.inventoryFate },
     data_summary: result.dataSummary, sample_stems: 20, sample_stem_ids: result.sampleStemIds, scale: '1000' as unknown as number, case_weight_kg: null, marketing_sample_fruit: 1, marketing_crop_fruit: 1000, marketing_kg: 200,
+    basis: 'lifecycle', harvest_ready_share: null, breaker_breakdown: null, coverage: null,
   } satisfies ForecastRunRow
   const weeks: ForecastRunWeekRow[] = result.weeks.map((w) => ({
-    run_id: 'r', horizon: w.horizon, ...(({ year, week }) => ({ target_year: year, target_week: week }))(weekOfIndex(w.targetIndex)), window: w.window,
+    run_id: 'r', horizon: w.horizon, ...(({ year, week }) => ({ target_year: year, target_week: week }))(weekOfIndex(w.targetIndex)), window: w.window, available: true,
     sample_fruit: w.sampleFruit, sample_variance: w.sampleVariance, crop_fruit: w.cropFruit, components: w.components,
     expected_aborted: w.expectedAborted, expected_pruned: w.expectedPruned, afw_g: w.afwG, afw_source: w.afwSource, afw_kind: w.afwKind, kg: w.kg, cases: null,
   }))

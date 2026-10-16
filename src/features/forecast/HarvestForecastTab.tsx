@@ -24,9 +24,11 @@ import {
   type HistoricalReplay,
   type Preview,
 } from './api'
-import { MAX_ABS_BIAS, MIN_COVERAGE, MIN_SETTLED, type LiveAccuracy, type ScoredRun, type WeekStatus } from './engine/live'
+import { MAX_ABS_BIAS, MIN_COVERAGE, MIN_SETTLED, type ActualAccuracy, type ActualScoredRun, type LiveAccuracy, type ScoredRun, type WeekStatus } from './engine/live'
+import { LOW_COVERAGE } from './engine/breaker'
+import { ForecastSettings } from './ForecastSettings'
 import { FORECAST_WEEKS, MARKETING_WEEKS } from './engine/types'
-import { weekStartInstant } from './engine/weeks'
+import { weekLabel, weekStartInstant, weekIndex } from './engine/weeks'
 import {
   STATUS_LABEL,
   componentsTitle,
@@ -72,11 +74,15 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
   const [busy, setBusy] = useState<'preview' | 'lock' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showAudit, setShowAudit] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   // The sampling week a preview starts from: the latest week with any visit (this week once sampling has begun).
   const samplingRows = sampling.data ?? []
   const latestSampled = [...samplingRows].reverse().find((r) => r.visited_stems > 0 && r.iso_week <= now.week)
-  const originWeek = latestSampled?.iso_week ?? now.week
+  // Previews start from the latest sampled week, or an earlier one picked (e.g. the last full lifecycle week).
+  const sampledWeeks = samplingRows.filter((r) => r.visited_stems > 0 && r.iso_week <= now.week).map((r) => r.iso_week).reverse()
+  const [pickedWeek, setPickedWeek] = useState<number | null>(null)
+  const originWeek = pickedWeek ?? latestSampled?.iso_week ?? now.week
   const originRow = samplingRows.find((r) => r.iso_week === originWeek)
   const currentRow = samplingRows.find((r) => r.iso_week === now.week)
 
@@ -96,7 +102,7 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
     setBusy('preview')
     setError(null)
     try {
-      setPreview(await computePreview(crop, now.year, originWeek, live.data?.accuracy.validatedHorizons ?? []))
+      setPreview(await computePreview(crop, now.year, originWeek, live.data?.validatedByBasis))
       setSelectedRun(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -125,7 +131,10 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
     }
   }
 
-  const completedUnlocked = samplingRows.filter((r) => r.state === 'complete' && !runs.data?.some((run) => run.origin_year === now.year && run.origin_week === r.iso_week))
+  // Completed weeks without a locked forecast that can be locked: every sampled stem checked (the server enforces it too).
+  const completedUnlocked = samplingRows.filter(
+    (r) => r.state === 'complete' && r.checked_stems >= r.expected_stems && !runs.data?.some((run) => run.origin_year === now.year && run.origin_week === r.iso_week),
+  )
 
   return (
     <section className={wpd.section} aria-label="Harvest Forecast">
@@ -142,10 +151,33 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
               ))}
             </select>
           </label>
+          {sampledWeeks.length > 1 && (
+            <label className={`field ${wpd.yearControl}`}>
+              <span className="field-label">Preview from</span>
+              <select
+                className="input"
+                value={originWeek}
+                onChange={(e) => {
+                  setPickedWeek(Number(e.target.value) === sampledWeeks[0] ? null : Number(e.target.value))
+                  setPreview(null)
+                }}
+                title="The sampling week a generated forecast starts from"
+              >
+                {sampledWeeks.map((w) => (
+                  <option key={w} value={w}>
+                    W{w}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {/* Re-mounts when the saved value changes, so the field shows it. */}
           <CaseWeight key={String(crop.case_weight_kg)} crop={crop} />
         </div>
         <div className={wpd.controlButtons}>
+          <button type="button" className={`button button-secondary ${wpd.helpButton}`} onClick={() => setShowSettings(true)} aria-haspopup="dialog">
+            Forecast settings
+          </button>
           <button type="button" className={`button button-secondary ${wpd.helpButton}`} onClick={() => setShowAudit(true)} disabled={!view} aria-haspopup="dialog">
             How it was made
           </button>
@@ -181,15 +213,18 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
           <ForecastTable
             view={view}
             scored={view.runId ? live.data?.scored.find((s) => s.run.id === view.runId) : undefined}
+            actual={view.runId ? live.data?.actual.runs.find((s) => s.run.id === view.runId) : undefined}
             accuracy={live.data?.accuracy}
+            actualAccuracy={live.data?.actual}
             onBackToLocked={preview && runs.data?.length ? () => { setPreview(null); setSelectedRun(null) } : undefined}
           />
           <Snapshots runs={runs.data ?? []} shown={view.runId} onShow={(id) => { setSelectedRun(id); setPreview(null) }} />
         </>
       )}
-      {!runs.isPending && <AccuracyPanel crop={crop} accuracy={live.data?.accuracy} />}
+      {!runs.isPending && <AccuracyPanel crop={crop} accuracy={live.data?.accuracy} actual={live.data?.actual} />}
       {live.error && <div className={styles.error}>Couldn’t score forecasts: {live.error.message}</div>}
       {view && <AuditDialog open={showAudit} onClose={() => setShowAudit(false)} view={view} />}
+      {showSettings && <ForecastSettings crop={crop} open onClose={() => setShowSettings(false)} />}
     </section>
   )
 }
@@ -200,6 +235,7 @@ const JOB_TEXT: Record<string, (job: { last_error: string | null; next_attempt_a
   waiting_for_sync: (j) => `waiting for the phone to sync before locking: ${j.last_error ?? ''}`,
   retry: (j) => `the server will retry at ${dateTime(j.next_attempt_at)} (${j.last_error ?? 'error'})`,
   failed: (j) => `the server couldn’t lock it: ${j.last_error ?? 'unknown error'}`,
+  incomplete: (j) => `not locked: ${j.last_error ?? 'not every sampled stem was checked'} Check the remaining stems and mark sampling complete again.`,
 }
 
 function LockStatus(props: {
@@ -218,10 +254,13 @@ function LockStatus(props: {
       <span>
         <strong>W{week} sampling:</strong>{' '}
         {current?.state === 'complete'
-          ? `complete${current.completed_at ? ` (${dateTime(current.completed_at)})` : ''}`
+          ? `complete${current.completed_at ? ` (${dateTime(current.completed_at)})` : ''} · ${current.checked_stems} of ${current.expected_stems} stems checked`
           : current && current.visited_stems > 0
             ? `in progress · ${current.checked_stems} of ${current.expected_stems} stems checked`
             : 'not started'}
+        {current && current.expected_stems > 0 && current.checked_stems < current.expected_stems && (
+          <span className={styles.incompleteNote}> · locks automatically only when all {current.expected_stems} sampled stems are checked</span>
+        )}
       </span>
       <span>
         <strong>Official forecast:</strong>{' '}
@@ -257,40 +296,77 @@ const pctSigned = (x: number | null) => (x === null ? '—' : `${x >= 0 ? '+' : 
 function ForecastTable({
   view,
   scored,
+  actual,
   accuracy,
+  actualAccuracy,
   onBackToLocked,
 }: {
   view: ForecastView
-  /** The locked forecast scored against what was recorded since (locked forecasts only). */
+  /** The locked forecast scored against what was recorded since (locked lifecycle forecasts only). */
   scored?: ScoredRun
+  /** The locked forecast against the actual kg entered (locked forecasts). */
+  actual?: ActualScoredRun
   accuracy?: LiveAccuracy
+  actualAccuracy?: ActualAccuracy
   onBackToLocked?: () => void
 }) {
   const marketing = view.weeks.filter((w) => w.window === 'marketing')
   const outlook = view.weeks.filter((w) => w.window === 'outlook')
   const showCases = view.caseWeightKg !== null
   const observed = Boolean(scored)
-  const columns = 5 + (showCases ? 1 : 0) + (observed ? 4 : 0)
+  const withActual = Boolean(actual)
+  const columns = 5 + (showCases ? 1 : 0) + (observed ? 4 : 0) + (withActual ? 2 : 0)
   const scoredWeek = (h: number) => scored?.weeks.find((w) => w.horizon === h)
-  const horizonStatus = (h: number) => accuracy?.horizons.find((a) => a.horizon === h)
+  const actualWeek = (h: number) => actual?.weeks.find((w) => w.horizon === h)
+  const horizonStatus = (h: number) =>
+    view.basis === 'breaker_only' ? actualAccuracy?.horizons.find((a) => a.basis === 'breaker_only' && a.horizon === h) : accuracy?.horizons.find((a) => a.horizon === h)
+  const breakerOnly = view.basis === 'breaker_only'
 
   const row = (w: ForecastView['weeks'][number]) => {
+    if (!w.available) {
+      return (
+        <tr key={w.horizon} className={`${w.window === 'outlook' ? styles.outlookRow : ''} ${styles.unavailableRow}`} title={w.unavailableReason ?? undefined}>
+          <th scope="row">
+            W{w.week}
+            <span className={styles.ahead}>+{w.horizon}</span>
+          </th>
+          <td colSpan={columns - 1} className={styles.unavailable}>
+            Not available{breakerOnly ? ' · needs full lifecycle data' : ''}
+          </td>
+        </tr>
+      )
+    }
     const o = scoredWeek(w.horizon)
+    const a = actualWeek(w.horizon)
     const hs = horizonStatus(w.horizon)
     const block = o?.status === 'unreliable' ? scored?.units.find((u) => u.block && u.weeks.includes(o.targetIndex)) : undefined
+    const afwNeeded = w.afwG === null
     return (
-      <tr key={w.horizon} className={w.window === 'outlook' ? styles.outlookRow : undefined} title={componentsTitle(w, view.scale)}>
+      <tr key={w.horizon} className={w.window === 'outlook' ? styles.outlookRow : undefined} title={componentsTitle(w, view.scale, view.basis)}>
         <th scope="row">
           W{w.week}
           <span className={styles.ahead}>+{w.horizon}</span>
         </th>
         <td>{formatCount(w.cropFruit)}</td>
-        <td title={w.afwSource ?? undefined}>
-          {w.afwG === null ? '—' : w.afwG.toFixed(0)}
+        <td title={w.afwSource ?? 'No AFW entered for this variety: enter one in Weekly Plant Data to calculate kg and cases.'}>
+          {afwNeeded ? <span className={styles.afwNeeded}>AFW needed</span> : w.afwG!.toFixed(0)}
           {w.afwKind === 'grower' && <span className={styles.grower}>Grower</span>}
         </td>
-        <td className={styles.kg}>{formatCount(w.kg)}</td>
-        {showCases && <td>{formatCount(w.cases)}</td>}
+        <td className={styles.kg}>{afwNeeded ? '—' : formatCount(w.kg)}</td>
+        {showCases && <td>{afwNeeded ? '—' : formatCount(w.cases)}</td>}
+        {withActual && (
+          <>
+            <td className={styles.observed} title={a?.status === 'awaiting_actual' ? 'Enter the actual kg in Weekly Plant Data' : undefined}>
+              {a?.actualKg !== null && a?.actualKg !== undefined ? formatCount(a.actualKg) : a?.status === 'awaiting_actual' ? 'Awaiting' : '—'}
+            </td>
+            <td
+              className={styles.observed}
+              title={a?.impliedShare != null ? `The harvest-ready share that would have matched: ${Math.round(100 * a.impliedShare)}%` : a?.status === 'not_scorable' ? 'No forecast kg (no AFW) or no harvest: not scored' : undefined}
+            >
+              {a?.status === 'scored' ? pctSigned(a.error) : a?.status === 'not_scorable' ? 'Not scorable' : '—'}
+            </td>
+          </>
+        )}
         {observed && (
           <>
             <td className={styles.observed}>{o?.observedFruit === null || o?.observedFruit === undefined ? '—' : formatCount(o.observedFruit * view.scale)}</td>
@@ -309,7 +385,7 @@ function ForecastTable({
         )}
         <td>
           {hs?.status === 'validated' ? (
-            <span className={styles.validated} title={`Validated by ${hs.fruit.n} live forecasts`}>
+            <span className={styles.validated} title={`Validated by ${'fruit' in hs ? hs.fruit.n : hs.kg.n} live forecasts`}>
               Validated
             </span>
           ) : (
@@ -331,7 +407,13 @@ function ForecastTable({
           <h2 className={styles.title}>
             Forecast from W{view.originWeek} sampling
             <span className={`${styles.badge} ${styles[`badge_${view.status}`]}`}>{STATUS_LABEL[view.status]}</span>
+            <span className={`${styles.badge} ${styles.badge_basis}`}>{breakerOnly ? 'Next week from Breakers' : 'Full lifecycle · 8 weeks'}</span>
             {view.confidence.level === 'experimental' && <span className={`${styles.badge} ${styles.badge_experimental}`}>Experimental</span>}
+            {view.coverage.visited !== null && view.coverage.visited < view.coverage.expected && (
+              <span className={`${styles.badge} ${styles.badge_incomplete}`}>
+                Incomplete walkthrough{view.coverage.share !== null && view.coverage.share < LOW_COVERAGE ? ' · low coverage' : ''}
+              </span>
+            )}
           </h2>
           <p className={styles.subtitle}>
             {statusExplanation(view)} {view.source === 'locked' ? 'Locked' : 'Computed'} {dateTime(view.at)} · records observed to {dateTime(view.observedCutoff)} ·{' '}
@@ -344,6 +426,8 @@ function ForecastTable({
           </button>
         )}
       </div>
+
+      {breakerOnly && view.breakers && <BreakerSummary view={view} />}
 
       {view.confidence.reasons.length > 0 && (
         <ul className={styles.reasons}>
@@ -365,6 +449,16 @@ function ForecastTable({
             </th>
             <th scope="col">kg</th>
             {showCases && <th scope="col">Cases ({view.caseWeightKg} kg)</th>}
+            {withActual && (
+              <>
+                <th scope="col" className={styles.observedHead} title="Actual kilograms harvested that week, entered in Weekly Plant Data (the newest entry)">
+                  Actual kg
+                </th>
+                <th scope="col" className={styles.observedHead} title="Forecast kg ÷ actual kg − 1. Positive = forecast too high.">
+                  vs actual
+                </th>
+              </>
+            )}
             {observed && (
               <>
                 <th scope="col" className={styles.observedHead} title="Peppers recorded Harvested that week on this forecast’s sampled stems, scaled to the crop">
@@ -389,17 +483,31 @@ function ForecastTable({
           {marketing.map(row)}
           <tr className={styles.totalRow}>
             <th scope="row">Weeks 1–{MARKETING_WEEKS} total</th>
-            <td>{formatCount(view.marketing.cropFruit)}</td>
-            <td />
-            <td className={styles.kg}>{formatCount(view.marketing.kg)}</td>
-            {showCases && <td>{formatCount(view.marketing.cases)}</td>}
+            {view.marketing.cropFruit === null ? (
+              <td colSpan={2 + (showCases ? 1 : 0) + 1} className={styles.unavailable}>
+                Not available{breakerOnly ? ': only next week is forecast while Breakers only are recorded' : ''}
+              </td>
+            ) : (
+              <>
+                <td>{formatCount(view.marketing.cropFruit)}</td>
+                <td />
+                <td className={styles.kg}>{formatCount(view.marketing.kg)}</td>
+                {showCases && <td>{formatCount(view.marketing.cases)}</td>}
+              </>
+            )}
+            {withActual && (
+              <>
+                <td />
+                <td />
+              </>
+            )}
             {observed && (
               <>
                 <td>{observedFive ? formatCount(observedFive.reduce((a, w) => a + (w.observedFruit ?? 0), 0) * view.scale) : '—'}</td>
                 <td>{observedFive && observedFive.every((w) => w.observedKg !== null) ? formatCount(observedFive.reduce((a, w) => a + w.observedKg!, 0)) : '—'}</td>
                 <td>
                   {observedFive
-                    ? pctSigned(view.marketing.cropFruit / Math.max(1, observedFive.reduce((a, w) => a + (w.observedFruit ?? 0), 0) * view.scale) - 1)
+                    ? pctSigned((view.marketing.cropFruit ?? 0) / Math.max(1, observedFive.reduce((a, w) => a + (w.observedFruit ?? 0), 0) * view.scale) - 1)
                     : '—'}
                 </td>
                 <td />
@@ -429,8 +537,35 @@ function ForecastTable({
 
 const pct = (x: number | null) => (x === null ? '—' : `${Math.round(100 * x)}%`)
 
+/** How a Breakers-only forecast counted this week's Breakers (each pepper once). */
+function BreakerSummary({ view }: { view: ForecastView }) {
+  const b = view.breakers!
+  const share = view.harvestReadyShare ?? 0
+  const prev = weekLabel(weekIndex(view.originYear, view.originWeek) - 1)
+  return (
+    <div className={styles.breakerSummary}>
+      <p>
+        <strong>{b.total.toLocaleString('en-US')} Breakers</strong> on {view.coverage.visited ?? view.sampleStems} of {view.coverage.expected} sampled stems in W{view.originWeek}:{' '}
+        {b.new} new, {b.carriedOver} still Breaker from {prev}, {b.firstSeen} first seen (stem not checked in {prev}). Each pepper is counted once.
+      </p>
+      <p>
+        Next week: {Math.round(100 * share)}% harvest-ready share (experimental) × {b.total} Breakers × {view.scale.toFixed(0)} (picking stems ÷ stems checked).{' '}
+        About {formatCount(b.possibleLaterCrop)} peppers may be picked later; they count again only if recorded as Breaker next Friday.
+      </p>
+      {b.notRecordedAgain > 0 && (
+        <p>
+          {b.notRecordedAgain} of {prev}’s Breakers weren’t recorded again on stems checked this week: they are out of the Breaker inventory (not counted as
+          harvested; actual kg is entered separately).
+        </p>
+      )}
+    </div>
+  )
+}
+
+const BASIS_NAME = { lifecycle: 'Full lifecycle', breaker_only: 'Breakers only' } as const
+
 /** Live accuracy by week ahead (official forecasts only) and, separately, the historical replay. */
-function AccuracyPanel({ crop, accuracy }: { crop: Crop; accuracy: LiveAccuracy | undefined }) {
+function AccuracyPanel({ crop, accuracy, actual }: { crop: Crop; accuracy: LiveAccuracy | undefined; actual: ActualAccuracy | undefined }) {
   const [replay, setReplay] = useState<HistoricalReplay | null | 'none'>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -440,6 +575,13 @@ function AccuracyPanel({ crop, accuracy }: { crop: Crop; accuracy: LiveAccuracy 
   return (
     <div className={styles.card}>
       <h2 className={styles.title}>Forecast accuracy</h2>
+      {actual && <ActualAccuracyTable actual={actual} metricCell={(m) => (m.n === 0 ? '—' : `${pct(m.wape)} · ${pctSigned(m.bias)}`)} />}
+      <h3 className={styles.replayTitle}>Against recorded harvests (full lifecycle forecasts)</h3>
+      {accuracy && accuracy.officialRuns + accuracy.lateRuns === 0 && (
+        <p className={styles.fate}>No full lifecycle forecast locked yet for {crop.name}: Breakers-only forecasts are scored against actual kg above.</p>
+      )}
+      {(!accuracy || accuracy.officialRuns + accuracy.lateRuns > 0) && (
+      <>
       <p className={styles.subtitle}>
         Live: each official forecast against the peppers later recorded Harvested on its sampled stems. Error = WAPE · bias (positive = forecast too high).
         Unsampled or flagged weeks are scored together with the following week, never as zero. Late forecasts aren’t counted
@@ -511,6 +653,8 @@ function AccuracyPanel({ crop, accuracy }: { crop: Crop; accuracy: LiveAccuracy 
         A week ahead is validated only with at least {MIN_SETTLED} settled official forecasts, bias within ±{Math.round(100 * MAX_ABS_BIAS)}%, sampling coverage of at
         least {Math.round(100 * MIN_COVERAGE)}% and error within its goal.
       </p>
+      </>
+      )}
 
       <div className={styles.replay}>
         <h3 className={styles.replayTitle}>
@@ -574,17 +718,79 @@ function AccuracyPanel({ crop, accuracy }: { crop: Crop; accuracy: LiveAccuracy 
   )
 }
 
-function Snapshots({ runs, shown, onShow }: { runs: { id: string; origin_year: number; origin_week: number; kind: string; locked_at: string; marketing_kg: number | null; confidence: string }[]; shown: string | null; onShow: (id: string) => void }) {
+/** Official forecasts against the actual kg entered, by basis and week ahead; the implied harvest-ready share for Breakers only. */
+function ActualAccuracyTable({ actual, metricCell }: { actual: ActualAccuracy; metricCell: (m: { wape: number | null; bias: number | null; n: number }) => string }) {
+  const statusLabel = { collecting: 'Collecting', validated: 'Validated', not_validated: 'Not validated' } as const
+  const shares = actual.runs
+    .filter((r) => r.run.kind === 'official' && r.run.basis === 'breaker_only')
+    .flatMap((r) => r.weeks.filter((w) => w.status === 'scored' && w.impliedShare !== null).map((w) => w.impliedShare!))
+  const shown = actual.horizons.filter((h) => h.basis === 'breaker_only' || h.kg.n > 0)
+  return (
+    <>
+      <h3 className={styles.replayTitle}>Against actual harvested kg</h3>
+      <p className={styles.subtitle}>
+        Each official forecast’s kg against the actual kg entered in Weekly Plant Data for that week (the newest entry; corrections count, the forecast never
+        changes). Error = WAPE · bias (positive = forecast too high). Weeks without an actual entry wait; forecasts without kg (no AFW) aren’t scored.
+      </p>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th scope="col">Basis</th>
+            <th scope="col">Week ahead</th>
+            <th scope="col">Goal</th>
+            <th scope="col">kg error</th>
+            <th scope="col">Scored</th>
+            <th scope="col" title="Mean share of sampled stems checked in the forecasts’ sampling weeks">Coverage</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((h) => (
+            <tr key={`${h.basis}:${h.horizon}`}>
+              <th scope="row">{BASIS_NAME[h.basis]}</th>
+              <td>+{h.horizon}</td>
+              <td>{pct(h.goal)}</td>
+              <td>{metricCell(h.kg)}</td>
+              <td>{h.kg.n}</td>
+              <td>{pct(h.coverage)}</td>
+              <td>
+                <span className={h.status === 'validated' ? styles.validated : styles.lowConfidence} title={h.reasons.join('; ') || undefined}>
+                  {statusLabel[h.status]}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className={styles.fate}>
+        {shares.length
+          ? `Implied harvest-ready share (Breakers only, ${shares.length} scored week${shares.length === 1 ? '' : 's'}): mean ${pct(shares.reduce((a, b) => a + b, 0) / shares.length)}, range ${pct(Math.min(...shares))}–${pct(Math.max(...shares))}. A diagnostic: the share changes only when you change it in Forecast settings.`
+          : 'Implied harvest-ready share: appears once Breakers-only forecasts are scored against actual kg.'}
+      </p>
+    </>
+  )
+}
+
+function Snapshots({
+  runs,
+  shown,
+  onShow,
+}: {
+  runs: { id: string; origin_year: number; origin_week: number; kind: string; locked_at: string; marketing_kg: number | null; confidence: string; basis: 'lifecycle' | 'breaker_only' }[]
+  shown: string | null
+  onShow: (id: string) => void
+}) {
   if (runs.length === 0) return null
   return (
     <div className={styles.card}>
       <h2 className={styles.title}>Locked forecasts</h2>
-      <p className={styles.subtitle}>Every forecast locked for this variety. They are never recalculated; comparisons with observed harvests come next.</p>
+      <p className={styles.subtitle}>Every forecast locked for this variety. They are never recalculated: each is compared with the actual kg entered (and full lifecycle forecasts also with recorded harvests).</p>
       <table className={styles.table}>
         <thead>
           <tr>
             <th scope="col">Sampling week</th>
             <th scope="col">Status</th>
+            <th scope="col">Basis</th>
             <th scope="col">Locked</th>
             <th scope="col">Weeks 1–5 kg</th>
             <th scope="col">Confidence</th>
@@ -598,8 +804,9 @@ function Snapshots({ runs, shown, onShow }: { runs: { id: string; origin_year: n
                 W{r.origin_week} {r.origin_year}
               </th>
               <td>{r.kind === 'official' ? 'Official' : 'Late'}</td>
+              <td>{BASIS_NAME[r.basis]}</td>
               <td>{dateTime(r.locked_at)}</td>
-              <td className={styles.kg}>{formatCount(r.marketing_kg)}</td>
+              <td className={styles.kg}>{r.basis === 'breaker_only' ? 'next week only' : formatCount(r.marketing_kg)}</td>
               <td>{r.confidence === 'experimental' ? 'Experimental' : 'Standard'}</td>
               <td>
                 <button type="button" className="button button-link" onClick={() => onShow(r.id)} disabled={r.id === shown}>
@@ -622,6 +829,13 @@ function AuditDialog({ open, onClose, view }: { open: boolean; onClose: () => vo
         <dt>Forecast</dt>
         <dd>
           {STATUS_LABEL[view.status]} from W{view.originWeek} {view.originYear} sampling · engine {view.engineVersion}
+        </dd>
+        <dt>Basis</dt>
+        <dd>
+          {view.basis === 'breaker_only'
+            ? `Breakers only: next week = ${Math.round(100 * (view.harvestReadyShare ?? 0))}% of the week’s Breakers (experimental harvest-ready share). Later weeks aren’t available.`
+            : 'Full lifecycle: the eight-week stage forecast.'}{' '}
+          Stems checked or recorded: {view.coverage.visited ?? '—'} of {view.coverage.expected}.
         </dd>
         <dt>Data cutoffs</dt>
         <dd>

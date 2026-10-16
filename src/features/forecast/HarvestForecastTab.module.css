@@ -284,3 +284,78 @@
   font-size: 12px;
   color: var(--text-muted);
 }
+
+/* ── Breakers-only forecasts (2026-10-16) ── */
+.badge_basis {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.badge_incomplete {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.unavailableRow th {
+  color: var(--text-muted);
+}
+
+.unavailable {
+  color: var(--text-muted);
+  font-style: italic;
+  text-align: left;
+}
+
+.afwNeeded {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.incompleteNote {
+  color: var(--danger);
+}
+
+.breakerSummary {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  font-size: var(--text-sm);
+}
+
+.breakerSummary p {
+  margin: 0 0 4px;
+}
+
+.breakerSummary p:last-child {
+  margin-bottom: 0;
+}
+
+.settingsTimeline,
+.settingsHistory {
+  margin: 4px 0 12px;
+  padding-left: 18px;
+  font-size: var(--text-sm);
+}
+
+.settingsForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.settingsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settingsRow :global(.field) {
+  min-width: 110px;
+}

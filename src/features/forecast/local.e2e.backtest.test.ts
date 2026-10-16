@@ -25,7 +25,7 @@ vi.mock('../../lib/supabase', () => ({
 }))
 
 describe.skipIf(!local)('Harvest Forecast against the local stack', () => {
-  it('previews; the server worker waits for synced checks, locks once and never overwrites', { timeout: 120_000 }, async () => {
+  it('previews the lifecycle forecast; the server worker waits for synced checks and never locks an incomplete walkthrough', { timeout: 120_000 }, async () => {
     const { supabase } = await import('../../lib/supabase')
     const api = await import('./api')
     const { processLockJobs } = await import('./server/lockWorker')
@@ -56,46 +56,29 @@ describe.skipIf(!local)('Harvest Forecast against the local stack', () => {
     const waiting = (await supabase.from('forecast_lock_jobs').select('*').eq('sampling_event_id', event.id).single()).data!
     expect(waiting.status).toBe('waiting_for_sync')
 
-    // The checks sync; the worker (next round, fast-forwarded here) locks the official forecast.
+    // The checks sync, but only 2 of the 56 sampled stems were checked: no official forecast (20261024: every sampled stem must be checked).
     await supabase.from('stem_visits').insert(
       stems.map((s) => ({ id: crypto.randomUUID(), organization_id: crop.organization_id, crop_id: crop.id, measurement_stem_id: s.id, year: now.year, week_number: now.week, checked: true, observed_at: event.observed_at })),
     )
-    expect((await api.lockReadiness(event.id)).state).toBe('ready')
+    const readiness = await api.lockReadiness(event.id)
+    expect(readiness.state).toBe('incomplete')
+    expect(readiness.detail).toMatch(/2 of the \d+ sampled stems were checked/)
     await fastForward(event.id)
-    const round = await processLockJobs(service)
-    expect(round).toMatchObject({ locked: 1, failed: 0 })
-    const job = (await supabase.from('forecast_lock_jobs').select('*').eq('sampling_event_id', event.id).single()).data!
-    expect(job).toMatchObject({ status: 'done', run_kind: 'official' })
-    const first = { run_id: job.run_id! }
-
-    // Again (a retry, a second worker, a browser): the stored run is returned, nothing new.
-    const completion = { id: event.id, year: event.year, week: event.week_number, observedAt: event.observed_at, recordedAt: event.recorded_at }
-    const again = await api.lockForecast(crop, completion)
-    expect(again).toMatchObject({ run_id: first.run_id, stored_now: false })
-    expect(await processLockJobs(service)).toMatchObject({ locked: 0, alreadyLocked: 0, failed: 0 })
-    expect((await supabase.from('forecast_runs').select('id').eq('crop_id', crop.id).eq('origin_week', now.week)).data).toHaveLength(1)
-
-    const run = (await supabase.from('forecast_runs').select('*').eq('id', first.run_id).single()).data!
-    expect(run.confidence).toBe('experimental')
-    expect((run.data_summary as { training: { legacy: number } }).training.legacy).toBeGreaterThan(1000)
-    const weeks = (await supabase.from('forecast_run_weeks').select('*').eq('run_id', first.run_id).order('horizon')).data!
-    expect(weeks.map((w) => w.window)).toEqual(['marketing', 'marketing', 'marketing', 'marketing', 'marketing', 'outlook', 'outlook', 'outlook'])
-    expect(Number(run.marketing_kg)).toBeCloseTo(weeks.slice(0, 5).reduce((a, w) => a + Number(w.kg), 0), 3)
-
-    // Immutable from the client.
-    const upd = await supabase.from('forecast_runs').update({ kind: 'late' } as never).eq('id', first.run_id)
-    expect(upd.error).not.toBeNull()
-
-    // Grower AFW: weeks with an AFW typed in Weekly Plant Data use it, labelled; the others use the model's estimate.
-    expect(weeks.some((w) => w.afw_kind === 'grower')).toBe(true)
-    expect(weeks.filter((w) => w.afw_kind === 'grower').every((w) => (w.afw_source ?? '').startsWith('Grower AFW'))).toBe(true)
+    expect(await processLockJobs(service)).toMatchObject({ locked: 0, failed: 0 })
+    expect((await supabase.from('forecast_lock_jobs').select('status').eq('sampling_event_id', event.id).single()).data!.status).toBe('incomplete')
+    expect((await supabase.from('forecast_runs').select('id').eq('crop_id', crop.id).eq('origin_week', now.week)).data).toHaveLength(0)
   })
 
   it('scores a locked forecast against later records, without changing it; a past week locks as late', { timeout: 180_000 }, async () => {
     const { supabase } = await import('../../lib/supabase')
     const api = await import('./api')
     const crop = (await supabase.from('crops').select('*').eq('name', 'Mathieu').single()).data!
-    // Completing W38 now is long after W39 began: late.
+    // Every stem visited in W38 checked (as on that Friday), then completing W38 now, long after W39 began: late.
+    const visited = execFileSync('/opt/homebrew/opt/postgresql@17/bin/psql', ['-h', '127.0.0.1', '-p', '54329', '-U', 'postgres', '-d', 'plants', '-qAtc',
+      `select string_agg(distinct n.measurement_stem_id::text, ',') from public.node_observations o join public.plant_nodes n on n.id = o.plant_node_id where o.crop_id = '${crop.id}' and o.year = 2026 and o.week_number = 38`]).toString().trim().split(',')
+    await supabase.from('stem_visits').insert(
+      visited.map((stem) => ({ id: crypto.randomUUID(), organization_id: crop.organization_id, crop_id: crop.id, measurement_stem_id: stem, year: 2026, week_number: 38, checked: true, observed_at: '2026-09-18T16:00:00Z' })),
+    )
     const event = (await supabase
       .from('sampling_week_events')
       .insert({ id: crypto.randomUUID(), organization_id: crop.organization_id, crop_id: crop.id, year: 2026, week_number: 38, event: 'completed', observed_at: new Date().toISOString(), note: 'local e2e' })

@@ -6,7 +6,20 @@ import { greenhouseIsoWeek, useGreenhouseWeek } from '../collector/greenhouseWee
 import { useCrops } from '../crops/api'
 import { sortCrops, stemsPerM2 } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
-import { useSamplingWeeks, useSaveWeeklyHarvestAfw, useSetHarvestCohorts, useWeeklyFruitLoss, useWeeklyHarvestAfw, useWeeklyPlantData, type AfwChange } from './api'
+import { Dialog } from '../../components/Dialog'
+import {
+  parseActualKg,
+  useSamplingWeeks,
+  useSaveWeeklyHarvestActual,
+  useSaveWeeklyHarvestAfw,
+  useSetHarvestCohorts,
+  useWeeklyFruitLoss,
+  useWeeklyHarvestActuals,
+  useWeeklyHarvestAfw,
+  useWeeklyPlantData,
+  type ActualWeek,
+  type AfwChange,
+} from './api'
 import {
   LADDER_AGES,
   AFW_MAX_G,
@@ -71,6 +84,8 @@ export function WeeklyPlantDataTab() {
   const sampling = useSamplingWeeks(crop?.id, year)
   const afw = useWeeklyHarvestAfw(crop?.id, year)
   const saveAfw = useSaveWeeklyHarvestAfw(organization.id, crop?.id, year)
+  const actuals = useWeeklyHarvestActuals(crop?.id, year)
+  const [actualWeek, setActualWeek] = useState<number | null>(null)
   // Typed but unsaved AFWs, per crop · year · harvest week (text as typed).
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [justSaved, setJustSaved] = useState(false)
@@ -278,6 +293,7 @@ export function WeeklyPlantDataTab() {
                 ))}
                 <th scope="col" className={styles.afwHead} title="Harvest-week AFW: average grams per pepper harvested that week">AFW g</th>
                 <th scope="col" className={styles.pickedHead} title="Estimated kg picked that calendar week: Harvested/m² × crop area × that week's AFW">Picked kg</th>
+                <th scope="col" className={styles.actualHead} title="Actual kilograms harvested that week, entered by hand (click to enter or correct; every entry is kept)">Actual kg</th>
                 <th scope="col" className={styles.lossHead} title="Fruit lost that calendar week ÷ fruit on the plants at the start of the week">Fruit Loss %</th>
               </tr>
             </thead>
@@ -317,6 +333,7 @@ export function WeeklyPlantDataTab() {
                     areaM2={crop.area_m2}
                     timing={weekTiming(year, w.iso_week, today)}
                   />
+                  <ActualTd week={w.iso_week} actual={actuals.data?.get(w.iso_week)} onOpen={() => setActualWeek(w.iso_week)} />
                   <FruitLossTd week={w.iso_week} row={fruitLossRows.get(w.iso_week)} />
                 </tr>
               ))}
@@ -325,8 +342,130 @@ export function WeeklyPlantDataTab() {
         </div>
         </>
       )}
-
+      {actualWeek !== null && crop && year !== undefined && (
+        <ActualDialogHost
+          key={`${crop.id}:${year}:${actualWeek}`}
+          organizationId={organization.id}
+          cropId={crop.id}
+          cropName={crop.name}
+          year={year}
+          week={actualWeek}
+          actual={actuals.data?.get(actualWeek)}
+          onClose={() => setActualWeek(null)}
+        />
+      )}
     </section>
+  )
+}
+
+function ActualDialogHost(props: { organizationId: string; cropId: string; cropName: string; year: number; week: number; actual: ActualWeek | undefined; onClose: () => void }) {
+  const save = useSaveWeeklyHarvestActual(props.organizationId, props.cropId, props.year)
+  return (
+    <ActualDialog
+      cropName={props.cropName}
+      year={props.year}
+      week={props.week}
+      actual={props.actual}
+      saving={save.isPending}
+      error={save.error ? save.error.message : null}
+      onClose={props.onClose}
+      onSave={(kg, note) => save.mutate({ week: props.week, kg, note }, { onSuccess: props.onClose })}
+    />
+  )
+}
+
+/** The actual kg in effect for a week; opens the entry dialog. */
+function ActualTd({ week, actual, onOpen }: { week: number; actual: ActualWeek | undefined; onOpen: () => void }) {
+  const corrected = (actual?.history.length ?? 0) > 1
+  return (
+    <td className={styles.actualCell}>
+      <button
+        type="button"
+        className={styles.actualButton}
+        onClick={onOpen}
+        aria-label={`Actual harvested kg W${week}${actual?.kg != null ? `: ${formatInteger(Math.round(actual.kg))} kg` : ': not entered'}`}
+        title={actual?.history.length ? `${actual.history.length} entr${actual.history.length === 1 ? 'y' : 'ies'}; click for the history` : 'Enter the actual kg harvested'}
+      >
+        {actual?.kg != null ? formatInteger(Math.round(actual.kg)) : '+'}
+        {corrected && <span className={styles.actualCorrected} aria-hidden="true">✎</span>}
+      </button>
+    </td>
+  )
+}
+
+/** Enter, correct or clear one week's actual harvested kg; every earlier entry stays listed. */
+function ActualDialog({
+  cropName,
+  year,
+  week,
+  actual,
+  onSave,
+  onClose,
+  saving,
+  error,
+}: {
+  cropName: string
+  year: number
+  week: number
+  actual: ActualWeek | undefined
+  onSave: (kg: number | null, note: string | null) => void
+  onClose: () => void
+  saving: boolean
+  error: string | null
+}) {
+  const [text, setText] = useState(actual?.kg == null ? '' : String(actual.kg))
+  const [note, setNote] = useState('')
+  const parsed = parseActualKg(text)
+  const unchanged = parsed === (actual?.kg ?? null) && note.trim() === ''
+  const when = (iso: string) => new Date(iso).toLocaleString(undefined, { timeZone: 'America/Toronto', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+  return (
+    <Dialog open title={`Actual harvested kg · ${cropName} · W${week} ${year}`} onClose={onClose}>
+      <form
+        className={styles.actualForm}
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (parsed === 'invalid' || unchanged) return
+          onSave(parsed, note.trim() || null)
+        }}
+      >
+        <p className={styles.actualHint}>
+          The kilograms actually harvested for this variety in W{week}, from your harvest records. Forecasts are scored against it. Leave it empty and save to
+          clear the week. Earlier entries are kept.
+        </p>
+        <label className="field">
+          <span className="field-label">Actual kg</span>
+          <input className="input" inputMode="decimal" value={text} onChange={(e) => setText(e.target.value)} autoFocus aria-invalid={parsed === 'invalid'} placeholder="e.g. 54000" />
+        </label>
+        <label className="field">
+          <span className="field-label">Note (optional)</span>
+          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder={actual?.history.length ? 'Why it was corrected' : ''} />
+        </label>
+        {parsed === 'invalid' && <p className={styles.afwError}>Enter kilograms as a number (up to 2 decimals).</p>}
+        {error && <p className={styles.afwError}>{error}</p>}
+        <div className={styles.actualActions}>
+          <button type="submit" className="button button-primary" disabled={saving || parsed === 'invalid' || unchanged}>
+            {saving ? 'Saving…' : parsed === null && actual?.kg != null ? 'Clear the week' : 'Save'}
+          </button>
+          <button type="button" className="button button-secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+        </div>
+      </form>
+      {actual && actual.history.length > 0 && (
+        <div className={styles.actualHistory}>
+          <h3>History</h3>
+          <ol>
+            {actual.history.map((h, i) => (
+              <li key={h.id}>
+                <strong>{h.kg === null ? 'Cleared' : `${formatInteger(Math.round(h.kg))} kg`}</strong> · {when(h.enteredAt)}
+                {i === 0 && <span className={styles.tag}>In effect</span>}
+                {h.note && <span className={styles.actualNote}> — {h.note}</span>}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </Dialog>
   )
 }
 

@@ -21,8 +21,19 @@
 //      A pepper set next week typically reaches harvest around week 7–8, so
 //      new sets matter only to the outlook weeks.
 //   4. Scale: × picking stems ÷ sampled stems. Kg: × forecast AFW ÷ 1000.
+//
+// Enough history (approved 2026-10-16): no rate is invented. Unless each
+// stage has at least MIN_STAGE_EXAMPLES week-to-week records from lifecycle
+// weeks, and the new-set rate rests on at least MIN_SET_RATE_WEEKS weeks,
+// the eight weeks are reported as not available (with the reason), never
+// filled with default odds.
+//
+// forecastForWeek() picks the basis in effect for the origin week: this
+// lifecycle forecast, or the next-week forecast from Breakers (breaker.ts).
 
 import { chooseAfw } from './afw'
+import { basisAt } from './basis'
+import { breakerForecast } from './breaker'
 import { assessConfidence } from './confidence'
 import { buildHistory, confirmedErrors, isLoss, stateAt, stateEntryAt, type CropHistory, type FruitStage, type NodeHistory } from './history'
 import { BINS, OUTCOMES, binOf, fitTransitions, stemLoad, tableFor, type FittedModel, type TransitionTable } from './hazards'
@@ -34,6 +45,7 @@ import {
   type EngineInput,
   type ForecastOptions,
   type ForecastResult,
+  type ForecastBasis,
   type ForecastWeek,
   type ModelParams,
 } from './types'
@@ -106,19 +118,34 @@ export function inventoryEntry(history: CropHistory, h: NodeHistory): { visitInd
 
 /**
  * New sets per sampled stem per week, averaged over the last `weeks` weeks:
- * fruit first recorded as fruit in a week, over the stems visited that week.
+ * fruit first recorded as SetFruit in a week, on stems checked that week and
+ * the week before, both lifecycle weeks. A fruit first seen at a later stage,
+ * or on a stem not checked the week before (a variety's first walkthrough),
+ * may have set any time earlier and is never counted as a new set.
  */
 export function newSetRate(history: CropHistory, weeks: number): number {
+  return newSetRates(history, weeks).rate
+}
+
+/** newSetRate with the number of weeks it rests on. */
+export function newSetRates(history: CropHistory, weeks: number): { rate: number; weeks: number } {
   const rates: number[] = []
   for (let w = history.originIndex; w > history.originIndex - weeks; w--) {
-    const stems = [...history.observedWeeks.entries()].filter(([, set]) => set.has(w)).map(([id]) => id)
+    if (!history.isLifecycleWeek(w) || !history.isLifecycleWeek(w - 1)) continue
+    const stems = [...history.observedWeeks.entries()].filter(([, set]) => set.has(w) && set.has(w - 1)).map(([id]) => id)
     if (stems.length === 0) continue
     const visited = new Set(stems)
-    const sets = history.nodes.filter((h) => h.fruitIndex === w && visited.has(h.stemId)).length
+    const sets = history.nodes.filter((h) => h.fruitIndex === w && h.stageEntry.S === w && visited.has(h.stemId)).length
     rates.push(sets / stems.length)
   }
-  return rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0
+  return { rate: rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0, weeks: rates.length }
 }
+
+/** Week-to-week records per stage needed before the lifecycle forecast uses that stage. */
+export const MIN_STAGE_EXAMPLES: Record<FruitStage, number> = { S: 200, M: 50, B: 50 }
+/** Lifecycle weeks (with the week before) the new-set rate must rest on. */
+export const MIN_SET_RATE_WEEKS = 2
+const STAGE_NAME: Record<FruitStage, string> = { S: 'SetFruit', M: 'MatureGreen', B: 'Breaker' }
 
 /** Mean live fruit per sampled stem at the origin (the load band new sets start in). */
 function meanLoad(history: CropHistory, load: (stemId: string, index: number) => number): number {
@@ -135,6 +162,14 @@ export function forecast(input: EngineInput, options: ForecastOptions): Forecast
 
   const sampleStems = history.sampleStemIds.length
   const scale = sampleStems === 0 ? 0 : input.crop.pickingStems / sampleStems
+  const visitedAtOrigin = history.sampleStemIds.filter((id) => history.observedWeeks.get(id)?.has(origin)).length
+  // Not enough history for a stage (or the new-set rate): no week is forecast.
+  const setRate = newSetRates(history, params.setRateWeeks)
+  const missing = (['S', 'M', 'B'] as FruitStage[])
+    .filter((st) => model.stageExamples[st] < MIN_STAGE_EXAMPLES[st])
+    .map((st) => `${STAGE_NAME[st]}: ${model.stageExamples[st]} of ${MIN_STAGE_EXAMPLES[st]} week-to-week records`)
+  if (setRate.weeks < MIN_SET_RATE_WEEKS) missing.push(`new sets: ${setRate.weeks} of ${MIN_SET_RATE_WEEKS} lifecycle weeks`)
+  const unavailableReason = missing.length ? `Not available: not enough full lifecycle history (${missing.join('; ')}).` : null
   const totals = Array.from({ length: horizon }, () => ({ mean: 0, variance: 0, breaker: 0, matureGreen: 0, setFruit: 0, catchUp: 0, newSets: 0, aborted: 0, pruned: 0 }))
   const inventory = { setFruit: 0, matureGreen: 0, breaker: 0, unvisitedAtOrigin: 0 }
   const fate = { harvested: 0, aborted: 0, pruned: 0, stillOnPlant: { S: 0, M: 0, B: 0 } as Record<FruitStage, number> }
@@ -168,7 +203,7 @@ export function forecast(input: EngineInput, options: ForecastOptions): Forecast
   }
 
   // Fruit not set yet: sets in week origin + j are first recorded at that visit (week 0 of SetFruit).
-  const setsPerWeek = newSetRate(history, params.setRateWeeks) * sampleStems
+  const setsPerWeek = setRate.rate * sampleStems
   const newSet = propagate(tableFor(model, false, meanLoad(history, load)), 'S', 0, horizon).harvest
   for (let k = 0; k < horizon; k++) {
     let n = 0
@@ -186,6 +221,8 @@ export function forecast(input: EngineInput, options: ForecastOptions): Forecast
       targetYw: indexYw(targetIndex),
       horizon: k + 1,
       window: k < MARKETING_WEEKS ? 'marketing' : 'outlook',
+      available: unavailableReason === null,
+      unavailableReason,
       sampleFruit,
       sampleVariance: t.variance + t.newSets,
       components: { breaker: t.breaker, matureGreen: t.matureGreen, setFruit: t.setFruit, catchUp: t.catchUp, newSets: t.newSets },
@@ -195,12 +232,13 @@ export function forecast(input: EngineInput, options: ForecastOptions): Forecast
       afwG: afw?.grams ?? null,
       afwSource: afw?.source ?? null,
       afwKind: afw?.kind ?? null,
-      kg: afw ? (cropFruit * afw.grams) / 1000 : null,
+      kg: afw && unavailableReason === null ? (cropFruit * afw.grams) / 1000 : null,
     }
   })
   const marketing = weeks.filter((w) => w.window === 'marketing')
   const training = { legacy: model.legacyExamples, verified: model.verifiedExamples }
   const confidence = assessConfidence(training, options.validatedHorizons ?? [], horizon)
+  if (unavailableReason) confidence.reasons.unshift(unavailableReason)
   const flagsAtCutoff = input.flags
   const applied = confirmedErrors(flagsAtCutoff, params.assumeConfirmed)
   const countWeeks = (m: Map<string, Set<number>>) => [...m.values()].reduce((a, set) => a + set.size, 0)
@@ -221,10 +259,15 @@ export function forecast(input: EngineInput, options: ForecastOptions): Forecast
     weeks,
     marketingTotal: {
       weeks: marketing.length,
-      sampleFruit: marketing.reduce((a, w) => a + w.sampleFruit, 0),
-      cropFruit: marketing.reduce((a, w) => a + w.cropFruit, 0),
-      kg: marketing.every((w) => w.kg !== null) ? marketing.reduce((a, w) => a + w.kg!, 0) : null,
+      sampleFruit: marketing.every((w) => w.available) ? marketing.reduce((a, w) => a + w.sampleFruit, 0) : null,
+      cropFruit: marketing.every((w) => w.available) ? marketing.reduce((a, w) => a + w.cropFruit, 0) : null,
+      kg: marketing.every((w) => w.available && w.kg !== null) ? marketing.reduce((a, w) => a + w.kg!, 0) : null,
     },
+    basis: 'lifecycle',
+    basisSource: basisAt(input.basisSettings, origin, Date.parse(options.cutoff)).source,
+    harvestReadyShare: null,
+    breakers: null,
+    coverage: { visited: visitedAtOrigin, expected: sampleStems, share: sampleStems ? visitedAtOrigin / sampleStems : null },
     params,
     engineVersion: ENGINE_VERSION,
     dataSummary: {
@@ -244,3 +287,26 @@ export function forecast(input: EngineInput, options: ForecastOptions): Forecast
     confidence: { level: confidence.level, reasons: confidence.reasons },
   }
 }
+
+/**
+ * The forecast of a sampling week on the basis in effect for it: the
+ * eight-week lifecycle forecast, or (Breakers only) next week from that
+ * week's Breakers. `defaultBasis` applies when the variety has no setting.
+ */
+export function forecastForWeek(
+  input: EngineInput,
+  options: ForecastOptions & { defaultBasis?: ForecastBasis; validatedByBasis?: Record<ForecastBasis, number[]> },
+): ForecastResult {
+  const inEffect = basisAt(input.basisSettings, options.originIndex, Date.parse(options.cutoff), options.defaultBasis ?? 'lifecycle')
+  const validatedHorizons = options.validatedByBasis?.[inEffect.basis] ?? options.validatedHorizons
+  if (inEffect.basis === 'lifecycle') return forecast(input, { ...options, validatedHorizons })
+  return breakerForecast(input, {
+    ...options,
+    validatedHorizons,
+    harvestReadyShare: inEffect.harvestReadyShare ?? DEFAULT_HARVEST_READY_SHARE,
+    basisSource: inEffect.source,
+  })
+}
+
+/** The experimental share used when Breakers only applies by default (no setting yet). */
+export const DEFAULT_HARVEST_READY_SHARE = 0.85

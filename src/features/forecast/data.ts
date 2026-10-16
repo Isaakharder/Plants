@@ -9,10 +9,10 @@ import type { Database, NodeStatus } from '../../lib/database.types'
 import { fetchAll } from '../collector/fetchAll'
 import type { Crop } from '../crops/model'
 import { runBacktest, originCutoff, type CandidateReport } from './engine/backtest'
-import { forecast } from './engine/forecast'
+import { forecastForWeek } from './engine/forecast'
 import { buildHistory } from './engine/history'
-import { liveAccuracy, type LiveAccuracy, type LiveRun, type ScoredRun, type SamplingWeek } from './engine/live'
-import type { EngineAfw, EngineFlag, EngineInput, ForecastResult } from './engine/types'
+import { actualsInEffect, liveAccuracy, type ActualAccuracy, type LiveAccuracy, type LiveRun, type ScoredRun, type SamplingWeek } from './engine/live'
+import type { EngineAfw, EngineBasisSetting, EngineFlag, EngineInput, ForecastBasis, ForecastResult } from './engine/types'
 import { FORECAST_WEEKS, MARKETING_WEEKS } from './engine/types'
 import { greenhouseWeekIndex, weekIndex, weekOfIndex } from './engine/weeks'
 
@@ -21,6 +21,11 @@ export type Db = SupabaseClient<Database>
 export type SamplingCompletion = { id: string; year: number; week: number; observedAt: string; recordedAt: string }
 export type Preview = { result: ForecastResult; afwHistory: 'log' | 'current'; origin: { year: number; week: number }; completion: SamplingCompletion | null; computedAt: string }
 export type HistoricalReplay = { reports: CandidateReport[]; unreliable: number[]; origins: number[]; lastScoreable: number }
+/** Weeks ahead validated so far, per basis (lifecycle: against Harvested records; Breakers only: against actual kg). */
+export type ValidatedByBasis = Record<ForecastBasis, number[]>
+export type LiveAccuracyResult = { accuracy: LiveAccuracy; scored: ScoredRun[]; actual: ActualAccuracy; validatedByBasis: ValidatedByBasis }
+/** A variety without a basis setting gets the next-week forecast from Breakers (no rates are assumed). */
+export const DEFAULT_BASIS: ForecastBasis = 'breaker_only'
 
 const num = (v: number | null) => (v === null ? null : Number(v))
 
@@ -54,6 +59,26 @@ export function createForecastData(supabase: Db) {
     return { afw: current.map((r) => ({ year: r.year, week: r.week, afwG: Number(r.afw_g) })), history: 'current' }
   }
 
+  /** Every forecast basis setting of the crop (the engine applies its cutoff). */
+  async function loadBasisSettings(cropId: string): Promise<EngineBasisSetting[]> {
+    const rows = check(
+      await supabase.from('forecast_basis_settings').select('from_year, from_week, basis, harvest_ready_share, created_at').eq('crop_id', cropId).order('created_at'),
+    )
+    return rows.map((r) => ({
+      fromYear: r.from_year,
+      fromWeek: r.from_week,
+      basis: r.basis,
+      harvestReadyShare: r.harvest_ready_share === null ? null : Number(r.harvest_ready_share),
+      createdAt: r.created_at,
+    }))
+  }
+
+  /** Actual harvested kg in effect per week index (the newest entry; cleared weeks left out). */
+  async function loadActualKg(cropId: string): Promise<Map<number, number>> {
+    const rows = check(await supabase.from('weekly_harvest_actuals').select('id, year, week, actual_kg, entered_at').eq('crop_id', cropId))
+    return actualsInEffect(rows.map((r) => ({ id: r.id, year: r.year, week: r.week, actualKg: r.actual_kg === null ? null : Number(r.actual_kg), enteredAt: r.entered_at })))
+  }
+
   /** Everything the engine needs for one crop, with flags and AFW as they stood at `cutoff`. */
   async function loadEngineInput(crop: Pick<Crop, 'id' | 'picking_stems' | 'area_m2'>, cutoff: string): Promise<EngineInput & { afwHistory: 'log' | 'current' }> {
     // The same paginated read for each table; the callers state each row's shape.
@@ -66,7 +91,7 @@ export function createForecastData(supabase: Db) {
         return q.order('id').limit(limit) as unknown as Page<T>
       }, (r) => r.id)
 
-    const [stems, nodes, observations, growth, visits, events, flags, afw] = await Promise.all([
+    const [stems, nodes, observations, growth, visits, events, flags, afw, basisSettings] = await Promise.all([
       byCrop<{ id: string; measurement_row_id: string; is_active: boolean }>('measurement_stems', 'id, measurement_row_id, is_active'),
       byCrop<{ id: string; measurement_stem_id: string; is_side_shoot: boolean; is_active: boolean; created_at: string }>('plant_nodes', 'id, measurement_stem_id, is_side_shoot, is_active, created_at'),
       byCrop<{ id: string; plant_node_id: string; year: number; week_number: number; status: NodeStatus; observed_at: string; recorded_at: string }>(
@@ -84,6 +109,7 @@ export function createForecastData(supabase: Db) {
       ),
       supabase.rpc('crop_quality_flags', { p_crop_id: crop.id, p_as_of: cutoff }).then(check),
       loadAfw(crop.id, cutoff),
+      loadBasisSettings(crop.id),
     ])
 
     return {
@@ -96,6 +122,7 @@ export function createForecastData(supabase: Db) {
       samplingEvents: events.map((e) => ({ year: e.year, week: e.week_number, event: e.event, observedAt: e.observed_at, recordedAt: e.recorded_at })),
       afw: afw.afw,
       afwHistory: afw.history,
+      basisSettings,
       flags: flags.map(
         (f): EngineFlag => ({
           flagKey: f.flag_key,
@@ -134,16 +161,17 @@ export function createForecastData(supabase: Db) {
    * that week's sampling isn't marked complete; it never replaces a locked
    * forecast.
    */
-  async function computePreview(crop: Crop, originYear: number, originWeek: number, validatedHorizons: number[] = []): Promise<Preview> {
+  async function computePreview(crop: Crop, originYear: number, originWeek: number, validatedByBasis?: ValidatedByBasis): Promise<Preview> {
     const now = new Date().toISOString()
     const [input, completion] = await Promise.all([loadEngineInput(crop, now), latestCompletion(crop.id, originYear, originWeek)])
-    const result = forecast(input, {
+    const result = forecastForWeek(input, {
       originIndex: weekIndex(originYear, originWeek),
       cutoff: now,
       // A completed week is forecast from what was observed by its completion, like the official one.
       observedCutoff: completion?.observedAt,
       horizon: FORECAST_WEEKS,
-      validatedHorizons,
+      defaultBasis: DEFAULT_BASIS,
+      validatedByBasis,
     })
     return { result, afwHistory: input.afwHistory, origin: { year: originYear, week: originWeek }, completion, computedAt: now }
   }
@@ -153,34 +181,44 @@ export function createForecastData(supabase: Db) {
    * stored run (an existing one when the week was already locked, by this or
    * another device: it is never overwritten).
    */
-  async function lockForecast(crop: Crop, completion: SamplingCompletion, validatedHorizons?: number[]) {
+  async function lockForecast(crop: Crop, completion: SamplingCompletion, validatedByBasis?: ValidatedByBasis) {
     // The weeks ahead validated by live accuracy so far, for the forecast's confidence statement.
-    const validated = validatedHorizons ?? (await loadLiveAccuracy(crop)).accuracy.validatedHorizons
+    const validated = validatedByBasis ?? (await loadLiveAccuracy(crop)).validatedByBasis
     // Stored-by cutoff: now, a little early so the server's clock can't be behind it, but never before the
     // completion reached the server (then its own timestamp, verbatim: the server keeps microseconds).
     const floor = Date.now() - 30_000
     const recordedCutoff = Date.parse(completion.recordedAt) >= floor ? completion.recordedAt : new Date(floor).toISOString()
     const input = await loadEngineInput(crop, recordedCutoff)
     const origin = weekIndex(completion.year, completion.week)
-    const result = forecast(input, { originIndex: origin, cutoff: recordedCutoff, observedCutoff: completion.observedAt, horizon: FORECAST_WEEKS, validatedHorizons: validated })
-    const dataSummary = { ...result.dataSummary, afwHistory: input.afwHistory }
+    const result = forecastForWeek(input, {
+      originIndex: origin,
+      cutoff: recordedCutoff,
+      observedCutoff: completion.observedAt,
+      horizon: FORECAST_WEEKS,
+      defaultBasis: DEFAULT_BASIS,
+      validatedByBasis: validated,
+    })
+    const dataSummary = { ...result.dataSummary, afwHistory: input.afwHistory, basisSource: result.basisSource }
     const weeks = result.weeks.map((w) => {
       const t = weekOfIndex(w.targetIndex)
+      const a = w.available
+      // A week the basis can't support is stored without numbers.
       return {
         horizon: w.horizon,
         target_year: t.year,
         target_week: t.week,
         window: w.window,
-        sample_fruit: w.sampleFruit,
-        sample_variance: w.sampleVariance,
-        crop_fruit: w.cropFruit,
-        components: w.components,
-        expected_aborted: w.expectedAborted,
-        expected_pruned: w.expectedPruned,
-        afw_g: w.afwG,
-        afw_source: w.afwSource,
-        afw_kind: w.afwKind,
-        kg: w.kg,
+        available: a,
+        sample_fruit: a ? w.sampleFruit : null,
+        sample_variance: a ? w.sampleVariance : null,
+        crop_fruit: a ? w.cropFruit : null,
+        components: a ? w.components : null,
+        expected_aborted: a ? w.expectedAborted : null,
+        expected_pruned: a ? w.expectedPruned : null,
+        afw_g: a ? w.afwG : null,
+        afw_source: a ? w.afwSource : null,
+        afw_kind: a ? w.afwKind : null,
+        kg: a ? w.kg : null,
       }
     })
     const rows = check(
@@ -203,6 +241,10 @@ export function createForecastData(supabase: Db) {
         p_scale: result.scale,
         p_marketing: { sample_fruit: result.marketingTotal.sampleFruit, crop_fruit: result.marketingTotal.cropFruit, kg: result.marketingTotal.kg },
         p_weeks: weeks,
+        p_basis: result.basis,
+        p_harvest_ready_share: result.harvestReadyShare,
+        p_breaker_breakdown: result.breakers,
+        p_coverage: result.coverage.share,
       }),
     )
     return rows[0]
@@ -221,7 +263,7 @@ export function createForecastData(supabase: Db) {
   }
 
   /** Every locked forecast of the crop with its weeks, scored against what has been recorded since. */
-  async function loadLiveAccuracy(crop: Crop): Promise<{ accuracy: LiveAccuracy; scored: ScoredRun[] }> {
+  async function loadLiveAccuracy(crop: Crop): Promise<LiveAccuracyResult> {
     const now = new Date().toISOString()
     const current = greenhouseWeekIndex(new Date())
     const runs = check(await supabase.from('forecast_runs').select('*').eq('crop_id', crop.id))
@@ -233,27 +275,48 @@ export function createForecastData(supabase: Db) {
       confidence: r.confidence,
       sampleStemIds: r.sample_stem_ids,
       scale: Number(r.scale),
+      basis: r.basis,
+      harvestReadyShare: num(r.harvest_ready_share),
+      coverage: num(r.coverage),
       weeks: weeks
         .filter((w) => w.run_id === r.id)
         .sort((a, b) => a.horizon - b.horizon)
-        .map((w) => ({ horizon: w.horizon, targetIndex: weekIndex(w.target_year, w.target_week), window: w.window, sampleFruit: Number(w.sample_fruit), kg: num(w.kg), afwG: num(w.afw_g) })),
+        .map((w) => ({
+          horizon: w.horizon,
+          targetIndex: weekIndex(w.target_year, w.target_week),
+          window: w.window,
+          available: w.available,
+          sampleFruit: Number(w.sample_fruit ?? 0),
+          kg: num(w.kg),
+          afwG: num(w.afw_g),
+        })),
     }))
     const years = [...new Set([weekOfIndex(current).year, ...weeks.map((w) => w.target_year)])]
-    const [input, sampling, afw] = await Promise.all([
+    const [input, sampling, afw, actualKg] = await Promise.all([
       loadEngineInput(crop, now),
       loadSampling(crop.id, years),
       supabase.from('weekly_harvest_afw').select('year, week, afw_g').eq('crop_id', crop.id).then(check),
+      loadActualKg(crop.id),
     ])
-    return liveAccuracy(
+    const live = liveAccuracy(
       {
         currentIndex: current,
         history: buildHistory(input, current, now),
         sampling,
         flags: input.flags,
         actualAfw: new Map(afw.map((a) => [weekIndex(a.year, a.week), Number(a.afw_g)])),
+        actualKg,
       },
       liveRuns,
     )
+    return {
+      ...live,
+      validatedByBasis: {
+        // Lifecycle: validated on Harvested records (and, separately, shown against actual kg); Breakers only: on actual kg.
+        lifecycle: live.accuracy.validatedHorizons,
+        breaker_only: live.actual.validatedHorizons.breaker_only,
+      },
+    }
   }
 
 
@@ -289,7 +352,7 @@ export function createForecastData(supabase: Db) {
   }
 
 
-  return { loadEngineInput, latestCompletion, computePreview, lockForecast, loadLiveAccuracy, runHistoricalReplay }
+  return { loadEngineInput, loadBasisSettings, loadActualKg, latestCompletion, computePreview, lockForecast, loadLiveAccuracy, runHistoricalReplay }
 }
 
 export type ForecastData = ReturnType<typeof createForecastData>

@@ -363,10 +363,19 @@ export type ForecastRunRow = {
   sample_stem_ids: string[]
   scale: number
   case_weight_kg: number | null
-  marketing_sample_fruit: number
-  marketing_crop_fruit: number
+  /** Null when a marketing week isn't available (e.g. Breakers only). */
+  marketing_sample_fruit: number | null
+  marketing_crop_fruit: number | null
   marketing_kg: number | null
+  /** 20261024: what the forecast rests on, and for Breakers only the share and how the Breakers were counted. */
+  basis: 'lifecycle' | 'breaker_only'
+  harvest_ready_share: number | null
+  breaker_breakdown: BreakerBreakdownJson | null
+  /** Stems checked or recorded that week ÷ stems in the sample. */
+  coverage: number | null
 }
+
+export type BreakerBreakdownJson = { total: number; carriedOver: number; new: number; firstSeen: number; notRecordedAgain: number; possibleLaterCrop: number }
 
 export type ForecastRunWeekRow = {
   run_id: string
@@ -374,12 +383,14 @@ export type ForecastRunWeekRow = {
   target_year: number
   target_week: number
   window: 'marketing' | 'outlook'
-  sample_fruit: number
-  sample_variance: number
-  crop_fruit: number
-  components: { breaker: number; matureGreen: number; setFruit: number; catchUp: number; newSets: number }
-  expected_aborted: number
-  expected_pruned: number
+  /** False: the basis can't support this week; no numbers are stored. */
+  available: boolean
+  sample_fruit: number | null
+  sample_variance: number | null
+  crop_fruit: number | null
+  components: { breaker: number; matureGreen: number; setFruit: number; catchUp: number; newSets: number } | null
+  expected_aborted: number | null
+  expected_pruned: number | null
   afw_g: number | null
   afw_source: string | null
   afw_kind: 'grower' | 'model' | null
@@ -418,6 +429,39 @@ export type LockForecastArgs = {
   p_scale: number
   p_marketing: unknown
   p_weeks: unknown
+  p_basis: 'lifecycle' | 'breaker_only'
+  p_harvest_ready_share: number | null
+  p_breaker_breakdown: unknown
+  p_coverage: number | null
+}
+
+// ---- Forecast basis and actual harvest (20261024000000_breaker_forecast_and_actuals.sql) ----
+// Append-only: a change or correction is a new row.
+
+export type ForecastBasisSettingRow = {
+  id: string
+  organization_id: string
+  crop_id: string
+  from_year: number
+  from_week: number
+  basis: 'lifecycle' | 'breaker_only'
+  harvest_ready_share: number | null
+  note: string | null
+  created_at: string
+  created_by: string | null
+}
+
+export type WeeklyHarvestActualRow = {
+  id: number
+  organization_id: string
+  crop_id: string
+  year: number
+  week: number
+  /** Null: the week was cleared. */
+  actual_kg: number | null
+  note: string | null
+  entered_at: string
+  entered_by: string | null
 }
 
 // ---- Server-side forecast locking (20261023000000_forecast_lock_jobs.sql) ----
@@ -429,7 +473,7 @@ export type ForecastLockJobRow = {
   year: number
   week: number
   sampling_event_id: string
-  status: 'pending' | 'waiting_for_sync' | 'running' | 'retry' | 'done' | 'superseded' | 'failed'
+  status: 'pending' | 'waiting_for_sync' | 'running' | 'retry' | 'done' | 'superseded' | 'incomplete' | 'failed'
   attempts: number
   next_attempt_at: string
   lease_until: string | null
@@ -440,7 +484,7 @@ export type ForecastLockJobRow = {
   updated_at: string
 }
 
-export type LockReadiness = { state: 'ready' | 'waiting_for_sync' | 'superseded' | 'locked'; checked_in_db: number | null; checked_seen: number | null; detail: string | null }
+export type LockReadiness = { state: 'ready' | 'waiting_for_sync' | 'incomplete' | 'superseded' | 'locked'; checked_in_db: number | null; checked_seen: number | null; detail: string | null }
 
 // ---- Breaker photos (20261019000000_breaker_photos.sql) ----
 // Append-only. Images are in the private Storage bucket 'node-photos'.
@@ -715,6 +759,21 @@ export type Database = {
       weekly_harvest_afw_log: {
         Row: WeeklyHarvestAfwLogRow
         Insert: never
+        Update: never
+        Relationships: []
+      }
+      forecast_basis_settings: {
+        Row: ForecastBasisSettingRow
+        Insert: Pick<ForecastBasisSettingRow, 'organization_id' | 'crop_id' | 'from_year' | 'from_week' | 'basis'> & {
+          harvest_ready_share?: number | null
+          note?: string | null
+        }
+        Update: never
+        Relationships: []
+      }
+      weekly_harvest_actuals: {
+        Row: WeeklyHarvestActualRow
+        Insert: Pick<WeeklyHarvestActualRow, 'organization_id' | 'crop_id' | 'year' | 'week' | 'actual_kg'> & { note?: string | null }
         Update: never
         Relationships: []
       }

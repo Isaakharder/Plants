@@ -41,7 +41,7 @@ function usePreview(photo: RecordedPhoto | null) {
   return url;
 }
 
-function Side({ label, photo, replacedCount }: { label: string; photo: RecordedPhoto | null; replacedCount: number }) {
+export function Side({ label, photo, replacedCount }: { label: string; photo: RecordedPhoto | null; replacedCount: number }) {
   const url = usePreview(photo);
   const state = !photo
     ? 'No photo'

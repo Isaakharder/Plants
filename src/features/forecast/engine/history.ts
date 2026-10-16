@@ -16,6 +16,7 @@
 // treat as confirmed) makes its weeks / stem-weeks unobserved and its nodes
 // unusable for training; its records stay as they are.
 
+import { basisAt } from './basis'
 import type { EngineFlag, EngineInput, NodeStatus } from './types'
 import { greenhouseWeekIndex, weekIndex } from './weeks'
 
@@ -43,6 +44,11 @@ export type NodeHistory = {
   isSideShoot: boolean
   /** Kept records: week index → state, in week order. */
   records: [number, State][]
+  /**
+   * Every week's latest record as recorded (before cleaning): repeats kept, so
+   * a Breaker recorded again the next Friday shows as Breaker in both weeks.
+   */
+  weekStates: Map<number, State>
   /** First week the node was a fruit (S, M or B), or null. */
   fruitIndex: number | null
   /** First week of each fruit stage. */
@@ -67,6 +73,13 @@ export type CropHistory = {
   /** Active stems with visit evidence in or before the origin week. */
   sampleStemIds: string[]
   excludedStemWeeks: number
+  /**
+   * Whether a week's records describe the whole fruit lifecycle (basis
+   * 'lifecycle', the default without settings). In Breakers-only weeks only
+   * Breakers are recorded: SetFruit and MatureGreen records aren't updated,
+   * so those weeks never teach stage transitions or new-set rates.
+   */
+  isLifecycleWeek: (index: number) => boolean
 }
 
 const isAtOrBefore = (iso: string, cutoffMs: number) => Date.parse(iso) <= cutoffMs
@@ -181,10 +194,27 @@ export function buildHistory(input: EngineInput, originIndex: number, cutoff: st
       }
       if (state === 'H') harvestIndex ??= index
     }
-    histories.push({ nodeId, stemId: node.stemId, isSideShoot: node.isSideShoot, records, fruitIndex, stageEntry, harvestIndex, excluded: excludedNodes.has(nodeId) })
+    histories.push({
+      nodeId,
+      stemId: node.stemId,
+      isSideShoot: node.isSideShoot,
+      records,
+      weekStates: new Map(raw.map(([index, status]) => [index, STATE[status]])),
+      fruitIndex,
+      stageEntry,
+      harvestIndex,
+      excluded: excludedNodes.has(nodeId),
+    })
   }
 
-  return { originIndex, nodes: histories, observedWeeks, verifiedWeeks, sampleStemIds, excludedStemWeeks }
+  const lifecycle = new Map<number, boolean>()
+  const isLifecycleWeek = (index: number) => {
+    let v = lifecycle.get(index)
+    if (v === undefined) lifecycle.set(index, (v = basisAt(input.basisSettings, index, cutoffMs).basis === 'lifecycle'))
+    return v
+  }
+
+  return { originIndex, nodes: histories, observedWeeks, verifiedWeeks, sampleStemIds, excludedStemWeeks, isLifecycleWeek }
 }
 
 /** Applies the cleaning rules to one node's weekly records (sorted by week). */

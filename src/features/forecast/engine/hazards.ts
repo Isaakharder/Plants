@@ -75,7 +75,7 @@ export function stemLoad(history: CropHistory): (stemId: string, index: number) 
   }
 }
 
-/** Every observed one-week transition of a fruit up to the origin. */
+/** Every observed one-week transition of a fruit up to the origin, between two lifecycle weeks. */
 export function trainingExamples(history: CropHistory): TrainingExample[] {
   const examples: TrainingExample[] = []
   const load = stemLoad(history)
@@ -87,6 +87,8 @@ export function trainingExamples(history: CropHistory): TrainingExample[] {
     const firstRecord = h.records[0][0]
     for (const w of weeks) {
       if (w < firstRecord || w >= history.originIndex || !weeks.has(w + 1)) continue
+      // A Breakers-only week doesn't record SetFruit / MatureGreen changes: no transition can be read from it.
+      if (!history.isLifecycleWeek(w) || !history.isLifecycleWeek(w + 1)) continue
       const from = stateAt(h, w)
       if (from !== 'S' && from !== 'M' && from !== 'B') continue
       const to = stateAt(h, w + 1)!
@@ -147,6 +149,8 @@ export type FittedModel = {
   /** Training examples by data tier. */
   legacyExamples: number
   verifiedExamples: number
+  /** Training examples by the stage they start from (enough history per stage: see MIN_STAGE_EXAMPLES). */
+  stageExamples: Record<FruitStage, number>
 }
 
 /** Load-band cut points: quantiles of the SetFruit examples' stem loads (null when too few). */
@@ -157,9 +161,9 @@ function loadCuts(examples: TrainingExample[], bands: number): number[] | null {
 }
 
 /** Fits every table on `examples`, each cell pulled toward `toward` (or its stage's pooled rates) with `alpha`. */
-function fitOn(examples: TrainingExample[], origin: number, params: ModelParams, alpha: number, cuts: number[] | null, toward?: FittedModel): Omit<FittedModel, 'examples' | 'legacyExamples' | 'verifiedExamples'> {
+function fitOn(examples: TrainingExample[], origin: number, params: ModelParams, alpha: number, cuts: number[] | null, toward?: FittedModel): Omit<FittedModel, 'examples' | 'legacyExamples' | 'verifiedExamples' | 'stageExamples'> {
   const all = shrink(weightedCounts(examples, origin, params), alpha, toward?.all)
-  const model: Omit<FittedModel, 'examples' | 'legacyExamples' | 'verifiedExamples'> = { all }
+  const model: Omit<FittedModel, 'examples' | 'legacyExamples' | 'verifiedExamples' | 'stageExamples'> = { all }
   if (params.splitSideShoots) {
     model.side = shrink(weightedCounts(examples.filter((e) => e.sideShoot), origin, params), params.shrinkage, toward?.side ?? all)
     model.main = shrink(weightedCounts(examples.filter((e) => !e.sideShoot), origin, params), params.shrinkage, toward?.main ?? all)
@@ -188,7 +192,9 @@ export function fitTransitions(history: CropHistory, params: ModelParams): Fitte
   const examples = trainingExamples(history)
   const legacy = examples.filter((e) => !e.verified)
   const verified = examples.filter((e) => e.verified)
-  const counts = { examples: examples.length, legacyExamples: legacy.length, verifiedExamples: verified.length }
+  const stageExamples = { S: 0, M: 0, B: 0 } as Record<FruitStage, number>
+  for (const e of examples) stageExamples[e.stage]++
+  const counts = { examples: examples.length, legacyExamples: legacy.length, verifiedExamples: verified.length, stageExamples }
   const origin = history.originIndex
   if (verified.length === 0 || legacy.length === 0) {
     const used = verified.length ? verified : legacy

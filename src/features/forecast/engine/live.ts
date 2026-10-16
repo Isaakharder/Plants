@@ -25,10 +25,18 @@
 // MIN_COVERAGE, and WAPE within the goal. The goals are improvement targets;
 // meeting one alone never marks a horizon reliable. Late forecasts are shown
 // but never counted. Historical backtests never count.
+//
+// Actual harvested kg (approved 2026-10-16): every locked forecast's kg is
+// also scored against the actual kg entered for its target week (the newest
+// entry; corrections flow through, the forecast is never recalculated).
+// Breakers-only forecasts can only be scored this way (harvests aren't
+// recorded on the walkthrough). Each basis is validated separately, with the
+// same rules on kg: at least MIN_SETTLED scored official forecasts, |bias| ≤
+// MAX_ABS_BIAS, mean stem coverage ≥ MIN_COVERAGE and WAPE within the goal.
 
 import { metrics, scoringUnits, type Metrics, type ScoringUnit, type ScoringWeek } from './accuracy'
 import type { CropHistory } from './history'
-import type { EngineFlag } from './types'
+import type { EngineFlag, ForecastBasis } from './types'
 import { MARKETING_WEEKS } from './types'
 import { weekIndex } from './weeks'
 
@@ -45,7 +53,13 @@ export type LiveRun = {
   confidence: 'experimental' | 'standard'
   sampleStemIds: string[]
   scale: number
-  weeks: { horizon: number; targetIndex: number; window: 'marketing' | 'outlook'; sampleFruit: number; kg: number | null; afwG: number | null }[]
+  /** Older forecasts: lifecycle. */
+  basis?: ForecastBasis
+  harvestReadyShare?: number | null
+  /** Stems checked or recorded at the origin ÷ stems in the sample. */
+  coverage?: number | null
+  /** Weeks a basis couldn't support (available false) have no numbers and are never scored. */
+  weeks: { horizon: number; targetIndex: number; window: 'marketing' | 'outlook'; available?: boolean; sampleFruit: number; kg: number | null; afwG: number | null }[]
 }
 
 /** A week's sampling (sampling_weeks): stems visited of those expected, and whether it was marked complete. */
@@ -60,6 +74,8 @@ export type ObservedContext = {
   flags: EngineFlag[]
   /** Actual AFW entered per week. */
   actualAfw: Map<number, number>
+  /** Actual harvested kg entered per week (newest entry; cleared weeks absent). */
+  actualKg?: Map<number, number>
 }
 
 export type WeekStatus = 'pending' | 'in_progress' | 'provisional' | 'settled' | 'unreliable'
@@ -117,7 +133,7 @@ export type ScoredWeek = LiveRun['weeks'][number] & ObservedWeek & {
 export type ScoredRun = { run: LiveRun; weeks: ScoredWeek[]; units: ScoringUnit[] }
 
 export function scoreRun(ctx: ObservedContext, run: LiveRun): ScoredRun {
-  const weeks: ScoredWeek[] = run.weeks.map((w) => {
+  const weeks: ScoredWeek[] = run.weeks.filter((w) => w.available !== false).map((w) => {
     const o = observeWeek(ctx, run, w.targetIndex)
     const single = o.status === 'settled'
     return {
@@ -168,8 +184,10 @@ export type LiveAccuracy = {
   validatedHorizons: number[]
 }
 
-export function liveAccuracy(ctx: ObservedContext, runs: LiveRun[], horizon = 8): { accuracy: LiveAccuracy; scored: ScoredRun[] } {
-  const scored = runs.map((r) => scoreRun(ctx, r))
+export function liveAccuracy(ctx: ObservedContext, runs: LiveRun[], horizon = 8): { accuracy: LiveAccuracy; scored: ScoredRun[]; actual: ActualAccuracy } {
+  const actual = actualAccuracy(ctx, runs, horizon)
+  // Harvested records score lifecycle forecasts only (the Friday walkthrough records no harvests).
+  const scored = runs.filter((r) => (r.basis ?? 'lifecycle') === 'lifecycle').map((r) => scoreRun(ctx, r))
   const official = scored.filter((s) => s.run.kind === 'official')
   const horizons: HorizonAccuracy[] = []
   for (let h = 1; h <= horizon; h++) {
@@ -213,5 +231,95 @@ export function liveAccuracy(ctx: ObservedContext, runs: LiveRun[], horizon = 8)
       validatedHorizons: horizons.filter((h) => h.status === 'validated').map((h) => h.horizon),
     },
     scored,
+    actual,
   }
+}
+
+// ── Against actual harvested kg ──────────────────────────────────────────────
+
+/** Actual kg in effect per week index: the newest entry per week (by entry time, then id); a cleared week (null) is left out. */
+export function actualsInEffect(rows: { year: number; week: number; actualKg: number | null; enteredAt: string; id: number }[]): Map<number, number> {
+  const latest = new Map<number, { kg: number | null; enteredAt: string; id: number }>()
+  for (const r of rows) {
+    const index = weekIndex(r.year, r.week)
+    const cur = latest.get(index)
+    if (!cur || r.enteredAt > cur.enteredAt || (r.enteredAt === cur.enteredAt && r.id > cur.id)) latest.set(index, { kg: r.actualKg, enteredAt: r.enteredAt, id: r.id })
+  }
+  return new Map([...latest].filter(([, v]) => v.kg !== null).map(([i, v]) => [i, v.kg!]))
+}
+
+export type ActualWeekStatus = 'pending' | 'in_progress' | 'awaiting_actual' | 'not_scorable' | 'scored'
+
+export type ActualScoredWeek = {
+  horizon: number
+  targetIndex: number
+  forecastKg: number | null
+  actualKg: number | null
+  status: ActualWeekStatus
+  /** forecast ÷ actual − 1 (positive = forecast too high). */
+  error: number | null
+  /** Breakers only: the share that would have matched the actual kg (share × actual ÷ forecast). A diagnostic; it changes nothing. */
+  impliedShare: number | null
+}
+
+export type ActualScoredRun = { run: LiveRun; weeks: ActualScoredWeek[] }
+
+export type ActualHorizonAccuracy = {
+  basis: ForecastBasis
+  horizon: number
+  goal: number
+  kg: Metrics
+  coverage: number | null
+  status: HorizonStatus
+  reasons: string[]
+}
+
+export type ActualAccuracy = {
+  runs: ActualScoredRun[]
+  /** Official forecasts only, by basis and week ahead (weeks a basis supports). */
+  horizons: ActualHorizonAccuracy[]
+  validatedHorizons: Record<ForecastBasis, number[]>
+}
+
+/** One locked forecast's available weeks against the actual kg entered for them. */
+export function scoreAgainstActual(ctx: Pick<ObservedContext, 'currentIndex' | 'actualKg'>, run: LiveRun): ActualScoredRun {
+  const weeks = run.weeks
+    .filter((w) => w.available !== false)
+    .map((w): ActualScoredWeek => {
+      const actualKg = ctx.actualKg?.get(w.targetIndex) ?? null
+      const base = { horizon: w.horizon, targetIndex: w.targetIndex, forecastKg: w.kg, actualKg, error: null, impliedShare: null }
+      if (w.targetIndex > ctx.currentIndex) return { ...base, status: 'pending' }
+      if (w.targetIndex === ctx.currentIndex) return { ...base, status: 'in_progress' }
+      if (actualKg === null) return { ...base, status: 'awaiting_actual' }
+      if (w.kg === null || actualKg === 0) return { ...base, status: 'not_scorable' }
+      const share = run.basis === 'breaker_only' && run.harvestReadyShare != null && w.kg > 0 ? (run.harvestReadyShare * actualKg) / w.kg : null
+      return { ...base, status: 'scored', error: w.kg / actualKg - 1, impliedShare: share }
+    })
+  return { run, weeks }
+}
+
+export function actualAccuracy(ctx: Pick<ObservedContext, 'currentIndex' | 'actualKg'>, runs: LiveRun[], horizon = 8): ActualAccuracy {
+  const scored = runs.map((r) => scoreAgainstActual(ctx, r))
+  const horizons: ActualHorizonAccuracy[] = []
+  const validatedHorizons: Record<ForecastBasis, number[]> = { lifecycle: [], breaker_only: [] }
+  for (const basis of ['lifecycle', 'breaker_only'] as ForecastBasis[]) {
+    const official = scored.filter((s) => s.run.kind === 'official' && (s.run.basis ?? 'lifecycle') === basis)
+    const maxH = basis === 'breaker_only' ? 1 : horizon
+    for (let h = 1; h <= maxH; h++) {
+      const weeks = official.flatMap((s) => s.weeks.filter((w) => w.horizon === h && w.status === 'scored').map((w) => ({ w, run: s.run })))
+      const kg = metrics(weeks.map(({ w }) => ({ forecast: w.forecastKg!, observed: w.actualKg! })))
+      const covs = weeks.map(({ run }) => run.coverage).filter((c): c is number => c !== null && c !== undefined)
+      const coverage = covs.length ? covs.reduce((a, b) => a + b, 0) / covs.length : null
+      const goal = WAPE_GOALS[h] ?? WAPE_GOALS[8]
+      const reasons: string[] = []
+      if (kg.n < MIN_SETTLED) reasons.push(`${kg.n} of ${MIN_SETTLED} official forecasts scored against actual kg so far`)
+      if (kg.bias !== null && Math.abs(kg.bias) > MAX_ABS_BIAS) reasons.push(`bias ${kg.bias > 0 ? '+' : ''}${Math.round(100 * kg.bias)}% (limit ±${100 * MAX_ABS_BIAS}%)`)
+      if (coverage !== null && coverage < MIN_COVERAGE) reasons.push(`stem coverage ${Math.round(100 * coverage)}% (needs ${100 * MIN_COVERAGE}%)`)
+      if (kg.wape !== null && kg.wape > goal) reasons.push(`WAPE ${Math.round(100 * kg.wape)}% above the ${Math.round(100 * goal)}% goal`)
+      const status: HorizonStatus = kg.n < MIN_SETTLED ? 'collecting' : reasons.length === 0 ? 'validated' : 'not_validated'
+      if (status === 'validated') validatedHorizons[basis].push(h)
+      horizons.push({ basis, horizon: h, goal, kg, coverage, status, reasons })
+    }
+  }
+  return { runs: scored, horizons, validatedHorizons }
 }

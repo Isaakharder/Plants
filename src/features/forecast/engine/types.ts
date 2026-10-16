@@ -60,6 +60,23 @@ export type EngineFlag = {
   unvisitedStemIds?: string[]
 }
 
+/**
+ * What a variety's forecast rests on from a week on (forecast_basis_settings):
+ *   lifecycle     the eight-week stage forecast (SetFruit → … → Harvested recorded)
+ *   breaker_only  only Breakers are recorded (Friday walkthrough): next week's
+ *                 harvest from that Friday's Breakers × the harvest-ready share
+ */
+export type ForecastBasis = 'lifecycle' | 'breaker_only'
+
+export type EngineBasisSetting = {
+  fromYear: number
+  fromWeek: number
+  basis: ForecastBasis
+  /** Breakers only: share of a Friday's Breakers harvested the following week. */
+  harvestReadyShare: number | null
+  createdAt: string
+}
+
 export type EngineInput = {
   crop: EngineCrop
   stems: EngineStem[]
@@ -71,10 +88,12 @@ export type EngineInput = {
   samplingEvents?: EngineSamplingEvent[]
   afw: EngineAfw[]
   flags: EngineFlag[]
+  /** Forecast basis settings (all rows; the engine picks the one in effect). Optional for older callers: lifecycle. */
+  basisSettings?: EngineBasisSetting[]
 }
 
 /** Identifies the engine's rules and defaults in every stored forecast. Change it with any change to how forecasts are computed. */
-export const ENGINE_VERSION = 'stage-8w-2026.10.1'
+export const ENGINE_VERSION = 'stage-8w-2026.10.2'
 
 export type AfwMethod = 'last' | 'mean3' | 'trend6'
 
@@ -148,6 +167,14 @@ export type ForecastWeek = {
   horizon: number
   /** Weeks 1–5: the marketing window; 6–8: the longer-range outlook. */
   window: 'marketing' | 'outlook'
+  /**
+   * False when the data can't support this week (Breakers only beyond next
+   * week, or a stage without enough history): its numbers are 0 and its kg
+   * null, and they must not be shown or stored as a forecast.
+   */
+  available: boolean
+  /** Why the week isn't available. */
+  unavailableReason: string | null
   /** Expected peppers first recorded Harvested in the target week on the sampled stems. */
   sampleFruit: number
   /** Variance of sampleFruit (fruit-level randomness only). */
@@ -186,8 +213,17 @@ export type ForecastResult = {
   newSetsPerWeek: number
   training: { transitions: number; excludedStemWeeks: number; excludedNodes: number }
   weeks: ForecastWeek[]
-  /** Weeks 1–5 only, for marketing. */
-  marketingTotal: { weeks: number; sampleFruit: number; cropFruit: number; kg: number | null }
+  /** Weeks 1–5 only, for marketing (null numbers when any of them isn't available). */
+  marketingTotal: { weeks: number; sampleFruit: number | null; cropFruit: number | null; kg: number | null }
+  basis: ForecastBasis
+  /** Where the basis came from: a setting (its start week), or none set. */
+  basisSource: { kind: 'setting'; fromYear: number; fromWeek: number } | { kind: 'default' }
+  /** Breakers only: the harvest-ready share used. */
+  harvestReadyShare: number | null
+  /** Breakers only: how the week's Breakers were counted. */
+  breakers: BreakerBreakdown | null
+  /** Stems checked or recorded at the origin ÷ stems in the sample (null when none). */
+  coverage: { visited: number; expected: number; share: number | null }
   params: ModelParams
   engineVersion: string
   /** What the forecast rests on, for auditing. */
@@ -212,4 +248,19 @@ export type DataSummary = {
   inventory: { setFruit: number; matureGreen: number; breaker: number; unvisitedAtOrigin: number }
   loadBandCuts: number[] | null
   afwSource: string | null
+}
+
+export type BreakerBreakdown = {
+  /** Distinct nodes recorded Breaker at the origin, on stems visited then (each pepper once). */
+  total: number
+  /** Recorded Breaker the previous week too (still on the plant). */
+  carriedOver: number
+  /** Not Breaker the previous week, on a stem checked the previous week. */
+  new: number
+  /** The stem wasn't checked the previous week (or this is the first sampled week): new or carried over unknown. */
+  firstSeen: number
+  /** Breakers of the previous week on stems visited both weeks, not recorded Breaker again: out of the inventory (not counted as harvested). */
+  notRecordedAgain: number
+  /** Breakers × (1 − share) × scale: may still be picked later; counted only if recorded again. */
+  possibleLaterCrop: number
 }

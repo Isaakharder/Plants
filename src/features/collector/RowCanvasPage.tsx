@@ -20,6 +20,7 @@ import { pickerOptions } from './statusOptions';
 import { checkedStemIds, nextUncheckedIndex } from './samplingProgress';
 import { BreakerCapture, type CaptureMode } from './BreakerCapture';
 import { BreakerRecorded } from './BreakerRecorded';
+import { BreakerCarryOver } from './BreakerCarryOver';
 import { BREAKER_PHOTOS_ENABLED, type PreparedPhoto } from './photos';
 import { captureDrafts, draftAlreadySaved, draftKey, freshDrafts, type CaptureDraft } from './offline/captureDrafts';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -135,7 +136,7 @@ export function RowCanvasPage() {
   // Camera-first Breaker: the picker shows the photo step instead of saving straight away.
   // 'auto': a Breaker recorded this week shows what was saved, otherwise the status grid.
   // Kept per node, so switching node or closing the picker starts again at 'auto'.
-  type PickerStep = 'auto' | 'grid' | 'recorded' | 'capture' | { replace: CaptureMode & { kind: 'replace' }; current: Partial<Record<'front' | 'back', string>> };
+  type PickerStep = 'auto' | 'grid' | 'recorded' | 'carryover' | 'capture' | { replace: CaptureMode & { kind: 'replace' }; current: Partial<Record<'front' | 'back', string>> };
   const [pickerStep, setPickerStepState] = useState<{ nodeId: string; step: PickerStep } | null>(null);
   const setPickerStep = (nodeId: string, step: PickerStep) => setPickerStepState({ nodeId, step });
   const closeBreakerStep = () => setPickerStepState(null);
@@ -157,6 +158,12 @@ export function RowCanvasPage() {
     setDrafts(list => list.filter(d => !saved.includes(d)));
   }, [drafts, canvasQuery.data]);
   const [message,  setMessage]  = useState('');
+
+  /** The node's latest record when it is a Breaker from an earlier week (Friday walkthrough: still Breaker?). */
+  const breakerEarlier = (stemId: string, nodeId: string): LatestNodeStatus | null => {
+    const latest = (statusesByStem[stemId] ?? []).find(s => s.plant_node_id === nodeId);
+    return latest && latest.status === 'BreakerFruit' && (latest.year < currentYear || (latest.year === currentYear && latest.week_number < currentWeek)) ? latest : null;
+  };
 
   /** The node's Breaker of this greenhouse week, if one is recorded (queued writes included). */
   const breakerThisWeek = (stemId: string, nodeId: string): LatestNodeStatus | null => {
@@ -376,7 +383,8 @@ export function RowCanvasPage() {
       const nodeLabel = statusPickerCtx.node.is_side_shoot
         ? (statusPickerCtx.node.node_label ?? 'Shoot')
         : `Node ${statusPickerCtx.node.node_number}`;
-      setMessage(`${nodeLabel}: ${STATUS_LABEL[status]}`);
+      const still = status === 'BreakerFruit' && breakerEarlier(statusPickerCtx.stem.id, statusPickerCtx.node.id);
+      setMessage(still ? `${nodeLabel}: still Breaker (W${currentWeek})` : `${nodeLabel}: ${STATUS_LABEL[status]}`);
       closeBreakerStep();
       setStatusPickerCtx(null);
     } catch (err: unknown) {
@@ -499,7 +507,9 @@ export function RowCanvasPage() {
   // The Breaker step shown in the picker (see PickerStep).
   const recordedBreaker = statusPickerCtx ? breakerThisWeek(statusPickerCtx.stem.id, statusPickerCtx.node.id) : null;
   const chosenStep = statusPickerCtx && pickerStep?.nodeId === statusPickerCtx.node.id ? pickerStep.step : 'auto';
-  const pickerStepNow: PickerStep = chosenStep === 'auto' ? (recordedBreaker && BREAKER_PHOTOS_ENABLED ? 'recorded' : 'grid') : chosenStep;
+  const earlierBreaker = statusPickerCtx ? breakerEarlier(statusPickerCtx.stem.id, statusPickerCtx.node.id) : null;
+  const pickerStepNow: PickerStep =
+    chosenStep === 'auto' ? (recordedBreaker && BREAKER_PHOTOS_ENABLED ? 'recorded' : earlierBreaker ? 'carryover' : 'grid') : chosenStep;
 
   const loading = canvasQuery.data === undefined;
 
@@ -978,7 +988,17 @@ export function RowCanvasPage() {
                   void captureDrafts().delete(draftKey(userId, statusPickerCtx.node.id)).catch(() => {});
                   void handleSaveStatus('BreakerFruit');
                 }}
-                onBack={() => setPickerStep(statusPickerCtx.node.id, 'grid')}
+                onBack={() => setPickerStep(statusPickerCtx.node.id, earlierBreaker ? 'carryover' : 'grid')}
+              />
+            ) : pickerStepNow === 'carryover' && earlierBreaker ? (
+              <BreakerCarryOver
+                userId={userId}
+                nodeLabel={pickerNodeLabel}
+                previous={earlierBreaker}
+                saving={saving}
+                onStillBreaker={() => void handleSaveStatus('BreakerFruit')}
+                onStillBreakerWithPhotos={BREAKER_PHOTOS_ENABLED ? () => setPickerStep(statusPickerCtx.node.id, 'capture') : undefined}
+                onChangeStatus={() => setPickerStep(statusPickerCtx.node.id, 'grid')}
               />
             ) : typeof pickerStepNow === 'object' ? (
               <BreakerCapture
@@ -1025,7 +1045,9 @@ export function RowCanvasPage() {
                       if (saving || opt.hidden) return;
                       // Breaker: photograph front and back first (manual entry stays available).
                       // Already recorded this week: show that record, never start a second Breaker.
-                      if (opt.value === 'BreakerFruit' && BREAKER_PHOTOS_ENABLED) setPickerStep(statusPickerCtx.node.id, recordedBreaker ? 'recorded' : 'capture');
+                      if (opt.value === 'BreakerFruit' && recordedBreaker && BREAKER_PHOTOS_ENABLED) setPickerStep(statusPickerCtx.node.id, 'recorded');
+                      else if (opt.value === 'BreakerFruit' && earlierBreaker) setPickerStep(statusPickerCtx.node.id, 'carryover');
+                      else if (opt.value === 'BreakerFruit' && BREAKER_PHOTOS_ENABLED) setPickerStep(statusPickerCtx.node.id, 'capture');
                       else void handleSaveStatus(opt.value);
                     }}
                     disabled={saving || opt.hidden}

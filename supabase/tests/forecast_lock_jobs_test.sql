@@ -118,7 +118,7 @@ begin
     array['aaaaaaaa-0000-4000-8000-00000000f921'::uuid], 700, '{"sample_fruit": 1, "crop_fruit": 700, "kg": 140}'::jsonb,
     jsonb_build_array(jsonb_build_object('horizon', 1, 'target_year', extract(isoyear from to_date(y || '-' || lpad(w::text, 2, '0'), 'IYYY-IW') + 7)::integer,
       'target_week', extract(week from to_date(y || '-' || lpad(w::text, 2, '0'), 'IYYY-IW') + 7)::integer, 'window', 'marketing',
-      'sample_fruit', 1, 'sample_variance', 1, 'crop_fruit', 700, 'expected_aborted', 0, 'expected_pruned', 0, 'kg', 140)));
+      'sample_fruit', 1, 'sample_variance', 1, 'crop_fruit', 700, 'expected_aborted', 0, 'expected_pruned', 0, 'kg', 140)), 'lifecycle', null, null, 1);
   if r.kind <> 'official' or not r.stored_now then raise exception 'FAIL: worker lock %', r; end if;
   perform public.finish_forecast_lock_job(j.id, r.run_id);
   select * into r from public.forecast_lock_jobs where id = j.id;

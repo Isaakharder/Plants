@@ -147,9 +147,13 @@ function ConfirmSampling({
                     and never as zero harvests).
                   </span>
                 </label>
+                <p className="sampling-confirm-text">
+                  <strong>No official forecast will be locked for W{progress.week.week}</strong>: it is locked automatically only when every sampled stem is
+                  checked. A preview is still shown, labelled incomplete. To get the official forecast, check the remaining stems first.
+                </p>
               </div>
             ) : (
-              <p className="sampling-confirm-text">Every stem has been checked.</p>
+              <p className="sampling-confirm-text">Every stem has been checked. The official forecast for next week is locked automatically once this reaches the server.</p>
             )}
           </>
         )}

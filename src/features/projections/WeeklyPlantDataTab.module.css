@@ -657,3 +657,75 @@
   color: var(--success, #2f7d32);
   font-weight: 700;
 }
+
+/* ── Actual harvested kg (entered by hand) ── */
+.actualHead {
+  text-align: right;
+}
+
+.actualCell {
+  text-align: right;
+  padding: 0 6px;
+}
+
+.actualButton {
+  min-width: 64px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  cursor: pointer;
+}
+
+.actualButton:hover {
+  border-color: var(--primary);
+}
+
+.actualCorrected {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.actualForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.actualHint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.actualActions {
+  display: flex;
+  gap: 8px;
+}
+
+.actualHistory {
+  margin-top: 16px;
+  font-size: 14px;
+}
+
+.actualHistory h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.actualHistory ol {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.actualNote {
+  color: var(--text-muted);
+}

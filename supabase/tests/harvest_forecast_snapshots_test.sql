@@ -56,7 +56,7 @@ returns table (run_id uuid, kind text, stored_now boolean, locked_at timestamptz
   select * from public.lock_forecast_run(run, 'aaaaaaaa-0000-4000-8000-00000000ec01', oy, ow, ev, now(), 8, 5, 'engine-test', 'experimental',
     array['Trained mostly on legacy records'], '{"loadBands": 3}'::jsonb, '{"training": {"legacy": 100, "verified": 0}}'::jsonb, 1,
     array['aaaaaaaa-0000-4000-8000-00000000e201'::uuid], 700,
-    '{"sample_fruit": 50, "crop_fruit": 35000, "kg": 7000}'::jsonb, coalesce(weeks, pg_temp.weeks(oy, ow)))
+    '{"sample_fruit": 50, "crop_fruit": 35000, "kg": 7000}'::jsonb, coalesce(weeks, pg_temp.weeks(oy, ow)), 'lifecycle', null, null, 1)
 $$;
 grant execute on function pg_temp.lock(uuid, integer, integer, uuid, jsonb) to authenticated;
 
@@ -78,6 +78,10 @@ begin
   exception when invalid_parameter_value then null;
   end;
 
+  -- The sampled stem checked (a lock needs every sampled stem checked by completion: 20261024).
+  insert into public.stem_visits (organization_id, crop_id, measurement_stem_id, year, week_number, checked, observed_at)
+  values ('aaaaaaaa-0000-4000-8000-00000000e0a0', 'aaaaaaaa-0000-4000-8000-00000000ec01', 'aaaaaaaa-0000-4000-8000-00000000e201', y, w, true, now()),
+         ('aaaaaaaa-0000-4000-8000-00000000e0a0', 'aaaaaaaa-0000-4000-8000-00000000ec01', 'aaaaaaaa-0000-4000-8000-00000000e201', 2026, 14, true, now());
   insert into public.sampling_week_events (id, organization_id, crop_id, year, week_number, event)
   values ('aaaaaaaa-0000-4000-8000-00000000e501', 'aaaaaaaa-0000-4000-8000-00000000e0a0', 'aaaaaaaa-0000-4000-8000-00000000ec01', y, w, 'completed');
 

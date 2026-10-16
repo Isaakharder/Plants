@@ -3,12 +3,12 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import type { ForecastRunRow, ForecastRunWeekRow, SamplingWeekRow } from '../../lib/database.types'
+import type { ForecastBasisSettingRow, ForecastRunRow, ForecastRunWeekRow, SamplingWeekRow } from '../../lib/database.types'
 import type { Crop } from '../crops/model'
 import { createForecastData } from './data'
 import { greenhouseWeekIndex, indexYw, weekOfIndex } from './engine/weeks'
 
-export type { HistoricalReplay, Preview, SamplingCompletion } from './data'
+export type { HistoricalReplay, LiveAccuracyResult, Preview, SamplingCompletion, ValidatedByBasis } from './data'
 
 const data = createForecastData(supabase)
 export const { loadEngineInput, latestCompletion, computePreview, lockForecast, loadLiveAccuracy, runHistoricalReplay } = data
@@ -45,6 +45,8 @@ export function useLockJobs(cropId: string | undefined) {
 
 // ── Queries ───────────────────────────────────────────────────────────────
 
+const num = (v: number | null) => (v === null ? null : Number(v))
+
 export const forecastKeys = {
   runs: (cropId: string | undefined) => ['forecast', 'runs', cropId] as const,
   weeks: (runId: string | undefined) => ['forecast', 'runWeeks', runId] as const,
@@ -58,12 +60,18 @@ export function useForecastRuns(cropId: string | undefined) {
     enabled: Boolean(cropId),
     queryFn: async (): Promise<ForecastRunRow[]> =>
       check(await supabase.from('forecast_runs').select('*').eq('crop_id', cropId!).order('origin_year', { ascending: false }).order('origin_week', { ascending: false })).map(
-        (r) => ({ ...r, scale: Number(r.scale), marketing_kg: r.marketing_kg === null ? null : Number(r.marketing_kg), marketing_crop_fruit: Number(r.marketing_crop_fruit), marketing_sample_fruit: Number(r.marketing_sample_fruit) }),
+        (r) => ({
+          ...r,
+          scale: Number(r.scale),
+          marketing_kg: num(r.marketing_kg),
+          marketing_crop_fruit: num(r.marketing_crop_fruit),
+          marketing_sample_fruit: num(r.marketing_sample_fruit),
+          harvest_ready_share: num(r.harvest_ready_share),
+          coverage: num(r.coverage),
+        }),
       ),
   })
 }
-
-const num = (v: number | null) => (v === null ? null : Number(v))
 
 /** The weeks of one locked forecast. */
 export function useForecastRunWeeks(runId: string | undefined) {
@@ -98,6 +106,37 @@ export function useSamplingYear(cropId: string | undefined, year: number) {
 export function useInvalidateForecasts() {
   const queryClient = useQueryClient()
   return () => Promise.all([queryClient.invalidateQueries({ queryKey: ['forecast'] }), queryClient.invalidateQueries({ queryKey: ['crops'] })])
+}
+
+/** The crop's forecast basis settings, newest first (append-only history). */
+export function useBasisSettings(cropId: string | undefined) {
+  return useQuery({
+    queryKey: ['forecast', 'basisSettings', cropId],
+    enabled: Boolean(cropId),
+    queryFn: async (): Promise<ForecastBasisSettingRow[]> =>
+      check(await supabase.from('forecast_basis_settings').select('*').eq('crop_id', cropId!).order('created_at', { ascending: false }).order('id')).map((r) => ({
+        ...r,
+        harvest_ready_share: r.harvest_ready_share === null ? null : Number(r.harvest_ready_share),
+      })),
+  })
+}
+
+/** Adds a basis setting (from a week on); earlier settings stay in the history. */
+export async function addBasisSetting(row: { organizationId: string; cropId: string; fromYear: number; fromWeek: number; basis: 'lifecycle' | 'breaker_only'; share: number | null; note: string | null }) {
+  check(
+    await supabase
+      .from('forecast_basis_settings')
+      .insert({
+        organization_id: row.organizationId,
+        crop_id: row.cropId,
+        from_year: row.fromYear,
+        from_week: row.fromWeek,
+        basis: row.basis,
+        harvest_ready_share: row.basis === 'breaker_only' ? row.share : null,
+        note: row.note,
+      })
+      .select('id'),
+  )
 }
 
 /** Saves the crop's case weight (kg per case; null hides cases). */
