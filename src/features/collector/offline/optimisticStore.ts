@@ -114,12 +114,17 @@ const stemVisitOf = (r: StemVisit): StemVisit => ({
 export function mergeWeekProgress(data: WeekProgressData, queued: QueuedAction[]): WeekProgressData {
   const visits = new Map(data.visits.map((v) => [v.id, v]))
   const events = new Map(data.events.map((e) => [e.id, e]))
+  const observations = new Map((data.observations ?? []).map((o) => [o.id, o]))
   for (const a of queued) {
+    if (a.type === 'record_status') {
+      const { id, crop_id, plant_node_id, year, week_number, status, observed_at } = a.record
+      observations.set(id, { id, crop_id, plant_node_id, stem_id: a.stemId ?? null, year, week_number, status, observed_at })
+    }
     if (a.type === 'record_stem_visit') visits.set(a.record.id, { ...stemVisitOf(a.record), crop_id: a.record.crop_id })
     if (a.type === 'record_sampling_event') {
       const { id, crop_id, year, week_number, event, observed_at } = a.record
       events.set(id, { id, crop_id, year, week_number, event, observed_at })
     }
   }
-  return { visits: [...visits.values()], events: [...events.values()] }
+  return { visits: [...visits.values()], events: [...events.values()], observations: [...observations.values()] }
 }

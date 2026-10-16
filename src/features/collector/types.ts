@@ -49,6 +49,19 @@ export type RowCanvasData = {
 export type WeekProgressData = {
   visits: (StemVisit & { crop_id: string })[]
   events: SamplingWeekEvent[]
+  /** Node records of the same weeks, with their node's stem (null when unknown on this device). */
+  observations?: WeekObservation[]
+}
+
+export type WeekObservation = {
+  id: string
+  crop_id: string
+  plant_node_id: string
+  stem_id: string | null
+  year: number
+  week_number: number
+  status: NodeStatus
+  observed_at: string
 }
 
 export const NODE_STATUSES = ['Aborted', 'Pruned', 'Flower', 'SetFruit', 'MatureGreen', 'BreakerFruit', 'Harvested'] as const satisfies readonly NodeStatus[]

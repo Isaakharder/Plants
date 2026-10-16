@@ -1,0 +1,8 @@
+{
+  "name": "plants-forecast-lock-worker",
+  "private": true,
+  "type": "module",
+  "description": "Plants forecast lock worker (bundled; built with npm run build:worker). Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node forecast-lock-worker.js" }
+}

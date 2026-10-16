@@ -238,8 +238,10 @@ alter table public.forecast_run_weeks
 --                   have reached the server, and every stem in the sample was
 --                   checked by the time sampling was marked complete
 -- waiting_for_sync  checks seen on the phone haven't all arrived yet
--- incomplete        some sampled stems weren't checked: no official forecast
---                   is locked from it (a preview still shows it, labelled)
+-- incomplete        some sampled stems (every active stem of the variety's
+--                   active rows, as the collector counts them) weren't checked
+--                   by completion: no official forecast is locked from it (a
+--                   preview still shows it, labelled)
 -- superseded / locked as before
 
 alter table public.forecast_lock_jobs drop constraint forecast_lock_jobs_status_check;
@@ -295,14 +297,12 @@ begin
     where v.crop_id = v_event.crop_id and v.year = v_event.year and v.week_number = v_event.week_number and v.observed_at <= v_event.observed_at
     order by v.measurement_stem_id, v.observed_at desc, v.recorded_at desc, v.id desc
   ) latest where latest.checked;
-  -- Stems in the sample that week: first visit evidence in or before it.
-  select count(*)::integer into v_expected from (
-    select w.measurement_stem_id
-    from public.crop_stem_weeks(v_event.crop_id, now()) w
-    where w.visited
-    group by w.measurement_stem_id
-    having min(w.yw) <= v_event.year * 100 + v_event.week_number
-  ) s;
+  -- Stems in the sample: every active stem of the variety's active rows that existed at completion
+  -- (what the collector shows as "x of y stems checked").
+  select count(*)::integer into v_expected
+  from public.measurement_stems s
+  join public.measurement_rows r on r.id = s.measurement_row_id
+  where s.crop_id = v_event.crop_id and s.is_active and r.is_active and s.created_at <= v_event.observed_at;
   if v_checked_by_completion < v_expected then
     return query select 'incomplete', v_checked_by_completion, v_event.stems_checked_seen,
       format('%s of the %s sampled stems were checked when sampling was marked complete. An official forecast is locked only when every sampled stem is checked.',

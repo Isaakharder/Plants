@@ -11,27 +11,17 @@ import { useOrganization } from '../organization/OrganizationProvider'
 import { addBasisSetting, currentWeek, useBasisSettings, useInvalidateForecasts } from './api'
 import { weekIndex, weekOfIndex } from './engine/weeks'
 import styles from './HarvestForecastTab.module.css'
+import { basisTimeline } from './basisTimeline'
 
 const BASIS_LABEL = { lifecycle: 'Full lifecycle (8 weeks)', breaker_only: 'Breakers only (next week)' } as const
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { timeZone: 'America/Toronto', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
-const yw = (r: Pick<ForecastBasisSettingRow, 'from_year' | 'from_week'>) => r.from_year * 100 + r.from_week
 const describe = (r: ForecastBasisSettingRow) =>
   `${BASIS_LABEL[r.basis]}${r.basis === 'breaker_only' && r.harvest_ready_share !== null ? ` · ${Math.round(100 * r.harvest_ready_share)}% harvest-ready` : ''}`
 
 const weekBefore = (r: Pick<ForecastBasisSettingRow, 'from_year' | 'from_week'>) => {
   const w = weekOfIndex(weekIndex(r.from_year, r.from_week) - 1)
   return `W${w.week} ${w.year}`
-}
-
-/** The entries in effect, by start week (for each start week the newest entry wins). */
-export function basisTimeline(rows: ForecastBasisSettingRow[]): ForecastBasisSettingRow[] {
-  const byWeek = new Map<number, ForecastBasisSettingRow>()
-  for (const r of rows) {
-    const cur = byWeek.get(yw(r))
-    if (!cur || r.created_at > cur.created_at) byWeek.set(yw(r), r)
-  }
-  return [...byWeek.values()].sort((a, b) => yw(a) - yw(b))
 }
 
 export function ForecastSettings({ crop, open, onClose }: { crop: Crop; open: boolean; onClose: () => void }) {

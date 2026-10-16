@@ -3,7 +3,7 @@
 // was started but never marked complete.
 
 import { useState } from 'react';
-import { completionNote, type CropWeekProgress } from './samplingProgress';
+import { completionNote, type BreakerProgress, type CropWeekProgress } from './samplingProgress';
 import type { GreenhouseWeek } from './greenhouseWeek';
 
 type Props = {
@@ -11,11 +11,13 @@ type Props = {
   current: CropWeekProgress;
   /** Last week's progress, when it had checks but was never marked complete. */
   unfinishedPrevious: CropWeekProgress | null;
+  /** This week's Breakers: new / still Breaker / first seen. */
+  breakers?: BreakerProgress;
   onComplete: (week: GreenhouseWeek, note: string, seen: { checked: number; expected: number }) => Promise<void>;
   onReopen: (week: GreenhouseWeek) => Promise<void>;
 };
 
-export function SamplingWeekPanel({ varietyName, current, unfinishedPrevious, onComplete, onReopen }: Props) {
+export function SamplingWeekPanel({ varietyName, current, unfinishedPrevious, breakers, onComplete, onReopen }: Props) {
   const [confirming, setConfirming] = useState<{ progress: CropWeekProgress; mode: 'complete' | 'reopen' } | null>(null);
   const pct = current.expected === 0 ? 0 : Math.round((100 * current.checked) / current.expected);
 
@@ -34,6 +36,12 @@ export function SamplingWeekPanel({ varietyName, current, unfinishedPrevious, on
           <div className="sampling-week-bar" aria-hidden="true">
             <div style={{ width: `${pct}%` }} />
           </div>
+          {breakers && (
+            <span className="sampling-week-breakers" aria-label="Breakers this week">
+              <strong>{breakers.total} Breaker{breakers.total === 1 ? '' : 's'}</strong> · {breakers.new} new · {breakers.stillBreaker} still Breaker
+              {breakers.firstSeen > 0 && ` · ${breakers.firstSeen} first seen`}
+            </span>
+          )}
         </div>
         {current.complete ? (
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setConfirming({ progress: current, mode: 'reopen' })}>

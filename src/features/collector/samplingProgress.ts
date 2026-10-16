@@ -6,8 +6,8 @@
 // week; nothing is inferred. Marking sampling complete never marks the
 // unchecked stems as checked: they stay "not visited" for that week.
 
-import type { GreenhouseWeek } from './greenhouseWeek'
-import type { MobileRowCard, SamplingWeekEvent, StemVisit } from './types'
+import { previousIsoWeek, type GreenhouseWeek } from './greenhouseWeek'
+import type { MobileRowCard, SamplingWeekEvent, StemVisit, WeekObservation } from './types'
 
 const sameWeek = (r: { year: number; week_number: number }, w: GreenhouseWeek) => r.year === w.year && r.week_number === w.week
 
@@ -95,4 +95,39 @@ export function nextUncheckedIndex(stemIds: string[], current: number, checked: 
     if (!checked.has(stemIds[i])) return i
   }
   return null
+}
+
+/**
+ * This week's Breakers for the Friday progress line, counted like the
+ * forecast: each node once (its latest record this week is Breaker);
+ * "still Breaker" when it was Breaker last week too; "new" when its stem was
+ * checked (or recorded) last week without it being Breaker; otherwise
+ * "first seen" (the stem wasn't walked last week, or isn't known here).
+ */
+export type BreakerProgress = { total: number; stillBreaker: number; new: number; firstSeen: number }
+
+export function breakerProgress(cropId: string, observations: WeekObservation[], visits: StemVisit[], week: GreenhouseWeek): BreakerProgress {
+  const prev = previousIsoWeek(week)
+  const latest = (w: GreenhouseWeek) => {
+    const byNode = new Map<string, WeekObservation>()
+    for (const o of observations) {
+      if (o.crop_id !== cropId || !sameWeek(o, w)) continue
+      const cur = byNode.get(o.plant_node_id)
+      if (!cur || o.observed_at > cur.observed_at || (o.observed_at === cur.observed_at && o.id > cur.id)) byNode.set(o.plant_node_id, o)
+    }
+    return byNode
+  }
+  const now = latest(week)
+  const before = latest(prev)
+  const walkedLastWeek = checkedStemIds(visits, prev)
+  for (const o of before.values()) if (o.stem_id) walkedLastWeek.add(o.stem_id)
+  const out: BreakerProgress = { total: 0, stillBreaker: 0, new: 0, firstSeen: 0 }
+  for (const [nodeId, o] of now) {
+    if (o.status !== 'BreakerFruit') continue
+    out.total++
+    if (before.get(nodeId)?.status === 'BreakerFruit') out.stillBreaker++
+    else if (o.stem_id && walkedLastWeek.has(o.stem_id)) out.new++
+    else out.firstSeen++
+  }
+  return out
 }

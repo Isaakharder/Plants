@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { checkedStemIds, completionNote, cropWeekProgress, latestSamplingEvent, nextUncheckedIndex } from './samplingProgress'
+import { breakerProgress, checkedStemIds, completionNote, cropWeekProgress, latestSamplingEvent, nextUncheckedIndex } from './samplingProgress'
 import { previousIsoWeek } from './greenhouseWeek'
-import type { MobileRowCard, SamplingWeekEvent, StemVisit } from './types'
+import type { MobileRowCard, NodeStatus, SamplingWeekEvent, StemVisit, WeekObservation } from './types'
 
 const W42 = { year: 2026, week: 42 }
 const visit = (id: string, stem: string, checked: boolean, at: string, week = 42): StemVisit => ({
@@ -80,3 +80,28 @@ describe('previousIsoWeek', () => {
     expect(previousIsoWeek({ year: 2026, week: 1 })).toEqual({ year: 2025, week: 52 })
   })
 })
+
+describe('Friday progress: Breakers this week', () => {
+  const W = { year: 2026, week: 43 }
+  const o = (id: string, node: string, stem: string | null, week: number, status: NodeStatus, at = '12:00', crop = 'c1'): WeekObservation => ({
+    id, crop_id: crop, plant_node_id: node, stem_id: stem, year: 2026, week_number: week, status, observed_at: `2026-10-${week === 43 ? 23 : 16}T${at}:00Z`,
+  })
+  const check = (stem: string, week: number): StemVisit => ({ id: `v${stem}${week}`, measurement_stem_id: stem, year: 2026, week_number: week, checked: true, observed_at: `2026-10-${week === 43 ? 23 : 16}T11:00:00Z` })
+
+  it('counts each node once: still Breaker, new on a stem walked last week, first seen otherwise', () => {
+    const obs = [
+      o('1', 'n1', 'a', 42, 'BreakerFruit'),
+      o('2', 'n1', 'a', 43, 'BreakerFruit'), // still Breaker
+      o('3', 'n1', 'a', 43, 'BreakerFruit', '12:05'), // tapped twice
+      o('4', 'n2', 'a', 43, 'BreakerFruit'), // new: stem a recorded last week
+      o('5', 'n3', 'b', 43, 'BreakerFruit'), // new: stem b checked last week
+      o('6', 'n4', 'c', 43, 'BreakerFruit'), // first seen: stem c not walked last week
+      o('7', 'n5', null, 43, 'BreakerFruit'), // stem unknown on this device: first seen
+      o('8', 'n6', 'a', 43, 'BreakerFruit'),
+      o('9', 'n6', 'a', 43, 'Harvested', '13:00'), // changed the same week: not a Breaker now
+      o('10', 'x1', 'z', 43, 'BreakerFruit', '12:00', 'c2'), // another variety
+    ]
+    expect(breakerProgress('c1', obs, [check('b', 42)], W)).toEqual({ total: 5, stillBreaker: 1, new: 2, firstSeen: 2 })
+  })
+})
+

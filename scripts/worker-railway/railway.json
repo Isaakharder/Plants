@@ -1,0 +1,10 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "echo 'Prebuilt bundle: forecast-lock-worker.js (npm run build:worker)'"
+  },
+  "deploy": {
+    "startCommand": "node forecast-lock-worker.js",
+    "restartPolicyType": "ALWAYS"
+  }
+}

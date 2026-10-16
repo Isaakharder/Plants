@@ -23,9 +23,14 @@ insert into public.crops (id, organization_id, name, color, planting_date, pullo
   ('aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'Crop A', 'orange', '2025-12-01', '2027-12-01', 100, 700, 5);
 insert into public.measurement_rows (id, organization_id, crop_id, row_name) values
   ('aaaaaaaa-0000-4000-8000-00000000d101', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'Row A');
-insert into public.measurement_stems (id, organization_id, crop_id, measurement_row_id, stem_name) values
-  ('aaaaaaaa-0000-4000-8000-00000000d201', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d101', 'S1'),
-  ('aaaaaaaa-0000-4000-8000-00000000d202', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d101', 'S2');
+insert into public.measurement_stems (id, organization_id, crop_id, measurement_row_id, stem_name, created_at) values
+  ('aaaaaaaa-0000-4000-8000-00000000d201', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d101', 'S1', '2026-01-01'),
+  ('aaaaaaaa-0000-4000-8000-00000000d202', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d101', 'S2', '2026-01-01'),
+  -- An active stem with no records at all is still in the sample: it must be checked too.
+  ('aaaaaaaa-0000-4000-8000-00000000d203', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d101', 'S3', '2026-01-01'),
+  -- An inactive stem doesn't count.
+  ('aaaaaaaa-0000-4000-8000-00000000d204', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d101', 'S4', '2026-01-01');
+update public.measurement_stems set is_active = false where id = 'aaaaaaaa-0000-4000-8000-00000000d204';
 insert into public.plant_nodes (id, organization_id, crop_id, measurement_stem_id, node_number) values
   ('aaaaaaaa-0000-4000-8000-00000000d301', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d201', 1),
   ('aaaaaaaa-0000-4000-8000-00000000d302', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d202', 1),
@@ -171,7 +176,7 @@ begin
   values ('aaaaaaaa-0000-4000-8000-00000000d501', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', (select y from cw), (select w from cw), 'completed', 1, 2,
           now() - interval '2 minutes', now() - interval '2 minutes');
   select * into r from public.forecast_lock_readiness('aaaaaaaa-0000-4000-8000-00000000d501');
-  if r.state <> 'incomplete' or r.detail not like '1 of the 2 sampled stems were checked%' then raise exception 'FAIL: readiness %', r; end if;
+  if r.state <> 'incomplete' or r.detail not like '1 of the 3 sampled stems were checked%' then raise exception 'FAIL: readiness %', r; end if;
   begin
     perform pg_temp.lock_breaker('aaaaaaaa-0000-4000-8000-00000000df01', 'aaaaaaaa-0000-4000-8000-00000000d501', pg_temp.breaker_weeks((select y from cw), (select w from cw)));
     raise exception 'FAIL: locked an incomplete walkthrough';
@@ -179,7 +184,8 @@ begin
   end;
   -- S2 checked after completion: still incomplete (later checks don't count for that completion).
   insert into public.stem_visits (organization_id, crop_id, measurement_stem_id, year, week_number, checked, observed_at)
-  values ('aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d202', (select y from cw), (select w from cw), true, now() - interval '1 minute');
+  values ('aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d202', (select y from cw), (select w from cw), true, now() - interval '1 minute'),
+         ('aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d203', (select y from cw), (select w from cw), true, now() - interval '1 minute');
   if (select state from public.forecast_lock_readiness('aaaaaaaa-0000-4000-8000-00000000d501')) <> 'incomplete' then raise exception 'FAIL: a late check counted'; end if;
 end $$;
 
@@ -195,7 +201,7 @@ begin
   if r.status <> 'incomplete' then raise exception 'FAIL: job %', r; end if;
 end $$;
 
--- Completed again with both stems checked: ready, and a Breakers-only forecast is stored.
+-- Completed again with every active stem checked: ready, and a Breakers-only forecast is stored.
 reset role;
 select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-4000-8000-00000000d001","role":"authenticated"}', true);
 set local role authenticated;
@@ -204,7 +210,7 @@ declare r record;
 begin
   insert into public.sampling_week_events (id, organization_id, crop_id, year, week_number, event, stems_checked_seen, stems_expected_seen, observed_at, recorded_at)
   values ('aaaaaaaa-0000-4000-8000-00000000d502', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', (select y from cw), (select w from cw),
-          'completed', 2, 2, now(), now());
+          'completed', 3, 3, now(), now());
   select * into r from public.forecast_lock_readiness('aaaaaaaa-0000-4000-8000-00000000d502');
   if r.state <> 'ready' then raise exception 'FAIL: readiness after all stems checked %', r; end if;
   -- A week marked unavailable may not carry numbers; Breakers only needs a share.

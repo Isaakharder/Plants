@@ -22,7 +22,8 @@ export type QueuedWrite =
   | { type: 'create_stem'; record: Insert<'measurement_stems'> }
   | { type: 'create_node'; record: Insert<'plant_nodes'> }
   | { type: 'deactivate_node'; record: { id: string; organization_id: string; measurement_stem_id: string } }
-  | { type: 'record_status'; record: Insert<'node_observations'> }
+  /** stemId: the node's stem, kept on the device only (Friday progress counts queued Breakers per stem); never sent. */
+  | { type: 'record_status'; record: Insert<'node_observations'>; stemId?: string }
   | { type: 'upsert_growth'; record: Insert<'stem_growth_measurements'> }
   | { type: 'record_stem_visit'; record: Insert<'stem_visits'> }
   | { type: 'record_sampling_event'; record: Insert<'sampling_week_events'> }

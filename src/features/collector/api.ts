@@ -230,7 +230,7 @@ export function useRowCards(organizationId: string, userId: string) {
 async function fetchWeekProgress(organizationId: string): Promise<WeekProgressData> {
   // The current and previous week only: a few hundred checks at most.
   const since = new Date(Date.now() - 16 * 24 * 60 * 60 * 1000).toISOString()
-  const [visits, events] = await Promise.all([
+  const [visits, events, observations] = await Promise.all([
     fetchAll((after, limit, withCount) => {
       let q = supabase
         .from('stem_visits')
@@ -246,8 +246,24 @@ async function fetchWeekProgress(organizationId: string): Promise<WeekProgressDa
       .eq('organization_id', organizationId)
       .gte('observed_at', since)
       .then(check),
+    // Records of this and last week, with their node's stem (Friday progress: new / still Breaker / first seen).
+    fetchAll((after, limit, withCount) => {
+      let q = supabase
+        .from('node_observations')
+        .select('id, crop_id, plant_node_id, year, week_number, status, observed_at, plant_nodes(measurement_stem_id)', withCount ? { count: 'exact' } : undefined)
+        .eq('organization_id', organizationId)
+        .gte('observed_at', since)
+      if (after) q = q.gt('id', after)
+      return q.order('id').limit(limit)
+    }, (o) => o.id),
   ])
-  return { visits: recentVisits(visits), events: recentVisits(events) }
+  return {
+    visits: recentVisits(visits),
+    events: recentVisits(events),
+    observations: recentVisits(
+      observations.map(({ plant_nodes, ...o }) => ({ ...o, stem_id: (plant_nodes as { measurement_stem_id: string } | null)?.measurement_stem_id ?? null })),
+    ),
+  }
 }
 
 /**
@@ -259,7 +275,7 @@ export function useWeekProgress(organizationId: string, userId: string) {
   const queued = useQueuedWrites(userId)
   return useQuery({
     ...collectorQuery<WeekProgressData>(queryClient, collectorKeys.weekProgress(organizationId), userId, () => fetchWeekProgress(organizationId), (base, queued) =>
-      mergeWeekProgress(base ?? { visits: [], events: [] }, queued),
+      mergeWeekProgress(base ?? { visits: [], events: [], observations: [] }, queued),
     ),
     select: useCallback((data: WeekProgressData) => mergeWeekProgress(data, queued), [queued]),
   })
@@ -450,7 +466,7 @@ export function useCollectorActions() {
         status,
         observed_at: new Date().toISOString(),
       }
-      await submit({ type: 'record_status', record })
+      await submit({ type: 'record_status', record, stemId: node.measurement_stem_id })
       return record
     }
 

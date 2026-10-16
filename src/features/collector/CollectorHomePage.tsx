@@ -12,7 +12,7 @@ import { NotOnDeviceError, prefetchRowCanvases, useAttentionRules, useCollectorA
 import { OfflineBanner } from './components/OfflineBanner';
 import { TextPromptModal } from './components/TextPromptModal';
 import { previousIsoWeek, useGreenhouseWeek } from './greenhouseWeek';
-import { cropWeekProgress } from './samplingProgress';
+import { breakerProgress, cropWeekProgress } from './samplingProgress';
 import { SamplingWeekPanel } from './SamplingWeekPanel';
 import type { CollectorCrop, MobileRowCard } from './types';
 import { cropColorVar, type CanvasState } from './display';
@@ -74,11 +74,13 @@ export function CollectorHomePage() {
     const rows = rowCardsQuery.data ?? [];
     const thisWeek = { year: currentYear, week: currentWeek };
     const lastWeek = previousIsoWeek(thisWeek);
+    const observations = weekProgress.data?.observations ?? [];
     return new Map(varieties.map(v => {
       const previous = cropWeekProgress(v.id, rows, visits, events, lastWeek);
       return [v.id, {
         current: cropWeekProgress(v.id, rows, visits, events, thisWeek),
         unfinishedPrevious: previous.checked > 0 && !previous.complete ? previous : null,
+        breakers: breakerProgress(v.id, observations, visits, thisWeek),
       }];
     }));
   }, [weekProgress.data, rowCardsQuery.data, varieties, currentYear, currentWeek]);
@@ -138,6 +140,7 @@ export function CollectorHomePage() {
                     varietyName={variety.name}
                     current={progressByVariety.get(variety.id)!.current}
                     unfinishedPrevious={progressByVariety.get(variety.id)!.unfinishedPrevious}
+                    breakers={progressByVariety.get(variety.id)!.breakers}
                     onComplete={(week, note, seen) => actions.recordSamplingEvent(variety.id, week, 'completed', note, seen)}
                     onReopen={week => actions.recordSamplingEvent(variety.id, week, 'reopened', null)}
                   />

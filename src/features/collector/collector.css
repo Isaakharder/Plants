@@ -1562,3 +1562,10 @@
   font-weight: 400;
   color: var(--gray-700);
 }
+
+.collector-app .sampling-week-breakers {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--gray-700);
+}
