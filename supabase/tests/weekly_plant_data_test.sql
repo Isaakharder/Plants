@@ -26,7 +26,7 @@ insert into public.crops (id, organization_id, name, color, planting_date, pullo
 insert into public.measurement_rows (id, organization_id, crop_id, row_name) values
   ('aaaaaaaa-0000-4000-8000-0000000001a1', 'aaaaaaaa-0000-4000-8000-0000000000a0', 'aaaaaaaa-0000-4000-8000-00000000c001', 'Row A'),
   ('bbbbbbbb-0000-4000-8000-0000000001b1', 'bbbbbbbb-0000-4000-8000-0000000000b0', 'bbbbbbbb-0000-4000-8000-00000000c001', 'Row B');
--- S1 is sampled from 2026-W10 to 2027-W02; S2 joins later (W12) and ends W20.
+-- S1 has records from 2026-W10 to 2027-W02; S2 joins later (W12) and ends W20.
 insert into public.measurement_stems (id, organization_id, crop_id, measurement_row_id, stem_name) values
   ('aaaaaaaa-0000-4000-8000-0000000002a1', 'aaaaaaaa-0000-4000-8000-0000000000a0', 'aaaaaaaa-0000-4000-8000-00000000c001', 'aaaaaaaa-0000-4000-8000-0000000001a1', 'S1'),
   ('aaaaaaaa-0000-4000-8000-0000000002a2', 'aaaaaaaa-0000-4000-8000-0000000000a0', 'aaaaaaaa-0000-4000-8000-00000000c001', 'aaaaaaaa-0000-4000-8000-0000000001a1', 'S2'),
@@ -107,15 +107,15 @@ begin
   -- Week-by-week counts: week:stems/sets/breakers/harvested for every sampled week.
   select string_agg(format('W%s:%s/%s/%s/%s', iso_week, sampled_stems, new_sets, new_breakers, new_harvested), ' ' order by iso_week)
     into got from public.weekly_plant_data(crop, 2026, as_of) where iso_week between 10 and 21 or iso_week >= 52;
-  want := 'W10:1/1/0/0 W11:1/1/0/0 W12:2/1/1/0 W13:2/1/0/1 W14:2/0/0/0 W15:2/0/0/0 W16:2/1/1/0 W17:2/0/0/0 '
-       || 'W18:2/0/0/1 W19:2/0/0/0 W20:2/0/0/1 W21:1/0/0/0 W52:1/0/0/0 W53:1/1/0/0';
+  want := 'W10:1/1/0/0 W11:1/1/0/0 W12:2/1/1/0 W13:1/1/0/1 W14:1/0/0/0 W15:1/0/0/0 W16:2/1/1/0 W17:1/0/0/0 '
+       || 'W18:1/0/0/1 W19:1/0/0/0 W20:2/0/0/1 W21:0/0/0/0 W52:0/0/0/0 W53:1/1/0/0';
   -- W10  N2 first observed as SetFruit (counts)            W11  N1 Flower → SetFruit
   -- W12  N4 side shoot set; N2 breaker (skipped Mature); N3's mis-tap corrected → no set; N5 inactive ignored
   -- W13  N3 set; N2 harvested                               W14  N1 repeats SetFruit after a gap → nothing
   -- W16  M1 set; N1 breaker                                 W17  N1 repeats BreakerFruit → nothing
   -- W18  N1 harvested   W19 repeat → nothing                W20  N3 harvested (no breaker inferred)
-  -- W12–W20: S2 counts as sampled, including W13–W15 when nothing was recorded on it
-  -- W21–W53: S1's span runs to 2027-W02                     W53  N6 set
+  -- A stem is sampled only in weeks with visit evidence (20261021000000_weekly_plant_data_visits.sql):
+  -- S2 has records in W12, W16 and W20 only; S1 has none in W21–W52     W53  N6 set
   if got <> want then raise exception E'FAIL: weekly counts\n got:  %\n want: %', got, want; end if;
 
   -- Totals: each stage once per node, nothing inferred.
@@ -141,7 +141,7 @@ begin
   if n <> 0 then raise exception 'FAIL: 2027 has no baseline week'; end if;
 
   -- Year boundary: the 2027-W01 SetFruit repeats 2026-W53 and is not a new set; 2027-W02 breaker counts;
-  -- S1 is sampled into 2027 until its last observation.
+  -- S1 is sampled in 2027 in the weeks it has records.
   select string_agg(format('W%s:%s/%s/%s', iso_week, sampled_stems, new_sets, new_breakers), ' ' order by iso_week) into got
     from public.weekly_plant_data(crop, 2027, as_of) where iso_week <= 3;
   if got <> 'W1:1/0/0 W2:1/0/1 W3:0/0/0' then raise exception 'FAIL: 2027 boundary = %', got; end if;

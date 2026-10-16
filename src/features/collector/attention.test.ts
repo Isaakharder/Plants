@@ -193,7 +193,7 @@ describe('offline: indicators follow this device’s queued writes', () => {
   const n18 = node('n18', 18)
   const n19 = node('n19', 19)
   const server: RowCanvasData = {
-    row, stems: [stem], nodes: [n18, n19], growth: [],
+    row, stems: [stem], nodes: [n18, n19], growth: [], visits: [],
     statuses: [status('n18', 'SetFruit', '2026-09-20T13:00:00.000Z', 2026, 38), status('n19', 'SetFruit', '2026-09-20T13:00:00.000Z', 2026, 38)],
   }
   const now = at('2026-10-05T14:00:00.000Z') // 15 days after both Set fruit records: both overdue
@@ -229,7 +229,7 @@ describe('offline: indicators follow this device’s queued writes', () => {
 describe('a node added offline: its age starts when the worker added it', () => {
   const row = { id: 'r1', ...base, row_name: 'Row 1', sort_order: 1, is_active: true, created_by: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }
   const stem = { id: 's1', ...base, measurement_row_id: 'r1', stem_name: 'Stem 1', sort_order: 1, is_active: true, created_by: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }
-  const server: RowCanvasData = { row, stems: [stem], nodes: [], statuses: [], growth: [] }
+  const server: RowCanvasData = { row, stems: [stem], nodes: [], statuses: [], growth: [], visits: [] }
   const monday = '2026-10-05T13:00:00.000Z'
   const record = { id: 'new', ...base, measurement_stem_id: 's1', node_number: 31, sort_order: 31, is_side_shoot: false, parent_node_id: null, node_label: null, side: null, is_active: true }
   const queuedNode = (rec: Record<string, unknown>, createdAt: number): QueuedAction =>

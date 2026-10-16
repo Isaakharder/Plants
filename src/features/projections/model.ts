@@ -1,8 +1,8 @@
-import type { ClosingCohort, CohortCell, SetHarvestCohortRow, WeeklyFruitLossRow, WeeklyPlantDataRow } from '../../lib/database.types'
+import type { ClosingCohort, CohortCell, SamplingWeekRow, SetHarvestCohortRow, WeeklyFruitLossRow, WeeklyPlantDataRow } from '../../lib/database.types'
 import type { IsoDate } from '../../lib/dates'
 import { formatTwoDecimals } from '../../lib/format'
 
-export type { ClosingCohort, CohortCell, SetHarvestCohortRow, WeeklyFruitLossRow, WeeklyPlantDataRow }
+export type { ClosingCohort, CohortCell, SamplingWeekRow, SetHarvestCohortRow, WeeklyFruitLossRow, WeeklyPlantDataRow }
 
 /** ISO week-numbering year of a calendar date ("2025-12-29" → 2026). */
 export function isoYearOfDate(iso: IsoDate): number {
@@ -291,4 +291,53 @@ export function observedHarvestShare(cells: CohortCell[]): number {
 export function cohortHarvestedKg(setsPerM2: number | null, harvestShare: number, afwG: number | null, cropAreaM2: number): number | null {
   if (afwG === null || setsPerM2 === null) return null
   return ((setsPerM2 * harvestShare * afwG) / 1000) * cropAreaM2
+}
+
+// ── Sampling coverage (sampling_weeks) ─────────────────────────────────────
+
+/** sampling_weeks() numerics arrive as numbers or strings; normalise them. */
+export function normalizeSamplingWeek(row: SamplingWeekRow): SamplingWeekRow {
+  const num = (v: number | null) => (v === null ? null : Number(v))
+  return { ...row, visited_m2: num(row.visited_m2), coverage: num(row.coverage) }
+}
+
+export type CoverageKind = 'none' | 'full' | 'partial' | 'in_progress'
+
+/**
+ * How a week's sampling coverage reads in the table: none (no stem expected
+ * or visited), full (every expected stem visited), partial (a finished week
+ * with stems missing) or in progress (the current week, not marked complete).
+ */
+export function coverageKind(row: SamplingWeekRow): CoverageKind {
+  if (row.expected_stems === 0 || (row.visited_stems === 0 && row.state === 'not_started')) return 'none'
+  if (row.is_provisional && row.state !== 'complete') return 'in_progress'
+  return row.visited_stems >= row.expected_stems ? 'full' : 'partial'
+}
+
+/** "55/56": stems visited ÷ stems expected; — when no stem was expected or visited. */
+export function coverageLabel(row: SamplingWeekRow | undefined): string {
+  if (!row || coverageKind(row) === 'none') return '—'
+  return `${row.visited_stems}/${row.expected_stems}`
+}
+
+/** Hover text for a week's coverage: what was visited, and what can't be verified. */
+export function coverageTitle(week: number, row: SamplingWeekRow | undefined): string {
+  if (!row || coverageKind(row) === 'none') return `W${week}: no sampled stem was visited.`
+  const missing = row.expected_stems - row.visited_stems
+  const lines = [`W${week}: ${row.visited_stems} of ${row.expected_stems} sampled stems visited.`]
+  if (missing > 0) {
+    lines.push(
+      row.is_provisional && row.state !== 'complete'
+        ? `${missing} not visited yet this week.`
+        : `${missing} stem${missing === 1 ? ' has' : 's have'} no record this week: not visited${row.tracking === 'legacy' ? ', or checked with nothing changed' : ''}. Their fruit counts as not observed, never as zero harvests.`,
+    )
+  }
+  if (row.tracking === 'legacy') {
+    lines.push('Legacy week: only status changes were recorded, so a visit is inferred from the records and complete inspection of every node can’t be verified.')
+  } else {
+    lines.push(`${row.checked_stems} confirmed checked with “✓ Stem checked”.`)
+  }
+  if (row.state === 'complete') lines.push('Sampling marked complete.')
+  else if (row.completion === 'reopened') lines.push('Sampling was marked complete, then reopened.')
+  return lines.join('\n')
 }

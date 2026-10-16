@@ -1,0 +1,185 @@
+// One shape for what the Harvest Forecast tab shows, whether it comes from a
+// locked snapshot (forecast_runs) or a preview computed in the browser.
+
+import type { ForecastRunRow, ForecastRunWeekRow } from '../../lib/database.types'
+import type { Preview } from './api'
+import type { DataSummary } from './engine/types'
+import { MARKETING_WEEKS } from './engine/types'
+import { weekOfIndex } from './engine/weeks'
+
+export type ViewWeek = {
+  horizon: number
+  year: number
+  week: number
+  window: 'marketing' | 'outlook'
+  sampleFruit: number
+  cropFruit: number
+  afwG: number | null
+  afwSource: string | null
+  afwKind: 'grower' | 'model' | null
+  kg: number | null
+  cases: number | null
+  components: { breaker: number; matureGreen: number; setFruit: number; catchUp: number; newSets: number }
+  expectedAborted: number
+  expectedPruned: number
+}
+
+export type ForecastView = {
+  source: 'locked' | 'preview'
+  /** Locked: 'official' (on time) or 'late'. Preview: 'preliminary' (sampling not complete) or 'preview'. */
+  status: 'official' | 'late' | 'preliminary' | 'preview'
+  runId: string | null
+  originYear: number
+  originWeek: number
+  /** When it was locked or computed. */
+  at: string
+  observedCutoff: string
+  recordedCutoff: string
+  engineVersion: string
+  confidence: { level: 'experimental' | 'standard'; reasons: string[] }
+  sampleStems: number
+  scale: number
+  caseWeightKg: number | null
+  weeks: ViewWeek[]
+  marketing: { weeks: number; cropFruit: number; kg: number | null; cases: number | null }
+  /** Fruit on the plants at the origin (crop scale): expected harvested within the forecast, aborted, pruned, still on the plant after it. */
+  fate: { harvested: number; aborted: number; pruned: number; stillOnPlant: number } | null
+  dataSummary: (DataSummary & { afwHistory?: 'log' | 'current' }) | null
+  model: unknown
+}
+
+const cases = (kg: number | null, caseWeight: number | null) => (kg === null || !caseWeight ? null : kg / caseWeight)
+
+type Fate = { harvested: number; aborted: number; pruned: number; stillOnPlant: { S: number; M: number; B: number } }
+const fateAtScale = (f: Fate | undefined, scale: number) =>
+  f ? { harvested: f.harvested * scale, aborted: f.aborted * scale, pruned: f.pruned * scale, stillOnPlant: (f.stillOnPlant.S + f.stillOnPlant.M + f.stillOnPlant.B) * scale } : null
+
+export function viewFromPreview(p: Preview, caseWeightKg: number | null): ForecastView {
+  const r = p.result
+  const weeks: ViewWeek[] = r.weeks.map((w) => {
+    const t = weekOfIndex(w.targetIndex)
+    return {
+      horizon: w.horizon,
+      year: t.year,
+      week: t.week,
+      window: w.window,
+      sampleFruit: w.sampleFruit,
+      cropFruit: w.cropFruit,
+      afwG: w.afwG,
+      afwSource: w.afwSource,
+      afwKind: w.afwKind,
+      kg: w.kg,
+      cases: cases(w.kg, caseWeightKg),
+      components: w.components,
+      expectedAborted: w.expectedAborted,
+      expectedPruned: w.expectedPruned,
+    }
+  })
+  return {
+    source: 'preview',
+    status: p.completion ? 'preview' : 'preliminary',
+    runId: null,
+    originYear: p.origin.year,
+    originWeek: p.origin.week,
+    at: p.computedAt,
+    observedCutoff: r.dataSummary.observedCutoff,
+    recordedCutoff: r.dataSummary.recordedCutoff,
+    engineVersion: r.engineVersion,
+    confidence: r.confidence,
+    sampleStems: r.sampleStems,
+    scale: r.scale,
+    caseWeightKg,
+    weeks,
+    marketing: { weeks: r.marketingTotal.weeks, cropFruit: r.marketingTotal.cropFruit, kg: r.marketingTotal.kg, cases: cases(r.marketingTotal.kg, caseWeightKg) },
+    fate: fateAtScale(r.inventoryFate, r.scale),
+    dataSummary: { ...r.dataSummary, afwHistory: p.afwHistory },
+    model: { params: r.params, newSetsPerWeek: r.newSetsPerWeek },
+  }
+}
+
+export function viewFromRun(run: ForecastRunRow, rows: ForecastRunWeekRow[]): ForecastView {
+  const model = run.model as { inventoryFate?: Fate } | null
+  return {
+    source: 'locked',
+    status: run.kind,
+    runId: run.id,
+    originYear: run.origin_year,
+    originWeek: run.origin_week,
+    at: run.locked_at,
+    observedCutoff: run.observed_cutoff,
+    recordedCutoff: run.recorded_cutoff,
+    engineVersion: run.engine_version,
+    confidence: { level: run.confidence, reasons: run.confidence_reasons },
+    sampleStems: run.sample_stems,
+    scale: Number(run.scale),
+    caseWeightKg: run.case_weight_kg === null ? null : Number(run.case_weight_kg),
+    weeks: rows.map((w) => ({
+      horizon: w.horizon,
+      year: w.target_year,
+      week: w.target_week,
+      window: w.window,
+      sampleFruit: w.sample_fruit,
+      cropFruit: w.crop_fruit,
+      afwG: w.afw_g,
+      afwSource: w.afw_source,
+      afwKind: w.afw_kind,
+      kg: w.kg,
+      cases: w.cases,
+      components: w.components,
+      expectedAborted: w.expected_aborted,
+      expectedPruned: w.expected_pruned,
+    })),
+    marketing: {
+      weeks: run.marketing_weeks,
+      cropFruit: Number(run.marketing_crop_fruit),
+      kg: run.marketing_kg,
+      cases: cases(run.marketing_kg, run.case_weight_kg === null ? null : Number(run.case_weight_kg)),
+    },
+    fate: fateAtScale(model?.inventoryFate, Number(run.scale)),
+    dataSummary: run.data_summary as ForecastView['dataSummary'],
+    model: run.model,
+  }
+}
+
+export const STATUS_LABEL: Record<ForecastView['status'], string> = {
+  official: 'Official',
+  late: 'Late',
+  preliminary: 'Preliminary preview',
+  preview: 'Preview',
+}
+
+export function statusExplanation(v: Pick<ForecastView, 'status' | 'originWeek'>): string {
+  switch (v.status) {
+    case 'official':
+      return `Locked from the completed W${v.originWeek} sampling before its first forecast week began. It will never change.`
+    case 'late':
+      return `Locked from the W${v.originWeek} sampling after its first forecast week had begun, so it is kept but not counted as an on-time forecast.`
+    case 'preliminary':
+      return `W${v.originWeek} sampling isn’t marked complete, so this preview may change. It is not stored and never replaces the official forecast.`
+    case 'preview':
+      return `Computed now from the completed W${v.originWeek} sampling. Not stored; the official forecast is the locked one.`
+  }
+}
+
+/** Weeks 1–5 for the marketer, 6–8 the outlook. */
+export const isMarketing = (w: Pick<ViewWeek, 'horizon'>) => w.horizon <= MARKETING_WEEKS
+
+/** "1,234" */
+export const formatCount = (n: number | null) => (n === null ? '—' : Math.round(n).toLocaleString('en-US'))
+/** "1,234 kg" figures without unit. */
+export const formatKg = formatCount
+
+/** Hover text for a forecast week: where its expected harvest comes from (sample peppers). */
+export function componentsTitle(w: ViewWeek, scale: number): string {
+  const c = w.components
+  const crop = (n: number) => Math.round(n * scale).toLocaleString('en-US')
+  const lines = [
+    `W${w.week}: ${w.sampleFruit.toFixed(1)} sampled peppers expected (${crop(w.sampleFruit)} for the crop)`,
+    `From fruit at Breaker now: ${c.breaker.toFixed(1)} · MatureGreen: ${c.matureGreen.toFixed(1)} · SetFruit: ${c.setFruit.toFixed(1)}`,
+  ]
+  if (c.catchUp > 0.05) lines.push(`Catch-up from stems not visited at the last sampling: ${c.catchUp.toFixed(1)}`)
+  if (c.newSets > 0.05) lines.push(`Fruit not set yet: ${c.newSets.toFixed(1)}`)
+  lines.push(`Fruit on the plants expected to abort this week: ${w.expectedAborted.toFixed(1)} · to be pruned: ${w.expectedPruned.toFixed(1)}`)
+  if (w.afwSource) lines.push(`AFW ${w.afwG?.toFixed(0)} g: ${w.afwSource}`)
+  return lines.join('\n')
+}

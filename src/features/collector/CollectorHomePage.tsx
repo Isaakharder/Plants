@@ -8,15 +8,17 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { cropStatus } from '../crops/model';
 import { useOrganization } from '../organization/OrganizationProvider';
-import { NotOnDeviceError, prefetchRowCanvases, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRowCards } from './api';
+import { NotOnDeviceError, prefetchRowCanvases, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRowCards, useWeekProgress } from './api';
 import { OfflineBanner } from './components/OfflineBanner';
 import { TextPromptModal } from './components/TextPromptModal';
-import { useGreenhouseWeek } from './greenhouseWeek';
+import { previousIsoWeek, useGreenhouseWeek } from './greenhouseWeek';
+import { cropWeekProgress } from './samplingProgress';
+import { SamplingWeekPanel } from './SamplingWeekPanel';
 import type { CollectorCrop, MobileRowCard } from './types';
 import { cropColorVar, type CanvasState } from './display';
 
 export function CollectorHomePage() {
-  const { week: currentWeek, dayLabel: todayLabel } = useGreenhouseWeek(); // greenhouse (Toronto) week, not the device clock
+  const { year: currentYear, week: currentWeek, dayLabel: todayLabel } = useGreenhouseWeek(); // greenhouse (Toronto) week, not the device clock
 
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -26,6 +28,7 @@ export function CollectorHomePage() {
 
   const cropsQuery = useCollectorCrops(organization.id, userId);
   const rowCardsQuery = useRowCards(organization.id, userId);
+  const weekProgress = useWeekProgress(organization.id, userId);
   // Download the attention rules up front so the rows have them offline.
   useAttentionRules(organization.id, userId);
   // Downloaded here too, so the picker has the organization's choice before the phone goes offline.
@@ -63,6 +66,22 @@ export function CollectorHomePage() {
   async function handleAddRow(variety: CollectorCrop, rowName: string) {
     await actions.createRow(variety.id, rowName, (rowCardsByVariety[variety.id]?.length ?? 0) + 1);
   }
+
+  // This week's (and an unfinished last week's) "✓ Stem checked" progress per variety.
+  const progressByVariety = useMemo(() => {
+    const visits = weekProgress.data?.visits ?? [];
+    const events = weekProgress.data?.events ?? [];
+    const rows = rowCardsQuery.data ?? [];
+    const thisWeek = { year: currentYear, week: currentWeek };
+    const lastWeek = previousIsoWeek(thisWeek);
+    return new Map(varieties.map(v => {
+      const previous = cropWeekProgress(v.id, rows, visits, events, lastWeek);
+      return [v.id, {
+        current: cropWeekProgress(v.id, rows, visits, events, thisWeek),
+        unfinishedPrevious: previous.checked > 0 && !previous.complete ? previous : null,
+      }];
+    }));
+  }, [weekProgress.data, rowCardsQuery.data, varieties, currentYear, currentWeek]);
 
   function openCanvas(row: MobileRowCard, variety: CollectorCrop) {
     const state: CanvasState = {
@@ -114,6 +133,16 @@ export function CollectorHomePage() {
                   </button>
                 </div>
 
+                {progressByVariety.get(variety.id) && (
+                  <SamplingWeekPanel
+                    varietyName={variety.name}
+                    current={progressByVariety.get(variety.id)!.current}
+                    unfinishedPrevious={progressByVariety.get(variety.id)!.unfinishedPrevious}
+                    onComplete={(week, note, seen) => actions.recordSamplingEvent(variety.id, week, 'completed', note, seen)}
+                    onReopen={week => actions.recordSamplingEvent(variety.id, week, 'reopened', null)}
+                  />
+                )}
+
                 {rowCards === undefined ? (
                   <div style={{ color: 'var(--gray-400)', fontSize: 13, padding: '8px 0' }}>
                     {rowCardsQuery.error instanceof NotOnDeviceError
@@ -135,7 +164,7 @@ export function CollectorHomePage() {
                         <div className="row-card-name">{row.row_name}</div>
                         <div className="row-card-meta">
                           <span>{row.stem_count} stem{row.stem_count !== 1 ? 's' : ''}</span>
-                          <span>Wk {currentWeek}</span>
+                          <RowChecked progress={progressByVariety.get(variety.id)?.current.byRow.get(row.id)} />
                         </div>
                         <div className="row-card-footer">
                           <span>
@@ -168,5 +197,16 @@ export function CollectorHomePage() {
         />
       )}
     </div>
+  );
+}
+
+/** "9/14 ✓" on a row card: stems checked this week. */
+function RowChecked({ progress }: { progress: { checked: number; total: number } | undefined }) {
+  if (!progress || progress.total === 0) return <span />;
+  const done = progress.checked === progress.total;
+  return (
+    <span className={`row-card-checked${done ? ' row-card-checked--done' : ''}`}>
+      {progress.checked}/{progress.total} ✓
+    </span>
   );
 }

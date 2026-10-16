@@ -8,6 +8,8 @@ export type MeasurementStem = Tables['measurement_stems']['Row']
 export type PlantNode = Tables['plant_nodes']['Row']
 export type NodeObservation = Tables['node_observations']['Row']
 export type StemGrowthMeasurement = Tables['stem_growth_measurements']['Row']
+export type StemVisit = Pick<Tables['stem_visits']['Row'], 'id' | 'measurement_stem_id' | 'year' | 'week_number' | 'checked' | 'observed_at'>
+export type SamplingWeekEvent = Pick<Tables['sampling_week_events']['Row'], 'id' | 'crop_id' | 'year' | 'week_number' | 'event' | 'observed_at'>
 
 /** A node's most recent observation (carried forward across weeks). */
 export type LatestNodeStatus = Pick<NodeObservation, 'id' | 'plant_node_id' | 'year' | 'week_number' | 'status' | 'observed_at'>
@@ -39,6 +41,14 @@ export type RowCanvasData = {
   nodes: PlantNode[]
   statuses: LatestNodeStatus[]
   growth: StemGrowthMeasurement[]
+  /** “✓ Stem checked” records of this row's stems (recent weeks; the latest per stem and week wins). */
+  visits: StemVisit[]
+}
+
+/** This organization's stem checks and sampling completions for the weeks the home screen shows. */
+export type WeekProgressData = {
+  visits: (StemVisit & { crop_id: string })[]
+  events: SamplingWeekEvent[]
 }
 
 export const NODE_STATUSES = ['Aborted', 'Pruned', 'Flower', 'SetFruit', 'MatureGreen', 'BreakerFruit', 'Harvested'] as const satisfies readonly NodeStatus[]

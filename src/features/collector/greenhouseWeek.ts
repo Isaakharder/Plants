@@ -23,6 +23,13 @@ export function greenhouseIsoWeek(now: Date = new Date()): GreenhouseWeek {
   return { year, week: Math.ceil(((date.getTime() - Date.UTC(year, 0, 1)) / 86400000 + 1) / 7) }
 }
 
+/** The ISO week before this one (2027-W01 → 2026-W53). */
+export function previousIsoWeek({ year, week }: GreenhouseWeek): GreenhouseWeek {
+  if (week > 1) return { year, week: week - 1 }
+  // Dec 28 is always in the last ISO week of its year.
+  return greenhouseIsoWeek(new Date(Date.UTC(year - 1, 11, 28, 12)))
+}
+
 /** The week to stamp on an observation being saved at this moment. */
 export function currentGreenhouseWeek(): GreenhouseWeek {
   return greenhouseIsoWeek(new Date())

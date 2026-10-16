@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { NavLink, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { formatInteger } from '../../lib/format'
 import { greenhouseIsoWeek, useGreenhouseWeek } from '../collector/greenhouseWeek'
 import { useCrops } from '../crops/api'
 import { sortCrops, stemsPerM2 } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
-import { useSaveWeeklyHarvestAfw, useSetHarvestCohorts, useWeeklyFruitLoss, useWeeklyHarvestAfw, useWeeklyPlantData, type AfwChange } from './api'
+import { useSamplingWeeks, useSaveWeeklyHarvestAfw, useSetHarvestCohorts, useWeeklyFruitLoss, useWeeklyHarvestAfw, useWeeklyPlantData, type AfwChange } from './api'
 import {
   LADDER_AGES,
   AFW_MAX_G,
@@ -14,6 +14,9 @@ import {
   cohortBand,
   cohortCellTitle,
   cohortKey,
+  coverageKind,
+  coverageLabel,
+  coverageTitle,
   cropYears,
   defaultYear,
   followCaption,
@@ -30,10 +33,12 @@ import {
   weeksFromFirstSample,
   type CohortCell,
   type CohortSummary,
+  type SamplingWeekRow,
   type SetHarvestCohortRow,
   type WeeklyFruitLossRow,
   type WeekTiming,
 } from './model'
+import { ProjectionsTabs } from './ProjectionsTabs'
 import { SamplingDetail } from './SamplingDetail'
 import { WeeklyPlantDataHelp } from './WeeklyPlantDataHelp'
 import styles from './WeeklyPlantDataTab.module.css'
@@ -63,6 +68,7 @@ export function WeeklyPlantDataTab() {
   const weeks = useWeeklyPlantData(crop?.id, year)
   const cohorts = useSetHarvestCohorts(crop?.id, year)
   const fruitLoss = useWeeklyFruitLoss(crop?.id, year)
+  const sampling = useSamplingWeeks(crop?.id, year)
   const afw = useWeeklyHarvestAfw(crop?.id, year)
   const saveAfw = useSaveWeeklyHarvestAfw(organization.id, crop?.id, year)
   // Typed but unsaved AFWs, per crop · year · harvest week (text as typed).
@@ -71,6 +77,7 @@ export function WeeklyPlantDataTab() {
   const tableRef = useRef<HTMLDivElement>(null)
   const fruitLossRows = useMemo(() => new Map((fruitLoss.data ?? []).map((row) => [row.iso_week, row])), [fruitLoss.data])
   const cohortRows = useMemo(() => new Map((cohorts.data ?? []).map((row) => [row.iso_week, row])), [cohorts.data])
+  const samplingRows = useMemo(() => new Map((sampling.data ?? []).map((row) => [row.iso_week, row])), [sampling.data])
   // Presentation only: start at the first sampled week and show only the
   // cohort ages that have a harvest somewhere in the displayed weeks.
   const shownWeeks = useMemo(() => weeksFromFirstSample(weeks.data ?? []), [weeks.data])
@@ -167,11 +174,7 @@ export function WeeklyPlantDataTab() {
     <section className={styles.section} aria-label="Weekly Plant Data">
       {/* One compact toolbar: tab on the left, Variety/Year centred, actions on the right. */}
       <div className={styles.toolbar}>
-        <nav className={styles.subtabs} aria-label="Projections">
-          <NavLink to="/projections/weekly-plant-data" className={({ isActive }) => `${styles.subtab} ${isActive ? styles.active : ''}`}>
-            Weekly Plant Data
-          </NavLink>
-        </nav>
+        <ProjectionsTabs />
         <div className={styles.selectors}>
           <label className={`field ${styles.control}`}>
             <span className="field-label">Variety</span>
@@ -216,6 +219,7 @@ export function WeeklyPlantDataTab() {
         year={year}
         weeks={shownWeeks}
         cohortRows={cohorts.data ?? []}
+        samplingRows={samplingRows}
         ages={ages}
         stemsPerM2={stemsPerM2(crop)}
       />
@@ -228,10 +232,10 @@ export function WeeklyPlantDataTab() {
         startMarker={ages.includes(0)}
       />
 
-      {weeks.isPending || cohorts.isPending || fruitLoss.isPending ? (
+      {weeks.isPending || cohorts.isPending || fruitLoss.isPending || sampling.isPending ? (
         <LoadingState />
-      ) : weeks.error || cohorts.error || fruitLoss.error ? (
-        <ErrorState error={weeks.error ?? cohorts.error ?? fruitLoss.error} />
+      ) : weeks.error || cohorts.error || fruitLoss.error || sampling.error ? (
+        <ErrorState error={weeks.error ?? cohorts.error ?? fruitLoss.error ?? sampling.error} />
       ) : shownWeeks.length === 0 ? (
         <EmptyState title={`No plant data for ${crop.name} in ${year}`} description="Weeks appear here once plants are recorded with the mobile collector." />
       ) : (
@@ -263,6 +267,7 @@ export function WeeklyPlantDataTab() {
             <thead>
               <tr>
                 <th scope="col">Week</th>
+                <th scope="col" className={styles.stemsHead} title="Sampled stems visited that week ÷ stems in the sample">Stems</th>
                 <th scope="col">Sets/m²</th>
                 <th scope="col">Breakers/m²</th>
                 <th scope="col">Harvested/m²</th>
@@ -284,6 +289,7 @@ export function WeeklyPlantDataTab() {
                     {w.is_baseline && <span className={styles.tag}>Baseline</span>}
                     {w.is_provisional && <span className={`${styles.tag} ${styles.provisional}`}>In progress</span>}
                   </th>
+                  <CoverageTd week={w.iso_week} row={samplingRows.get(w.iso_week)} />
                   <SetsTd row={cohortRows.get(w.iso_week)} value={formatRate(w.sets_per_m2)} follow={follow} />
                   <td>{formatRate(w.breakers_per_m2)}</td>
                   <td>{formatRate(w.harvested_per_m2)}</td>
@@ -321,6 +327,20 @@ export function WeeklyPlantDataTab() {
       )}
 
     </section>
+  )
+}
+
+const COVERAGE_CLASS = { none: '', full: '', partial: styles.coveragePartial, in_progress: styles.coverageInProgress }
+
+/** Stems visited ÷ stems in the sample. Partial weeks stand out; legacy weeks (visits inferred from records) are muted. */
+function CoverageTd({ week, row }: { week: number; row: SamplingWeekRow | undefined }) {
+  const kind = row ? coverageKind(row) : 'none'
+  const classes = [styles.coverage, COVERAGE_CLASS[kind], row?.tracking === 'legacy' && kind !== 'none' ? styles.coverageLegacy : ''].filter(Boolean).join(' ')
+  return (
+    <td className={classes} title={coverageTitle(week, row)}>
+      {coverageLabel(row)}
+      {row?.state === 'complete' && <span className={styles.coverageComplete} aria-label="sampling marked complete"> ✓</span>}
+    </td>
   )
 }
 

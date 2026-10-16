@@ -23,5 +23,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Node-only tooling (backtests that read database exports) is checked by tsconfig.tools.json.
+  "exclude": ["src/**/*.backtest.test.ts"]
 }

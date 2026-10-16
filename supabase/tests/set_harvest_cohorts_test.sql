@@ -55,7 +55,7 @@ insert into public.crops (id, organization_id, name, color, planting_date, pullo
 insert into public.measurement_rows (id, organization_id, crop_id, row_name) values
   ('aaaaaaaa-0000-4000-8000-0000000001a1', 'aaaaaaaa-0000-4000-8000-0000000000a0', 'aaaaaaaa-0000-4000-8000-00000000c001', 'Row A'),
   ('bbbbbbbb-0000-4000-8000-0000000001b1', 'bbbbbbbb-0000-4000-8000-0000000000b0', 'bbbbbbbb-0000-4000-8000-00000000c001', 'Row B');
--- S1: sampled 2026-W10 … 2027-W03 (W10 is the crop's baseline). S2: W12 … W22.
+-- S1: sampled (checked weekly) 2026-W10 … 2027-W03 (W10 is the crop's baseline). S2: W12 … W22.
 insert into public.measurement_stems (id, organization_id, crop_id, measurement_row_id, stem_name) values
   ('aaaaaaaa-0000-4000-8000-0000000002a1', 'aaaaaaaa-0000-4000-8000-0000000000a0', 'aaaaaaaa-0000-4000-8000-00000000c001', 'aaaaaaaa-0000-4000-8000-0000000001a1', 'S1'),
   ('aaaaaaaa-0000-4000-8000-0000000002a2', 'aaaaaaaa-0000-4000-8000-0000000000a0', 'aaaaaaaa-0000-4000-8000-00000000c001', 'aaaaaaaa-0000-4000-8000-0000000001a1', 'S2'),
@@ -126,6 +126,17 @@ insert into public.node_observations (organization_id, crop_id, plant_node_id, y
   ('bbbbbbbb-0000-4000-8000-0000000000b0', 'bbbbbbbb-0000-4000-8000-00000000c001', 'bbbbbbbb-0000-4000-8000-0000000003b9', 2026, 20, 'Harvested', '2026-05-12 12:00Z');
 
 -- ── As user A ────────────────────────────────────────────────────────────────
+-- The stems were checked every week of their sampling periods (explicit
+-- "stem checked" records), so each week counts as sampled even when nothing
+-- on the stem changed.
+insert into public.stem_visits (organization_id, crop_id, measurement_stem_id, year, week_number, observed_at)
+select 'aaaaaaaa-0000-4000-8000-0000000000a0', 'aaaaaaaa-0000-4000-8000-00000000c001', stem::uuid,
+       extract(isoyear from d)::integer, extract(week from d)::integer, d + interval '1 day 12 hours'
+from (values ('aaaaaaaa-0000-4000-8000-0000000002a1', date '2026-03-02', date '2027-01-18'),   -- S1: 2026-W10 … 2027-W03
+             ('aaaaaaaa-0000-4000-8000-0000000002a2', date '2026-03-16', date '2026-05-25'))  -- S2: 2026-W12 … W22
+     as v(stem, first_monday, last_monday)
+cross join lateral generate_series(first_monday, last_monday, interval '7 days') as d;
+
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-4000-8000-000000000001","role":"authenticated"}', true);
 

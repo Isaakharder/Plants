@@ -7,6 +7,9 @@ import {
   cohortCells,
   cohortHarvestedKg,
   cohortKey,
+  coverageKind,
+  coverageLabel,
+  coverageTitle,
   cropYears,
   defaultYear,
   followCaption,
@@ -20,6 +23,7 @@ import {
   ladderAgesWithHarvests,
   cohortLossTitle,
   normalizeFruitLoss,
+  normalizeSamplingWeek,
   normalizeWeek,
   observedHarvestShare,
   parseAfw,
@@ -30,6 +34,7 @@ import {
   weeksFromFirstSample,
   type ClosingCohort,
   type CohortCell,
+  type SamplingWeekRow,
   type SetHarvestCohortRow,
   type WeeklyFruitLossRow,
   type WeeklyPlantDataRow,
@@ -448,5 +453,60 @@ describe('Fruit Loss % (per calendar week)', () => {
     expect(fruitLossTitle(41, { ...row, iso_week: 41, is_provisional: true })).toContain('In progress')
     expect(fruitLossTitle(42, undefined)).toContain('hasn\'t been sampled')
     expect(fruitLossTitle(22, { ...row, fruit_at_start: 0, fruit_lost: 0, flower_lost: 16, fruit_loss_percent: 0 })).toContain('no fruit was on the sampled plants')
+  })
+})
+
+describe('sampling coverage', () => {
+  const week = (over: Partial<SamplingWeekRow>): SamplingWeekRow => ({
+    iso_week: 31,
+    expected_stems: 56,
+    visited_stems: 56,
+    checked_stems: 0,
+    unvisited_stems: 0,
+    visited_m2: 8.24,
+    coverage: 1,
+    tracking: 'legacy',
+    completion: null,
+    completed_at: null,
+    state: 'legacy',
+    is_provisional: false,
+    ...over,
+  })
+
+  it('normalizes numeric strings', () => {
+    const row = normalizeSamplingWeek({ ...week({}), visited_m2: '8.09' as unknown as number, coverage: '0.9821' as unknown as number })
+    expect(row.visited_m2).toBe(8.09)
+    expect(row.coverage).toBe(0.9821)
+  })
+
+  it('classifies full, partial, in-progress and empty weeks', () => {
+    expect(coverageKind(week({}))).toBe('full')
+    expect(coverageKind(week({ visited_stems: 55, unvisited_stems: 1 }))).toBe('partial')
+    expect(coverageKind(week({ visited_stems: 12, is_provisional: true, tracking: 'explicit', state: 'in_progress' }))).toBe('in_progress')
+    expect(coverageKind(week({ visited_stems: 0, state: 'not_started', tracking: 'explicit', is_provisional: true }))).toBe('none')
+    expect(coverageKind(week({ expected_stems: 0, visited_stems: 0 }))).toBe('none')
+    // A current week marked complete with stems missing is partial, not in progress.
+    expect(coverageKind(week({ visited_stems: 54, is_provisional: true, tracking: 'explicit', state: 'complete' }))).toBe('partial')
+  })
+
+  it('labels visited ÷ expected', () => {
+    expect(coverageLabel(week({ visited_stems: 55 }))).toBe('55/56')
+    expect(coverageLabel(undefined)).toBe('—')
+    expect(coverageLabel(week({ visited_stems: 0, state: 'not_started' }))).toBe('—')
+  })
+
+  it('explains missing stems, legacy limits and explicit checks', () => {
+    const legacy = coverageTitle(31, week({ visited_stems: 55, unvisited_stems: 1 }))
+    expect(legacy).toContain('55 of 56 sampled stems visited')
+    expect(legacy).toContain('1 stem has no record this week: not visited, or checked with nothing changed')
+    expect(legacy).toContain('never as zero harvests')
+    expect(legacy).toContain('complete inspection of every node can’t be verified')
+
+    const explicit = coverageTitle(42, week({ tracking: 'explicit', state: 'complete', completion: 'completed', checked_stems: 56 }))
+    expect(explicit).toContain('56 confirmed checked')
+    expect(explicit).toContain('Sampling marked complete.')
+    expect(explicit).not.toContain('Legacy')
+
+    expect(coverageTitle(42, week({ tracking: 'explicit', state: 'in_progress', is_provisional: true, visited_stems: 20 }))).toContain('36 not visited yet this week.')
   })
 })

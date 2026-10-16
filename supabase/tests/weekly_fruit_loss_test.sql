@@ -49,7 +49,7 @@ insert into public.crops (id, organization_id, name, color, planting_date, pullo
   ('aaaaaaaa-0000-4000-8000-0000000f1c01', 'aaaaaaaa-0000-4000-8000-0000000f10a0', 'Crop A', 'red', '2025-12-01', '2026-12-01', 100, 700);
 insert into public.measurement_rows (id, organization_id, crop_id, row_name) values
   ('aaaaaaaa-0000-4000-8000-0000000f1101', 'aaaaaaaa-0000-4000-8000-0000000f10a0', 'aaaaaaaa-0000-4000-8000-0000000f1c01', 'Row A');
--- S1 is sampled 2025-W52 … 2026-W16; S2 only 2026-W10 … W11.
+-- S1 is sampled (checked weekly) 2025-W52 … 2026-W16; S2 only 2026-W10 … W11.
 insert into public.measurement_stems (id, organization_id, crop_id, measurement_row_id, stem_name) values
   ('aaaaaaaa-0000-4000-8000-0000000f1201', 'aaaaaaaa-0000-4000-8000-0000000f10a0', 'aaaaaaaa-0000-4000-8000-0000000f1c01', 'aaaaaaaa-0000-4000-8000-0000000f1101', 'S1'),
   ('aaaaaaaa-0000-4000-8000-0000000f1202', 'aaaaaaaa-0000-4000-8000-0000000f10a0', 'aaaaaaaa-0000-4000-8000-0000000f1c01', 'aaaaaaaa-0000-4000-8000-0000000f1101', 'S2');
@@ -84,6 +84,17 @@ from (values
   ('09', 2026, 10, 'SetFruit'), ('09', 2026, 11, 'Aborted'),
   ('10', 2026, 10, 'SetFruit'), ('10', 2026, 11, 'SetFruit')
 ) as v(n, y, w, s);
+
+-- Both stems were checked every week of their sampling periods (explicit
+-- "stem checked" records), so each week counts as sampled even when nothing
+-- on the stem changed.
+insert into public.stem_visits (organization_id, crop_id, measurement_stem_id, year, week_number, observed_at)
+select 'aaaaaaaa-0000-4000-8000-0000000f10a0', 'aaaaaaaa-0000-4000-8000-0000000f1c01', stem::uuid,
+       extract(isoyear from d)::integer, extract(week from d)::integer, d + interval '1 day 12 hours'
+from (values ('aaaaaaaa-0000-4000-8000-0000000f1201', date '2025-12-22', date '2026-04-13'),   -- S1: 2025-W52 … 2026-W16
+             ('aaaaaaaa-0000-4000-8000-0000000f1202', date '2026-03-02', date '2026-03-09'))  -- S2: 2026-W10 … W11
+     as v(stem, first_monday, last_monday)
+cross join lateral generate_series(first_monday, last_monday, interval '7 days') as d;
 
 -- ── As user A ────────────────────────────────────────────────────────────────
 set local role authenticated;

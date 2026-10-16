@@ -81,6 +81,7 @@ const data: RowCanvasData = {
     reading('g32', s1.id, 32, 7, 19),
     reading('g33', s1.id, 33, 8, 19),
   ],
+  visits: [],
 }
 const twin = buildTwin(data, NOW)
 const stemById = (id: string): TwinStem => twin.stems.find((s) => s.id === id)!
@@ -250,7 +251,7 @@ describe('duplicate records', () => {
   // Node 3 has two shoots both labelled 3+1 (one an empty double tap) and a 3+2.
   const st = stem('stem-d', 'Stem D', 1)
   const n3 = main('d3', st.id, 3)
-  const twinOf = (nodes: PlantNode[]) => buildTwin({ row: null, stems: [st], nodes, statuses: [], growth: [] }, NOW).stems[0]
+  const twinOf = (nodes: PlantNode[]) => buildTwin({ row: null, stems: [st], nodes, statuses: [], growth: [], visits: [] }, NOW).stems[0]
   const dupA = { ...shoot('d3+1a', st.id, n3, 1, 'right'), created_at: '2026-06-05T13:29:20.054Z' }
   const dupB = { ...shoot('d3+1b', st.id, n3, 1, 'right'), created_at: '2026-06-05T13:29:20.535Z' }
   const second = shoot('d3+2', st.id, n3, 2, 'right')

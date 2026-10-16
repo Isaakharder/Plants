@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { newId } from './ids'
 import { OfflineQueue, indexedDbStorage, type QueuedWrite, type WriteResult } from './offlineQueue'
+import { PHOTO_BUCKET, sendPhoto, type PhotoUploader } from './photoUpload'
 import { syncOnlineState } from './onlineState'
 
 export type SyncStatus = 'online' | 'offline' | 'syncing' | 'synced' | 'error'
@@ -21,7 +22,17 @@ export function collectorQueue(): OfflineQueue {
 // 401 = expired access token, fixed by the next token refresh.
 const isRetryableStatus = (status: number) => status === 0 || status === 401 || status === 408 || status === 429 || status >= 500
 
+/** Breaker photos: the private bucket, then the record (see photoUpload.ts). */
+const photoUploader: PhotoUploader = {
+  upload: (path, body, contentType) => supabase.storage.from(PHOTO_BUCKET).upload(path, body, { contentType, upsert: false }),
+  insertRecord: async (record) => {
+    const res = await supabase.from('node_photos').upsert(record as never, { onConflict: 'id', ignoreDuplicates: true })
+    return { error: res.error, status: res.status }
+  },
+}
+
 export async function executeWrite(write: QueuedWrite): Promise<WriteResult> {
+  if (write.type === 'upload_photo') return sendPhoto(photoUploader, write.record, write.image)
   // Inserts use ON CONFLICT (id) DO NOTHING: replaying a write whose response
   // was lost leaves exactly one record.
   const insertOnce = { onConflict: 'id', ignoreDuplicates: true } as const
@@ -40,6 +51,10 @@ export async function executeWrite(write: QueuedWrite): Promise<WriteResult> {
       case 'upsert_growth':
         // One reading per stem per week; re-saving corrects it.
         return supabase.from('stem_growth_measurements').upsert(write.record, { onConflict: 'measurement_stem_id,year,week_number' })
+      case 'record_stem_visit':
+        return supabase.from('stem_visits').upsert(write.record, insertOnce)
+      case 'record_sampling_event':
+        return supabase.from('sampling_week_events').upsert(write.record, insertOnce)
     }
   })()
   if (!res.error) return { ok: true }

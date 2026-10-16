@@ -631,3 +631,29 @@
 .samplingTable tbody tr:last-child > * {
   border-bottom: 0;
 }
+
+/* Stems column: sampling coverage (sampling_weeks). */
+.stemsHead {
+  white-space: nowrap;
+}
+.coverage {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.coverageLegacy {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.coveragePartial {
+  color: #8a5a00;
+  background: #fdf3dc;
+  font-weight: 600;
+}
+.coverageInProgress {
+  font-style: italic;
+}
+.coverageComplete {
+  color: var(--success, #2f7d32);
+  font-weight: 700;
+}

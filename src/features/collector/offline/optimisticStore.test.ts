@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { RowCanvasData } from '../types'
 import type { QueuedAction, QueuedWrite } from './offlineQueue'
-import { mergeRowCanvas, mergeRowCards } from './optimisticStore'
+import { mergeRowCanvas, mergeRowCards, mergeWeekProgress } from './optimisticStore'
 
 const ORG = 'org-1'
 const CROP = 'crop-1'
@@ -21,6 +21,7 @@ const server: RowCanvasData = {
   nodes: [serverNode],
   statuses: [{ id: 'o1', plant_node_id: 'n1', year: 2026, week_number: 40, status: 'Flower', observed_at: '2026-09-30T12:00:00Z' }],
   growth: [],
+  visits: [],
 }
 
 describe('mergeRowCanvas', () => {
@@ -50,7 +51,7 @@ describe('mergeRowCanvas', () => {
   })
 
   it('builds the row itself when the row was created offline', () => {
-    const empty: RowCanvasData = { row: null, stems: [], nodes: [], statuses: [], growth: [] }
+    const empty: RowCanvasData = { row: null, stems: [], nodes: [], statuses: [], growth: [], visits: [] }
     const created = queued({ type: 'create_row', record: { id: 'r9', ...base, row_name: 'Row 9', sort_order: 9, is_active: true } })
     expect(mergeRowCanvas(empty, 'r9', [created]).row).toMatchObject({ id: 'r9', row_name: 'Row 9', crop_id: CROP })
   })
@@ -77,5 +78,24 @@ describe('mergeRowCards', () => {
     const merged = mergeRowCards([card], ORG, writes)
     expect(merged.map((c) => [c.id, c.stem_count])).toEqual([['r1', 1], ['r2', 1]])
     expect(mergeRowCards(merged, ORG, writes)).toEqual(merged)
+  })
+})
+
+describe('stem checks and sampling completion (offline)', () => {
+  const check = queued({ type: 'record_stem_visit', record: { id: 'v1', ...base, measurement_stem_id: 's1', year: 2026, week_number: 42, checked: true, observed_at: '2026-10-16T12:00:00Z' } })
+  const otherRow = queued({ type: 'record_stem_visit', record: { id: 'v2', ...base, measurement_stem_id: 's-elsewhere', year: 2026, week_number: 42, checked: true, observed_at: '2026-10-16T12:00:00Z' } })
+  const complete = queued({ type: 'record_sampling_event', record: { id: 'e1', ...base, year: 2026, week_number: 42, event: 'completed', note: 'Completed with all 1 stems checked.', observed_at: '2026-10-16T15:00:00Z' } })
+
+  it('shows a queued check on its own row only', () => {
+    const merged = mergeRowCanvas(server, 'r1', [check, otherRow])
+    expect(merged.visits).toEqual([{ id: 'v1', measurement_stem_id: 's1', year: 2026, week_number: 42, checked: true, observed_at: '2026-10-16T12:00:00Z' }])
+    expect(mergeRowCanvas(merged, 'r1', [check, otherRow])).toEqual(merged)
+  })
+
+  it('adds queued checks and completions to the week progress, idempotently', () => {
+    const merged = mergeWeekProgress({ visits: [], events: [] }, [check, complete])
+    expect(merged.visits).toEqual([expect.objectContaining({ id: 'v1', crop_id: CROP, checked: true })])
+    expect(merged.events).toEqual([{ id: 'e1', crop_id: CROP, year: 2026, week_number: 42, event: 'completed', observed_at: '2026-10-16T15:00:00Z' }])
+    expect(mergeWeekProgress(merged, [check, complete])).toEqual(merged)
   })
 })

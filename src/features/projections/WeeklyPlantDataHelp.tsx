@@ -32,7 +32,17 @@ export function WeeklyPlantDataHelp({
           <dl>
             <div>
               <dt>Sampled m²</dt>
-              <dd>Sampled stems ÷ {formatTwoDecimals(stemsPerM2)} stems/m² (this variety’s picking stems ÷ its area).</dd>
+              <dd>Visited stems ÷ {formatTwoDecimals(stemsPerM2)} stems/m² (this variety’s picking stems ÷ its area).</dd>
+            </div>
+            <div>
+              <dt>Stems</dt>
+              <dd>
+                Sampled stems visited that week ÷ stems in the sample. A stem counts as visited only when there is evidence: a status record, a
+                growth reading, a new node, or “✓ Stem checked” in the collector. Per-m² values use the visited stems only; an unvisited stem is
+                never a zero. <span className={styles.coveragePartial}>Amber</span>: a finished week with stems missing. ✓: sampling marked
+                complete. <span className={styles.coverageLegacy}>Dotted</span>: a legacy week from before “✓ Stem checked”, when only status
+                changes were recorded, so complete inspection of every node can’t be verified.
+              </dd>
             </div>
             <div>
               <dt>Sampling detail</dt>

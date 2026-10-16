@@ -17,6 +17,9 @@ import { StatusIcon } from '../plantArt/StatusArt';
 import { useOrganization } from '../organization/OrganizationProvider';
 import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRowCanvas } from './api';
 import { pickerOptions } from './statusOptions';
+import { checkedStemIds, nextUncheckedIndex } from './samplingProgress';
+import { BreakerCapture } from './BreakerCapture';
+import type { PreparedPhoto } from './photos';
 import { OfflineBanner } from './components/OfflineBanner';
 import { TextPromptModal } from './components/TextPromptModal';
 import { cropColorVar, type CanvasState } from './display';
@@ -127,6 +130,8 @@ export function RowCanvasPage() {
   const [statusPickerCtx, setStatusPickerCtx] = useState<{ stem: MeasurementStem; node: PlantNode; isNew?: boolean } | null>(null);
   const [attentionCtx, setAttentionCtx] = useState<{ stem: MeasurementStem; node: PlantNode } | null>(null);
   const [saving,   setSaving]   = useState(false);
+  // Camera-first Breaker: the picker shows the photo step instead of saving straight away.
+  const [breakerCapture, setBreakerCapture] = useState(false);
   const [message,  setMessage]  = useState('');
 
   const [vegModal,     setVegModal]     = useState(false);
@@ -196,6 +201,45 @@ export function RowCanvasPage() {
   const safeIndex  = stems.length === 0 ? 0 : Math.min(activeStemIndex, stems.length - 1);
   const activeStem = stems[safeIndex] ?? null;
 
+  // "✓ Stem checked" this week (queued checks included, so it works offline).
+  const checkedThisWeek = useMemo(
+    () => checkedStemIds(canvasQuery.data?.visits ?? [], { year: currentYear, week: currentWeek }),
+    [canvasQuery.data, currentYear, currentWeek],
+  );
+  const checkedCount = stems.filter(s => checkedThisWeek.has(s.id)).length;
+  const activeChecked = activeStem ? checkedThisWeek.has(activeStem.id) : false;
+  const [checking, setChecking] = useState(false);
+
+  /**
+   * Confirms every node of the stem was looked at this week, then moves on to
+   * the next unchecked stem. Undo records a retraction (nothing is edited).
+   */
+  async function handleStemChecked(checked: boolean) {
+    if (!activeStem || checking) return;
+    setChecking(true);
+    try {
+      await actions.recordStemVisit(activeStem, checked);
+      if (!checked) {
+        setMessage(`${activeStem.stem_name} is no longer marked checked.`);
+        return;
+      }
+      const nowChecked = new Set(checkedThisWeek).add(activeStem.id);
+      const done = stems.filter(s => nowChecked.has(s.id)).length;
+      const next = nextUncheckedIndex(stems.map(s => s.id), safeIndex, nowChecked);
+      if (next === null) {
+        setMessage(`${activeStem.stem_name} checked ✓ All ${stems.length} stems in ${rowName} are checked this week.`);
+      } else {
+        setMessage(`${activeStem.stem_name} checked ✓ ${done} of ${stems.length} in this row. Now ${stems[next].stem_name}.`);
+        setActiveStemIndex(next);
+        canvasRef.current?.scrollTo({ top: 0 });
+      }
+    } catch (err) {
+      setMessage(`Couldn’t save the check: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setChecking(false);
+    }
+  }
+
   async function handleAddStem(name: string) {
     if (!row) throw new Error('This row isn’t available on this device yet. Reconnect and try again.');
     const newIndex = stems.length;
@@ -238,6 +282,25 @@ export function RowCanvasPage() {
     setStatusPickerCtx({ stem: activeStem, node: created, isNew: true });
   }
 
+  /** Breaker with its front and back photos (kept on the phone until they upload). */
+  async function handleSaveBreakerPhotos(photos: PreparedPhoto[]) {
+    if (!statusPickerCtx) return;
+    setSaving(true);
+    try {
+      await actions.recordBreakerWithPhotos(statusPickerCtx.node, photos);
+      const nodeLabel = statusPickerCtx.node.is_side_shoot
+        ? (statusPickerCtx.node.node_label ?? 'Shoot')
+        : `Node ${statusPickerCtx.node.node_number}`;
+      setMessage(`${nodeLabel}: ${STATUS_LABEL.BreakerFruit} · 2 photos saved on this phone${navigator.onLine ? '' : ' (they upload when the connection returns)'}`);
+      setBreakerCapture(false);
+      setStatusPickerCtx(null);
+    } catch (err: unknown) {
+      setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSaveStatus(status: NodeStatus) {
     if (!statusPickerCtx) return;
     setSaving(true);
@@ -247,6 +310,7 @@ export function RowCanvasPage() {
         ? (statusPickerCtx.node.node_label ?? 'Shoot')
         : `Node ${statusPickerCtx.node.node_number}`;
       setMessage(`${nodeLabel}: ${STATUS_LABEL[status]}`);
+      setBreakerCapture(false);
       setStatusPickerCtx(null);
     } catch (err: unknown) {
       setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
@@ -408,9 +472,10 @@ export function RowCanvasPage() {
             ←
           </button>
           <span className="stem-nav-name">
+            {activeChecked && <span className="stem-nav-checked" aria-label="checked this week">✓ </span>}
             {activeStem?.stem_name ?? ''}
             <span className="stem-nav-counter">
-              &nbsp;{safeIndex + 1} / {stems.length}
+              &nbsp;{safeIndex + 1} / {stems.length} · {checkedCount} checked
             </span>
           </span>
           <button
@@ -640,6 +705,27 @@ export function RowCanvasPage() {
         ) : null}
       </div>
 
+      {/* ── Stem check (thumb reach, below the canvas) ── */}
+      {activeStem && (
+        <div className={`stem-check-bar${activeChecked ? ' stem-check-bar--done' : ''}`}>
+          {activeChecked ? (
+            <>
+              <span className="stem-check-done">✓ {activeStem.stem_name} checked this week</span>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={checking} onClick={() => void handleStemChecked(false)}>
+                Undo
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn btn-primary stem-check-button" disabled={checking} onClick={() => void handleStemChecked(true)}>
+              ✓ Stem checked
+              <span className="stem-check-remaining">
+                {stems.length - checkedCount} of {stems.length} left in this row
+              </span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Add Stem modal ── */}
       {addStemModal && (
         <TextPromptModal
@@ -751,7 +837,7 @@ export function RowCanvasPage() {
 
       {/* ── Status picker ── */}
       {statusPickerCtx && (
-        <div className="modal-overlay" onClick={() => handleCancelStatusPicker()}>
+        <div className="modal-overlay" onClick={() => { if (!saving) { setBreakerCapture(false); handleCancelStatusPicker(); } }}>
           <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
             <div className="modal-title">
               {pickerNodeLabel}
@@ -774,6 +860,15 @@ export function RowCanvasPage() {
                 </select>
               </div>
             )}
+            {breakerCapture ? (
+              <BreakerCapture
+                nodeLabel={pickerNodeLabel}
+                saving={saving}
+                onSave={photos => void handleSaveBreakerPhotos(photos)}
+                onManual={() => void handleSaveStatus('BreakerFruit')}
+                onBack={() => setBreakerCapture(false)}
+              />
+            ) : (
             <div className="status-picker-grid">
               {(() => {
                 const currentRec = (statusesByStem[statusPickerCtx.stem.id] ?? []).find(
@@ -788,7 +883,12 @@ export function RowCanvasPage() {
                     key={opt.value}
                     className={`status-picker-btn${isActive ? ' active' : ''}`}
                     style={isActive ? { borderColor: tone.ring, background: tone.background } : {}}
-                    onClick={() => !saving && !opt.hidden && handleSaveStatus(opt.value)}
+                    onClick={() => {
+                      if (saving || opt.hidden) return;
+                      // Breaker: photograph front and back first (manual entry stays available).
+                      if (opt.value === 'BreakerFruit') setBreakerCapture(true);
+                      else void handleSaveStatus(opt.value);
+                    }}
                     disabled={saving || opt.hidden}
                     title={opt.hidden ? 'Current status. Not offered for new entries (Settings › Mobile status options).' : undefined}
                   >
@@ -799,8 +899,9 @@ export function RowCanvasPage() {
                 });
               })()}
             </div>
+            )}
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => handleCancelStatusPicker()}>Cancel</button>
+              <button className="btn btn-secondary" onClick={() => { setBreakerCapture(false); handleCancelStatusPicker(); }}>Cancel</button>
             </div>
           </div>
         </div>

@@ -27,3 +27,6 @@ dist-ssr
 .env
 .env.*
 !.env.example
+
+# Bundled forecast lock worker (npx rolldown -c scripts/rolldown.worker.config.mjs)
+dist-worker

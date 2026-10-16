@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { normalizeFruitLoss, normalizeWeek, type SetHarvestCohortRow, type WeeklyFruitLossRow, type WeeklyPlantDataRow } from './model'
+import { normalizeFruitLoss, normalizeSamplingWeek, normalizeWeek, type SamplingWeekRow, type SetHarvestCohortRow, type WeeklyFruitLossRow, type WeeklyPlantDataRow } from './model'
 
 /**
  * The whole ISO year for one variety in a single request, calculated in the
@@ -43,6 +43,19 @@ export function useWeeklyFruitLoss(cropId: string | undefined, year: number | un
       const { data, error } = await supabase.rpc('weekly_fruit_loss', { p_crop_id: cropId!, p_year: year! })
       if (error) throw error
       return data.map(normalizeFruitLoss)
+    },
+  })
+}
+
+/** Sampling coverage and completion for every ISO week of the year (sampling_weeks), in a single request. */
+export function useSamplingWeeks(cropId: string | undefined, year: number | undefined) {
+  return useQuery({
+    queryKey: ['projections', 'samplingWeeks', cropId, year] as const,
+    enabled: Boolean(cropId && year),
+    queryFn: async (): Promise<SamplingWeekRow[]> => {
+      const { data, error } = await supabase.rpc('sampling_weeks', { p_crop_id: cropId!, p_year: year! })
+      if (error) throw error
+      return data.map(normalizeSamplingWeek)
     },
   })
 }

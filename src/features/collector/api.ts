@@ -13,11 +13,12 @@ import { useOrganization } from '../organization/OrganizationProvider'
 import { DEFAULT_ATTENTION_RULES, rulesFromRows, type AttentionRules } from './attention'
 import { fetchAll, IncompleteReadError } from './fetchAll'
 import { enabledFromRows, statusOptionsOrDefaults, type EnabledStatuses } from './statusOptions'
-import { currentGreenhouseWeek } from './greenhouseWeek'
+import { currentGreenhouseWeek, greenhouseIsoWeek, previousIsoWeek, type GreenhouseWeek } from './greenhouseWeek'
 import { newId } from './offline/ids'
+import { photoPath, type PreparedPhoto } from './photos'
 import { collectorQueue, triggerSync } from './offline/networkStatus'
 import type { QueuedAction, QueuedWrite } from './offline/offlineQueue'
-import { mergeRowCanvas, mergeRowCards } from './offline/optimisticStore'
+import { mergeRowCanvas, mergeRowCards, mergeWeekProgress } from './offline/optimisticStore'
 import type {
   CollectorCrop,
   LatestNodeStatus,
@@ -28,6 +29,8 @@ import type {
   PlantNode,
   RowCanvasData,
   StemGrowthMeasurement,
+  StemVisit,
+  WeekProgressData,
 } from './types'
 
 export const collectorKeys = {
@@ -37,6 +40,7 @@ export const collectorKeys = {
   row: (rowId: string) => ['collector', 'row', rowId] as const,
   attentionRules: (organizationId: string) => ['collector', 'attentionRules', organizationId] as const,
   statusOptions: (organizationId: string) => ['collector', 'statusOptions', organizationId] as const,
+  weekProgress: (organizationId: string) => ['collector', 'weekProgress', organizationId] as const,
 }
 
 /** Offline, with nothing for this screen saved on the device. */
@@ -222,13 +226,51 @@ export function useRowCards(organizationId: string, userId: string) {
   })
 }
 
+async function fetchWeekProgress(organizationId: string): Promise<WeekProgressData> {
+  // The current and previous week only: a few hundred checks at most.
+  const since = new Date(Date.now() - 16 * 24 * 60 * 60 * 1000).toISOString()
+  const [visits, events] = await Promise.all([
+    fetchAll((after, limit, withCount) => {
+      let q = supabase
+        .from('stem_visits')
+        .select('id, crop_id, measurement_stem_id, year, week_number, checked, observed_at', withCount ? { count: 'exact' } : undefined)
+        .eq('organization_id', organizationId)
+        .gte('observed_at', since)
+      if (after) q = q.gt('id', after)
+      return q.order('id').limit(limit)
+    }, (v) => v.id),
+    supabase
+      .from('sampling_week_events')
+      .select('id, crop_id, year, week_number, event, observed_at')
+      .eq('organization_id', organizationId)
+      .gte('observed_at', since)
+      .then(check),
+  ])
+  return { visits: recentVisits(visits), events: recentVisits(events) }
+}
+
+/**
+ * Stem checks and sampling completions of the current and previous week for
+ * the home screen, with this device's queued checks and completions added.
+ */
+export function useWeekProgress(organizationId: string, userId: string) {
+  const queryClient = useQueryClient()
+  const queued = useQueuedWrites(userId)
+  return useQuery({
+    ...collectorQuery<WeekProgressData>(queryClient, collectorKeys.weekProgress(organizationId), userId, () => fetchWeekProgress(organizationId), (base, queued) =>
+      mergeWeekProgress(base ?? { visits: [], events: [] }, queued),
+    ),
+    select: useCallback((data: WeekProgressData) => mergeWeekProgress(data, queued), [queued]),
+  })
+}
+
 // Every list the canvas needs is read in full (see fetchAll.ts): a row can
 // hold more than 1,000 nodes, latest statuses (one per node) and growth
 // readings (stems × weeks). Pages are keyed on a unique column; the canvas
 // sorts nodes and stems itself, so the order records arrive in doesn't matter.
 export async function fetchRowCanvas(rowId: string): Promise<RowCanvasData> {
   const count = (withCount: boolean) => (withCount ? { count: 'exact' as const } : undefined)
-  const [row, stems, nodes, statuses, growth] = await Promise.all([
+  const [row, stems, nodes, statuses, growth, visits] = await Promise.all([
     supabase.from('measurement_rows').select('*').eq('id', rowId).maybeSingle().then(check),
     fetchAll((after, limit, withCount) => {
       let q = supabase.from('measurement_stems').select('*', count(withCount)).eq('measurement_row_id', rowId)
@@ -262,6 +304,15 @@ export async function fetchRowCanvas(rowId: string): Promise<RowCanvasData> {
       if (after) q = q.gt('id', after)
       return q.order('id').limit(limit)
     }, (g) => g.id),
+    // "✓ Stem checked" records; only the current and previous week are kept on the device.
+    fetchAll((after, limit, withCount) => {
+      let q = supabase
+        .from('stem_visits')
+        .select('id, measurement_stem_id, year, week_number, checked, observed_at, measurement_stems!inner(measurement_row_id)', count(withCount))
+        .eq('measurement_stems.measurement_row_id', rowId)
+      if (after) q = q.gt('id', after)
+      return q.order('id').limit(limit)
+    }, (v) => v.id),
   ])
   return {
     row,
@@ -269,10 +320,17 @@ export async function fetchRowCanvas(rowId: string): Promise<RowCanvasData> {
     nodes: nodes.map(({ measurement_stems: _stem, ...node }) => node),
     statuses,
     growth: growth.map(({ measurement_stems: _stem, ...reading }) => ({ ...reading, growth_cm: Number(reading.growth_cm) })),
+    visits: recentVisits(visits.map(({ measurement_stems: _stem, ...visit }) => visit)),
   }
 }
 
-const EMPTY_CANVAS: RowCanvasData = { row: null, stems: [], nodes: [], statuses: [], growth: [] }
+/** Stem checks of the current and the previous greenhouse week (what the collector shows). */
+function recentVisits<T extends { year: number; week_number: number }>(visits: T[], now: GreenhouseWeek = greenhouseIsoWeek()): T[] {
+  const prev = previousIsoWeek(now)
+  return visits.filter((v) => (v.year === now.year && v.week_number === now.week) || (v.year === prev.year && v.week_number === prev.week))
+}
+
+const EMPTY_CANVAS: RowCanvasData = { row: null, stems: [], nodes: [], statuses: [], growth: [], visits: [] }
 
 /** Exported for tests. */
 export const rowCanvasQuery = (queryClient: QueryClient, rowId: string, userId: string) =>
@@ -315,7 +373,9 @@ function applyQueueToCache(queryClient: QueryClient, userId: string) {
     if (kind === 'rowCards') {
       queryClient.setQueryData<MobileRowCard[]>(query.queryKey, (old) => old && mergeRowCards(old, id, queued))
     } else if (kind === 'row') {
-      queryClient.setQueryData<RowCanvasData>(query.queryKey, (old) => mergeRowCanvas(old ?? { row: null, stems: [], nodes: [], statuses: [], growth: [] }, id, queued))
+      queryClient.setQueryData<RowCanvasData>(query.queryKey, (old) => mergeRowCanvas(old ?? EMPTY_CANVAS, id, queued))
+    } else if (kind === 'weekProgress') {
+      queryClient.setQueryData<WeekProgressData>(query.queryKey, (old) => mergeWeekProgress(old ?? { visits: [], events: [] }, queued))
     }
   }
 }
@@ -334,6 +394,23 @@ export function useCollectorActions() {
       await queue.enqueue(write, userId)
       applyQueueToCache(queryClient, userId)
       void triggerSync()
+    }
+
+    const recordStatus = async (node: PlantNode, status: NodeStatus): Promise<LatestNodeStatus> => {
+      // The week is taken now, at save time, not when the page was opened.
+      const { year, week } = currentGreenhouseWeek()
+      const record = {
+        id: newId(),
+        organization_id: node.organization_id,
+        crop_id: node.crop_id,
+        plant_node_id: node.id,
+        year,
+        week_number: week,
+        status,
+        observed_at: new Date().toISOString(),
+      }
+      await submit({ type: 'record_status', record })
+      return record
     }
 
     return {
@@ -396,21 +473,89 @@ export function useCollectorActions() {
         await submit({ type: 'deactivate_node', record: { id: node.id, organization_id: node.organization_id, measurement_stem_id: node.measurement_stem_id } })
       },
 
-      async recordStatus(node: PlantNode, status: NodeStatus): Promise<LatestNodeStatus> {
-        // The week is taken now, at save time, not when the page was opened.
+      recordStatus,
+
+      /**
+       * Camera-first Breaker: records the node as BreakerFruit, then queues its
+       * front and back photos, tied to that exact observation record. Both are
+       * kept on the device and sent after the observation, in order.
+       */
+      async recordBreakerWithPhotos(node: PlantNode, photos: PreparedPhoto[]): Promise<LatestNodeStatus> {
+        const sides = photos.map((p) => p.side).sort().join(',')
+        if (sides !== 'back,front') throw new Error('Camera mode needs a front and a back photo.')
+        const observation = await recordStatus(node, 'BreakerFruit')
+        for (const p of photos) {
+          const id = newId()
+          await submit({
+            type: 'upload_photo',
+            image: p.image,
+            record: {
+              id,
+              organization_id: node.organization_id,
+              crop_id: node.crop_id,
+              plant_node_id: node.id,
+              node_observation_id: observation.id,
+              side: p.side,
+              storage_path: photoPath(node.organization_id, node.crop_id, node.id, id, p.contentType),
+              content_type: p.contentType,
+              bytes: p.bytes,
+              width: p.width,
+              height: p.height,
+              sha256: p.sha256,
+              taken_at: p.takenAt,
+            },
+          })
+        }
+        return observation
+      },
+
+      /**
+       * "✓ Stem checked": the worker confirms every node of this stem was
+       * looked at this week, even if nothing changed. checked = false takes
+       * it back (a new record; nothing is edited).
+       */
+      async recordStemVisit(stem: MeasurementStem, checked: boolean): Promise<StemVisit> {
         const { year, week } = currentGreenhouseWeek()
         const record = {
           id: newId(),
-          organization_id: node.organization_id,
-          crop_id: node.crop_id,
-          plant_node_id: node.id,
+          organization_id: stem.organization_id,
+          crop_id: stem.crop_id,
+          measurement_stem_id: stem.id,
           year,
           week_number: week,
-          status,
+          checked,
           observed_at: new Date().toISOString(),
         }
-        await submit({ type: 'record_status', record })
+        await submit({ type: 'record_stem_visit', record })
         return record
+      },
+
+      /**
+       * Marks a crop's sampling for a week complete, or reopens it. A
+       * completion carries what this device showed ("54 of 56 stems checked",
+       * queued checks included): the server locks the week's forecast only
+       * once at least that many checks have reached it.
+       */
+      async recordSamplingEvent(
+        cropId: string,
+        week: GreenhouseWeek,
+        event: 'completed' | 'reopened',
+        note: string | null,
+        seen?: { checked: number; expected: number },
+      ): Promise<void> {
+        const record = {
+          id: newId(),
+          organization_id: organizationId,
+          crop_id: cropId,
+          year: week.year,
+          week_number: week.week,
+          event,
+          note,
+          stems_checked_seen: seen?.checked ?? null,
+          stems_expected_seen: seen?.expected ?? null,
+          observed_at: new Date().toISOString(),
+        }
+        await submit({ type: 'record_sampling_event', record })
       },
 
       async saveGrowth(stem: MeasurementStem, growthCm: number, notes: string | null, topNodeNumber: number | null, existing: StemGrowthMeasurement | null): Promise<StemGrowthMeasurement> {

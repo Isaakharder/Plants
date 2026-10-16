@@ -6,7 +6,7 @@
 // queue (which survives reloads) and the IDs never change.
 // Every function is idempotent: applying it to already-merged data is a no-op.
 
-import type { LatestNodeStatus, MobileRowCard, RowCanvasData, StemGrowthMeasurement } from '../types'
+import type { LatestNodeStatus, MobileRowCard, RowCanvasData, StemGrowthMeasurement, StemVisit, WeekProgressData } from '../types'
 import type { QueuedAction } from './offlineQueue'
 
 const stamp = (a: QueuedAction) => {
@@ -52,6 +52,7 @@ export function mergeRowCanvas(data: RowCanvasData, rowId: string, queued: Queue
   let nodes = [...data.nodes]
   const statuses = new Map(data.statuses.map((s) => [s.plant_node_id, s]))
   const growth = new Map(data.growth.map((g) => [`${g.measurement_stem_id}:${g.year}:${g.week_number}`, g]))
+  const visits = new Map((data.visits ?? []).map((v) => [v.id, v]))
 
   for (const a of queued) {
     switch (a.type) {
@@ -91,8 +92,34 @@ export function mergeRowCanvas(data: RowCanvasData, rowId: string, queued: Queue
           growth.set(key, reading)
         }
         break
+      case 'record_stem_visit':
+        if (stems.some((s) => s.id === a.record.measurement_stem_id)) visits.set(a.record.id, stemVisitOf(a.record))
+        break
     }
   }
 
-  return { row, stems, nodes, statuses: [...statuses.values()], growth: [...growth.values()] }
+  return { row, stems, nodes, statuses: [...statuses.values()], growth: [...growth.values()], visits: [...visits.values()] }
+}
+
+const stemVisitOf = (r: StemVisit): StemVisit => ({
+  id: r.id,
+  measurement_stem_id: r.measurement_stem_id,
+  year: r.year,
+  week_number: r.week_number,
+  checked: r.checked,
+  observed_at: r.observed_at,
+})
+
+/** Adds queued stem checks and sampling completions to the home screen's week progress. */
+export function mergeWeekProgress(data: WeekProgressData, queued: QueuedAction[]): WeekProgressData {
+  const visits = new Map(data.visits.map((v) => [v.id, v]))
+  const events = new Map(data.events.map((e) => [e.id, e]))
+  for (const a of queued) {
+    if (a.type === 'record_stem_visit') visits.set(a.record.id, { ...stemVisitOf(a.record), crop_id: a.record.crop_id })
+    if (a.type === 'record_sampling_event') {
+      const { id, crop_id, year, week_number, event, observed_at } = a.record
+      events.set(id, { id, crop_id, year, week_number, event, observed_at })
+    }
+  }
+  return { visits: [...visits.values()], events: [...events.values()] }
 }
