@@ -172,8 +172,8 @@ export function viewFromRun(run: ForecastRunRow, rows: ForecastRunWeekRow[]): Fo
 export const STATUS_LABEL: Record<ForecastView['status'], string> = {
   official: 'Official',
   late: 'Late',
-  preliminary: 'Preliminary preview',
-  preview: 'Preview',
+  preliminary: 'Preliminary',
+  preview: 'Preliminary · sampling complete',
 }
 
 export function statusExplanation(v: Pick<ForecastView, 'status' | 'originWeek'>): string {
@@ -183,9 +183,9 @@ export function statusExplanation(v: Pick<ForecastView, 'status' | 'originWeek'>
     case 'late':
       return `Locked from the W${v.originWeek} sampling after its first forecast week had begun, so it is kept but not counted as an on-time forecast.`
     case 'preliminary':
-      return `W${v.originWeek} sampling isn’t marked complete, so this preview may change. It is not stored and never replaces the official forecast.`
+      return `W${v.originWeek} sampling isn’t marked complete, so this preliminary forecast may change. It is saved and shown until it is generated again; it is never official and never counted in accuracy.`
     case 'preview':
-      return `Computed now from the completed W${v.originWeek} sampling. Not stored; the official forecast is the locked one.`
+      return `Computed from the completed W${v.originWeek} sampling and saved. Preliminary: the official forecast is the one locked when every sampled stem is checked.`
   }
 }
 

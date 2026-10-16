@@ -8,8 +8,8 @@ import { useOrganization } from '../organization/OrganizationProvider'
 import { ProjectionsTabs } from '../projections/ProjectionsTabs'
 import wpd from '../projections/WeeklyPlantDataTab.module.css'
 import {
-  computePreview,
   currentWeek,
+  generatePreview,
   latestCompletion,
   lockForecast,
   lockReadiness,
@@ -21,8 +21,8 @@ import {
   useForecastRuns,
   useInvalidateForecasts,
   useSamplingYear,
+  useSavedPreview,
   type HistoricalReplay,
-  type Preview,
 } from './api'
 import { MAX_ABS_BIAS, MIN_COVERAGE, MIN_SETTLED, type ActualAccuracy, type ActualScoredRun, type LiveAccuracy, type ScoredRun, type WeekStatus } from './engine/live'
 import { LOW_COVERAGE } from './engine/breaker'
@@ -70,7 +70,6 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
   const live = useLiveAccuracy(crop)
   const jobs = useLockJobs(crop.id)
   const [selectedRun, setSelectedRun] = useState<string | null>(null)
-  const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState<'preview' | 'lock' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showAudit, setShowAudit] = useState(false)
@@ -86,14 +85,19 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
   const originRow = samplingRows.find((r) => r.iso_week === originWeek)
   const currentRow = samplingRows.find((r) => r.iso_week === now.week)
 
-  const shownRunId = selectedRun ?? (preview ? null : runs.data?.[0]?.id ?? null)
+  // What is shown: a forecast picked in the list; else the official (locked) forecast of the sampling week;
+  // else the saved preliminary forecast of that week (with an outdated warning when its data changed); else the latest locked one.
+  const stored = useSavedPreview(crop.id, now.year, originWeek)
+  const lockedForOrigin = runs.data?.find((r) => r.origin_year === now.year && r.origin_week === originWeek)
+  const showPreliminary = !selectedRun && !lockedForOrigin && Boolean(stored.saved)
+  const shownRunId = selectedRun ?? lockedForOrigin?.id ?? (showPreliminary ? null : runs.data?.[0]?.id ?? null)
   const shownRun = runs.data?.find((r) => r.id === shownRunId)
   const runWeeks = useForecastRunWeeks(shownRun?.id)
   const view: ForecastView | null = useMemo(() => {
-    if (preview && !selectedRun) return viewFromPreview(preview, crop.case_weight_kg === null ? null : Number(crop.case_weight_kg))
+    if (showPreliminary && stored.saved) return viewFromPreview(stored.saved.preview, crop.case_weight_kg === null ? null : Number(crop.case_weight_kg))
     if (shownRun && runWeeks.data) return viewFromRun(shownRun, runWeeks.data)
     return null
-  }, [preview, selectedRun, shownRun, runWeeks.data, crop.case_weight_kg])
+  }, [showPreliminary, stored.saved, shownRun, runWeeks.data, crop.case_weight_kg])
 
   const lockedThisWeek = runs.data?.find((r) => r.origin_year === now.year && r.origin_week === now.week)
   const firstTargetStarts = weekStartInstant(now.index + 1)
@@ -102,7 +106,9 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
     setBusy('preview')
     setError(null)
     try {
-      setPreview(await computePreview(crop, now.year, originWeek, live.data?.validatedByBasis))
+      // Saved for this variety and week: it stays across navigation, refreshes and sessions.
+      await generatePreview(crop, now.year, originWeek, live.data?.validatedByBasis)
+      await invalidate()
       setSelectedRun(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -122,7 +128,6 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
       if (ready?.state === 'waiting_for_sync') throw new Error(`${ready.detail} Wait until the phone has synced, then try again.`)
       const res = await lockForecast(crop, completion)
       await invalidate()
-      setPreview(null)
       setSelectedRun(res?.run_id ?? null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -159,7 +164,7 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
                 value={originWeek}
                 onChange={(e) => {
                   setPickedWeek(Number(e.target.value) === sampledWeeks[0] ? null : Number(e.target.value))
-                  setPreview(null)
+                  setSelectedRun(null)
                 }}
                 title="The sampling week a generated forecast starts from"
               >
@@ -199,7 +204,16 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
       />
       {error && <div className={styles.error}>{error}</div>}
 
-      {runs.isPending || sampling.isPending ? (
+      {showPreliminary && stored.outdated && (
+        <div className={styles.outdated} role="status">
+          <strong>This preliminary forecast may be outdated.</strong> Records, stem checks, AFW or settings for W{originWeek} have changed since it was
+          generated ({dateTime(stored.saved!.createdAt)}).{' '}
+          <button type="button" className="button button-secondary" onClick={() => void runPreview()} disabled={busy !== null}>
+            {busy === 'preview' ? 'Generating…' : 'Regenerate'}
+          </button>
+        </div>
+      )}
+      {runs.isPending || sampling.isPending || stored.loading ? (
         <LoadingState />
       ) : runs.error || sampling.error ? (
         <ErrorState error={runs.error ?? sampling.error} />
@@ -216,9 +230,10 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
             actual={view.runId ? live.data?.actual.runs.find((s) => s.run.id === view.runId) : undefined}
             accuracy={live.data?.accuracy}
             actualAccuracy={live.data?.actual}
-            onBackToLocked={preview && runs.data?.length ? () => { setPreview(null); setSelectedRun(null) } : undefined}
+            outdated={showPreliminary && stored.outdated}
+            onBackToLocked={showPreliminary && runs.data?.length ? () => setSelectedRun(runs.data![0].id) : undefined}
           />
-          <Snapshots runs={runs.data ?? []} shown={view.runId} onShow={(id) => { setSelectedRun(id); setPreview(null) }} />
+          <Snapshots runs={runs.data ?? []} shown={view.runId} onShow={(id) => setSelectedRun(id)} />
         </>
       )}
       {!runs.isPending && <AccuracyPanel crop={crop} accuracy={live.data?.accuracy} actual={live.data?.actual} />}
@@ -299,9 +314,12 @@ function ForecastTable({
   actual,
   accuracy,
   actualAccuracy,
+  outdated,
   onBackToLocked,
 }: {
   view: ForecastView
+  /** A saved preliminary forecast whose data changed since it was generated. */
+  outdated?: boolean
   /** The locked forecast scored against what was recorded since (locked lifecycle forecasts only). */
   scored?: ScoredRun
   /** The locked forecast against the actual kg entered (locked forecasts). */
@@ -407,6 +425,7 @@ function ForecastTable({
           <h2 className={styles.title}>
             Forecast from W{view.originWeek} sampling
             <span className={`${styles.badge} ${styles[`badge_${view.status}`]}`}>{STATUS_LABEL[view.status]}</span>
+            {outdated && <span className={`${styles.badge} ${styles.badge_incomplete}`}>Possibly outdated</span>}
             <span className={`${styles.badge} ${styles.badge_basis}`}>{breakerOnly ? 'Next week from Breakers' : 'Full lifecycle · 8 weeks'}</span>
             {view.confidence.level === 'experimental' && <span className={`${styles.badge} ${styles.badge_experimental}`}>Experimental</span>}
             {view.coverage.visited !== null && view.coverage.visited < view.coverage.expected && (

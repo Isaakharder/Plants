@@ -6,12 +6,35 @@ import { supabase } from '../../lib/supabase'
 import type { ForecastBasisSettingRow, ForecastRunRow, ForecastRunWeekRow, SamplingWeekRow } from '../../lib/database.types'
 import type { Crop } from '../crops/model'
 import { createForecastData } from './data'
+import { ENGINE_VERSION } from './engine/types'
 import { greenhouseWeekIndex, indexYw, weekOfIndex } from './engine/weeks'
 
-export type { HistoricalReplay, LiveAccuracyResult, Preview, SamplingCompletion, ValidatedByBasis } from './data'
+export type { HistoricalReplay, LiveAccuracyResult, Preview, SamplingCompletion, SavedPreview, ValidatedByBasis } from './data'
 
 const data = createForecastData(supabase)
-export const { loadEngineInput, latestCompletion, computePreview, lockForecast, loadLiveAccuracy, runHistoricalReplay } = data
+export const { loadEngineInput, latestCompletion, computePreview, generatePreview, latestPreview, inputSignature, lockForecast, loadLiveAccuracy, runHistoricalReplay } = data
+
+/**
+ * The newest saved preliminary forecast of a variety and sampling week, and
+ * whether the data it was computed from has changed since (outdated): the
+ * current signature is re-read whenever the page is shown or refocused.
+ */
+export function useSavedPreview(cropId: string | undefined, year: number, week: number) {
+  const saved = useQuery({
+    queryKey: ['forecast', 'preview', cropId, year, week],
+    enabled: Boolean(cropId),
+    queryFn: () => latestPreview(cropId!, year, week),
+  })
+  const signature = useQuery({
+    queryKey: ['forecast', 'signature', cropId, year, week],
+    enabled: Boolean(cropId) && Boolean(saved.data),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    queryFn: () => inputSignature(cropId!, year, week),
+  })
+  const outdated = saved.data && signature.data ? saved.data.inputSignature !== signature.data || saved.data.engineVersion !== ENGINE_VERSION : false
+  return { saved: saved.data ?? null, loading: saved.isPending && Boolean(cropId), outdated, error: saved.error ?? signature.error }
+}
 
 const check = <T>(res: { data: T | null; error: { message: string } | null }): T => {
   if (res.error) throw new Error(res.error.message)

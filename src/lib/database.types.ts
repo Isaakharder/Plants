@@ -451,6 +451,22 @@ export type ForecastBasisSettingRow = {
   created_by: string | null
 }
 
+/** A saved preliminary forecast (20261025000000_forecast_previews.sql): never official, never scored. */
+export type ForecastPreviewRow = {
+  id: string
+  organization_id: string
+  crop_id: string
+  origin_year: number
+  origin_week: number
+  basis: 'lifecycle' | 'breaker_only'
+  engine_version: string
+  /** forecast_input_signature() when computed: compare with the current value to see if the data changed since. */
+  input_signature: string
+  preview: unknown
+  created_at: string
+  created_by: string | null
+}
+
 export type WeeklyHarvestActualRow = {
   id: number
   organization_id: string
@@ -771,6 +787,12 @@ export type Database = {
         Update: never
         Relationships: []
       }
+      forecast_previews: {
+        Row: ForecastPreviewRow
+        Insert: Pick<ForecastPreviewRow, 'organization_id' | 'crop_id' | 'origin_year' | 'origin_week' | 'basis' | 'engine_version' | 'input_signature' | 'preview'>
+        Update: never
+        Relationships: []
+      }
       weekly_harvest_actuals: {
         Row: WeeklyHarvestActualRow
         Insert: Pick<WeeklyHarvestActualRow, 'organization_id' | 'crop_id' | 'year' | 'week' | 'actual_kg'> & { note?: string | null }
@@ -818,6 +840,10 @@ export type Database = {
       crop_quality_flags: {
         Args: { p_crop_id: string; p_as_of?: string }
         Returns: QualityFlagRow[]
+      }
+      forecast_input_signature: {
+        Args: { p_crop_id: string; p_year: number; p_week: number }
+        Returns: string
       }
       forecast_lock_readiness: {
         Args: { p_sampling_event_id: string }

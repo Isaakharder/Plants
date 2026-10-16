@@ -27,7 +27,7 @@ describe('viewFromPreview', () => {
 
   it('is preliminary without a completed sampling week, and says so', () => {
     expect(view.status).toBe('preliminary')
-    expect(statusExplanation(view)).toMatch(/isn’t marked complete.*not stored and never replaces the official forecast/)
+    expect(statusExplanation(view)).toMatch(/isn’t marked complete.*saved and shown until it is generated again; it is never official and never counted in accuracy/)
     expect(viewFromPreview({ ...preview, completion: { id: 'e', year: 2026, week: 40, observedAt: cutoff, recordedAt: cutoff } }, null).status).toBe('preview')
   })
 

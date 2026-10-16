@@ -20,6 +20,8 @@ export type Db = SupabaseClient<Database>
 
 export type SamplingCompletion = { id: string; year: number; week: number; observedAt: string; recordedAt: string }
 export type Preview = { result: ForecastResult; afwHistory: 'log' | 'current'; origin: { year: number; week: number }; completion: SamplingCompletion | null; computedAt: string }
+/** A preliminary forecast as saved (forecast_previews), with the data signature it was computed from. */
+export type SavedPreview = { id: string; preview: Preview; inputSignature: string; engineVersion: string; createdAt: string }
 export type HistoricalReplay = { reports: CandidateReport[]; unreliable: number[]; origins: number[]; lastScoreable: number }
 /** Weeks ahead validated so far, per basis (lifecycle: against Harvested records; Breakers only: against actual kg). */
 export type ValidatedByBasis = Record<ForecastBasis, number[]>
@@ -174,6 +176,56 @@ export function createForecastData(supabase: Db) {
       validatedByBasis,
     })
     return { result, afwHistory: input.afwHistory, origin: { year: originYear, week: originWeek }, completion, computedAt: now }
+  }
+
+  /** The signature of the data a forecast from (year, week) reads (forecast_input_signature): it changes whenever that data does. */
+  async function inputSignature(cropId: string, year: number, week: number): Promise<string> {
+    return check(await supabase.rpc('forecast_input_signature', { p_crop_id: cropId, p_year: year, p_week: week }))
+  }
+
+  /**
+   * Generate forecast: computes a preliminary forecast and saves it for the
+   * variety and sampling week (a new row; earlier ones stay). The signature
+   * is read before computing, so data arriving meanwhile marks it outdated.
+   */
+  async function generatePreview(crop: Crop, originYear: number, originWeek: number, validatedByBasis?: ValidatedByBasis): Promise<SavedPreview> {
+    const signature = await inputSignature(crop.id, originYear, originWeek)
+    const preview = await computePreview(crop, originYear, originWeek, validatedByBasis)
+    const row = check(
+      await supabase
+        .from('forecast_previews')
+        .insert({
+          organization_id: crop.organization_id,
+          crop_id: crop.id,
+          origin_year: originYear,
+          origin_week: originWeek,
+          basis: preview.result.basis,
+          engine_version: preview.result.engineVersion,
+          input_signature: signature,
+          preview: preview as unknown as Database['public']['Tables']['forecast_previews']['Insert']['preview'],
+        })
+        .select('id, created_at')
+        .single(),
+    ) as { id: string; created_at: string } | null
+    if (!row) throw new Error('The preliminary forecast wasn’t saved')
+    return { id: row.id, preview, inputSignature: signature, engineVersion: preview.result.engineVersion, createdAt: row.created_at }
+  }
+
+  /** The newest saved preliminary forecast of a variety and sampling week (null when none). */
+  async function latestPreview(cropId: string, year: number, week: number): Promise<SavedPreview | null> {
+    const rows = check(
+      await supabase
+        .from('forecast_previews')
+        .select('id, preview, input_signature, engine_version, created_at')
+        .eq('crop_id', cropId)
+        .eq('origin_year', year)
+        .eq('origin_week', week)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(1),
+    )
+    const r = rows[0]
+    return r ? { id: r.id, preview: r.preview as Preview, inputSignature: r.input_signature, engineVersion: r.engine_version, createdAt: r.created_at } : null
   }
 
   /**
@@ -352,7 +404,19 @@ export function createForecastData(supabase: Db) {
   }
 
 
-  return { loadEngineInput, loadBasisSettings, loadActualKg, latestCompletion, computePreview, lockForecast, loadLiveAccuracy, runHistoricalReplay }
+  return {
+    loadEngineInput,
+    loadBasisSettings,
+    loadActualKg,
+    latestCompletion,
+    computePreview,
+    inputSignature,
+    generatePreview,
+    latestPreview,
+    lockForecast,
+    loadLiveAccuracy,
+    runHistoricalReplay,
+  }
 }
 
 export type ForecastData = ReturnType<typeof createForecastData>
