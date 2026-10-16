@@ -7,6 +7,7 @@
 
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
+import type { PhotoSide } from '../../lib/database.types'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../auth/AuthProvider'
 import { useOrganization } from '../organization/OrganizationProvider'
@@ -15,7 +16,7 @@ import { fetchAll, IncompleteReadError } from './fetchAll'
 import { enabledFromRows, statusOptionsOrDefaults, type EnabledStatuses } from './statusOptions'
 import { currentGreenhouseWeek, greenhouseIsoWeek, previousIsoWeek, type GreenhouseWeek } from './greenhouseWeek'
 import { newId } from './offline/ids'
-import { photoPath, type PreparedPhoto } from './photos'
+import { photoPath, previewPath, type PhotoVersion, type PreparedPhoto } from './photos'
 import { collectorQueue, triggerSync } from './offline/networkStatus'
 import type { QueuedAction, QueuedWrite } from './offline/offlineQueue'
 import { mergeRowCanvas, mergeRowCards, mergeWeekProgress } from './offline/optimisticStore'
@@ -382,6 +383,46 @@ function applyQueueToCache(queryClient: QueryClient, userId: string) {
 
 type NewNode = Pick<PlantNode, 'node_number' | 'sort_order'> & Partial<Pick<PlantNode, 'node_label' | 'parent_node_id' | 'side' | 'is_side_shoot'>>
 
+/** A photo of a recorded Breaker, as the collector shows it. */
+export type RecordedPhoto = PhotoVersion & {
+  state: 'uploaded' | 'waiting' | 'failed'
+  previewPath: string | null
+  /** The preview (or image) still on this phone, for photos not uploaded yet. */
+  local: Blob | null
+}
+
+/**
+ * The photos of a Breaker record: those still waiting on this phone, and,
+ * when the phone is online, those already uploaded. `serverChecked` is false
+ * when the uploaded ones couldn't be read (offline): the list may be partial.
+ */
+export function useRecordedBreakerPhotos(userId: string, observationId: string | null) {
+  const queue = collectorQueue()
+  const queued = useSyncExternalStore(
+    useCallback((fn: () => void) => queue.subscribe(fn), [queue]),
+    () => queue.snapshot(userId),
+  )
+  const waiting: RecordedPhoto[] = queued.flatMap((a) =>
+    a.type === 'upload_photo' && a.record.node_observation_id === observationId
+      ? [{ id: a.record.id, side: a.record.side, takenAt: a.record.taken_at, replacesPhotoId: a.record.replaces_photo_id ?? null, state: a.status === 'failed' ? 'failed' : 'waiting', previewPath: null, local: a.preview ?? a.image }]
+      : [],
+  )
+  const uploaded = useQuery({
+    queryKey: ['collector', 'breakerPhotos', observationId, waiting.length],
+    enabled: Boolean(observationId),
+    retry: false,
+    queryFn: async (): Promise<RecordedPhoto[] | null> => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return null
+      const res = await supabase.from('node_photos').select('id, side, taken_at, replaces_photo_id, preview_path').eq('node_observation_id', observationId!)
+      if (res.error) return null
+      return (res.data ?? []).map((p) => ({ id: p.id, side: p.side, takenAt: p.taken_at, replacesPhotoId: p.replaces_photo_id, state: 'uploaded' as const, previewPath: p.preview_path, local: null }))
+    },
+  })
+  const server = uploaded.data ?? []
+  const photos = [...server, ...waiting.filter((w) => !server.some((u) => u.id === w.id))]
+  return { photos, loading: uploaded.isPending && Boolean(observationId), serverChecked: uploaded.data != null }
+}
+
 /** Collector writes for the signed-in user's organization. All are queued first. */
 export function useCollectorActions() {
   const queryClient = useQueryClient()
@@ -411,6 +452,35 @@ export function useCollectorActions() {
       }
       await submit({ type: 'record_status', record })
       return record
+    }
+
+    // One photo (original + preview) of a Breaker observation, queued after it.
+    const submitPhoto = async (node: PlantNode, observationId: string, p: PreparedPhoto, meta: Record<string, unknown>, replacesPhotoId: string | null = null) => {
+      const id = newId()
+      await submit({
+        type: 'upload_photo',
+        image: p.image,
+        preview: p.preview,
+        record: {
+          id,
+          organization_id: node.organization_id,
+          crop_id: node.crop_id,
+          plant_node_id: node.id,
+          node_observation_id: observationId,
+          side: p.side,
+          storage_path: photoPath(node.organization_id, node.crop_id, node.id, id, p.contentType),
+          preview_path: p.preview ? previewPath(node.organization_id, node.crop_id, node.id, id) : null,
+          content_type: p.contentType,
+          bytes: p.bytes,
+          width: p.width,
+          height: p.height,
+          sha256: p.sha256,
+          taken_at: p.takenAt,
+          // captureSeconds: how long photographing took (photo step opened → saved).
+          capture_meta: { ...p.captureMeta, ...meta },
+          ...(replacesPhotoId ? { replaces_photo_id: replacesPhotoId } : {}),
+        },
+      })
     }
 
     return {
@@ -477,36 +547,33 @@ export function useCollectorActions() {
 
       /**
        * Camera-first Breaker: records the node as BreakerFruit, then queues its
-       * front and back photos, tied to that exact observation record. Both are
-       * kept on the device and sent after the observation, in order.
+       * front and back photos (original + preview), tied to that exact
+       * observation record. Everything is kept on the device and sent in
+       * order: the observation first, then each photo.
        */
-      async recordBreakerWithPhotos(node: PlantNode, photos: PreparedPhoto[]): Promise<LatestNodeStatus> {
-        const sides = photos.map((p) => p.side).sort().join(',')
-        if (sides !== 'back,front') throw new Error('Camera mode needs a front and a back photo.')
+      async recordBreakerWithPhotos(node: PlantNode, photos: PreparedPhoto[], timing?: { captureSeconds: number }): Promise<LatestNodeStatus> {
+        if (photos.map((p) => p.side).sort().join(',') !== 'back,front') throw new Error('Camera mode needs a front and a back photo.')
         const observation = await recordStatus(node, 'BreakerFruit')
-        for (const p of photos) {
-          const id = newId()
-          await submit({
-            type: 'upload_photo',
-            image: p.image,
-            record: {
-              id,
-              organization_id: node.organization_id,
-              crop_id: node.crop_id,
-              plant_node_id: node.id,
-              node_observation_id: observation.id,
-              side: p.side,
-              storage_path: photoPath(node.organization_id, node.crop_id, node.id, id, p.contentType),
-              content_type: p.contentType,
-              bytes: p.bytes,
-              width: p.width,
-              height: p.height,
-              sha256: p.sha256,
-              taken_at: p.takenAt,
-            },
-          })
-        }
+        for (const p of photos) await submitPhoto(node, observation.id, p, { captureSeconds: timing?.captureSeconds ?? null })
         return observation
+      },
+
+      /**
+       * New photos for a Breaker already recorded (never a second Breaker
+       * record): each names the photo of its side it replaces, which stays
+       * stored. For a Breaker recorded without photos, nothing is replaced.
+       */
+      async replaceBreakerPhotos(
+        node: PlantNode,
+        observationId: string,
+        photos: PreparedPhoto[],
+        replaces: Partial<Record<PhotoSide, string>>,
+        meta: { captureSeconds: number; reason: string },
+      ): Promise<void> {
+        if (photos.length === 0) throw new Error('Take at least one photo.')
+        for (const p of photos) {
+          await submitPhoto(node, observationId, p, { captureSeconds: meta.captureSeconds, purpose: 'replacement', replaceReason: meta.reason }, replaces[p.side] ?? null)
+        }
       },
 
       /**

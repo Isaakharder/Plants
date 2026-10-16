@@ -11,6 +11,7 @@ import { queryClient } from '../lib/queryClient'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { PlantsPage } from '../pages/PlantsPage'
 import { ProjectionsPage } from '../pages/ProjectionsPage'
+import { PhotosPage } from '../features/photos/PhotosPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { AppGate } from './AppGate'
 import { AppLayout } from './AppLayout'
@@ -37,6 +38,7 @@ export function App() {
                   <Route path="harvest-forecast" element={<HarvestForecastTab />} />
                 </Route>
                 <Route path="plants" element={<PlantsPage />} />
+                <Route path="photos" element={<PhotosPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="settings/varieties/:cropId" element={<CropDetailPage />} />
                 <Route path="*" element={<NotFoundPage />} />

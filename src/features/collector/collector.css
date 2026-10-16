@@ -1328,6 +1328,17 @@
   margin: 0;
 }
 
+.collector-app .breaker-capture-guidance {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green-600);
+  background: var(--green-50);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--gray-900);
+}
+
 .collector-app .breaker-capture-slots {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1362,6 +1373,30 @@
   inset: 0;
   opacity: 0;
   cursor: pointer;
+}
+
+/* A taken photo's input: kept in the page (some phones only open the camera
+   for a rendered input) but not a tap target; its Retake button opens it. */
+.collector-app .breaker-slot-hidden-input input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  inset: auto;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.collector-app .breaker-slot--taken {
+  cursor: default;
+}
+
+.collector-app .breaker-retake {
+  min-height: 40px;
+  width: 100%;
+}
+
+.collector-app .breaker-reason {
+  margin: 0;
 }
 
 .collector-app .breaker-slot img {
@@ -1405,4 +1440,104 @@
 
 .collector-app .breaker-capture-secondary .btn {
   flex: 1;
+}
+
+.collector-app .breaker-drafts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #fffbeb;
+  border-bottom: 1px solid #fde68a;
+  flex-shrink: 0;
+}
+
+.collector-app .breaker-draft {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: #92400e;
+}
+
+.collector-app .breaker-discard {
+  align-self: center;
+  background: none;
+  border: none;
+  color: var(--gray-500);
+  font-size: 13px;
+  text-decoration: underline;
+  padding: 6px;
+}
+
+.collector-app .alert-info {
+  background: var(--green-50);
+  color: var(--green-700);
+  border: 1px solid var(--green-200);
+}
+
+/* ── A Breaker already recorded this week ─────────────────────────────── */
+
+.collector-app .breaker-recorded {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.collector-app .breaker-recorded-head {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--green-50);
+  border: 1px solid var(--green-200);
+  color: var(--green-700);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.collector-app .breaker-recorded-head span {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--gray-700);
+}
+
+.collector-app .breaker-recorded-photos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.collector-app .breaker-recorded-photo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  text-align: center;
+  color: var(--gray-700);
+}
+
+.collector-app .breaker-recorded-photo img,
+.collector-app .breaker-recorded-photo .breaker-recorded-missing {
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--gray-50);
+}
+
+.collector-app .breaker-recorded-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--gray-300, #d1d5db);
+  color: var(--gray-500);
+}
+
+.collector-app .breaker-recorded-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--gray-500);
 }

@@ -9,9 +9,9 @@
 //   * Each entry remembers the user who made it and is only replayed under that
 //     user's session; organization_id is inside the record itself.
 //   * Vegetative growth, node deactivation, "✓ Stem checked", "Mark sampling
-//     complete" and Breaker photos are queued too. A photo's image is stored in
-//     the queue entry itself (IndexedDB keeps Blobs), so it survives reloads
-//     and offline days until it has been uploaded.
+//     complete" and Breaker photos are queued too. A photo's image (and
+//     preview) are stored in the queue entry itself (IndexedDB keeps Blobs), so
+//     they survive reloads and offline days until they have been uploaded.
 
 import type { Database } from '../../../lib/database.types'
 
@@ -26,8 +26,11 @@ export type QueuedWrite =
   | { type: 'upsert_growth'; record: Insert<'stem_growth_measurements'> }
   | { type: 'record_stem_visit'; record: Insert<'stem_visits'> }
   | { type: 'record_sampling_event'; record: Insert<'sampling_week_events'> }
-  /** A Breaker photo: the image (kept on the device until uploaded) and its record. Queued after its observation. */
-  | { type: 'upload_photo'; record: Insert<'node_photos'>; image: Blob }
+  /**
+   * A Breaker photo: the original image and its small preview, kept on the
+   * device until uploaded, and its record. Queued after its observation.
+   */
+  | { type: 'upload_photo'; record: Insert<'node_photos'>; image: Blob; preview: Blob | null }
 
 export type QueuedAction = QueuedWrite & {
   id: string

@@ -62,6 +62,39 @@ describe('sendPhoto', () => {
   })
 })
 
+describe('sendPhoto with a preview', () => {
+  const withPreview = { ...record, preview_path: 'org/crop/node/p1.preview.jpg' }
+  const small = new Blob([new Uint8Array([9])], { type: 'image/jpeg' })
+
+  it('stores original, then preview, then the record', async () => {
+    const f = fakeUploader()
+    expect(await sendPhoto(f.uploader, withPreview, image, small)).toEqual({ ok: true })
+    expect(f.calls).toEqual(['upload', 'upload', 'insert'])
+    expect([...f.stored.keys()]).toEqual([record.storage_path, withPreview.preview_path])
+    expect(f.rows.get('p1')).toMatchObject({ preview_path: withPreview.preview_path })
+  })
+
+  it('a refused preview is dropped from the record instead of blocking the photo; a delayed one is retried', async () => {
+    let n = 0
+    const refusing: PhotoUploader = {
+      upload: async () => (++n === 2 ? { error: { message: 'mime type not allowed', status: 415 } } : { error: null }),
+      insertRecord: async (r) => {
+        expect(r.preview_path).toBeNull()
+        return { error: null, status: 201 }
+      },
+    }
+    expect(await sendPhoto(refusing, withPreview, image, small)).toEqual({ ok: true })
+    let m = 0
+    const delayed: PhotoUploader = {
+      upload: async () => (++m === 2 ? { error: { message: 'Bad gateway', status: 502 } } : { error: null }),
+      insertRecord: async () => {
+        throw new Error('the record must wait for the preview')
+      },
+    }
+    expect(await sendPhoto(delayed, withPreview, image, small)).toMatchObject({ ok: false, retryable: true })
+  })
+})
+
 describe('photos in the offline queue', () => {
   const status: QueuedWrite = {
     type: 'record_status',
@@ -70,6 +103,7 @@ describe('photos in the offline queue', () => {
   const photo = (id: string, side: 'front' | 'back'): QueuedWrite => ({
     type: 'upload_photo',
     image,
+    preview: null,
     record: {
       id, organization_id: 'org', crop_id: 'crop', plant_node_id: 'n1', node_observation_id: 'o1', side,
       storage_path: `org/crop/n1/${id}.jpg`, content_type: 'image/jpeg', bytes: 3, sha256: 'a'.repeat(64), taken_at: '2026-10-16T14:00:05Z',
@@ -97,5 +131,40 @@ describe('photos in the offline queue', () => {
     online = true
     expect(await queue.sync('u', execute)).toMatchObject({ synced: 2, remaining: 0 })
     expect(sent).toEqual(['record_status', 'photo:front', 'photo:back'])
+  })
+})
+
+describe('many photos waiting on one phone', () => {
+  it('sends 10 Breakers with 20 photos in order across a dropped connection; a refused photo is kept as failed and doesn’t block the rest', async () => {
+    let n = 0
+    const queue = new OfflineQueue(memoryStorage(), () => `q${++n}`)
+    for (let b = 1; b <= 10; b++) {
+      await queue.enqueue({ type: 'record_status', record: { id: `o${b}`, organization_id: 'org', crop_id: 'crop', plant_node_id: `n${b}`, year: 2026, week_number: 42, status: 'BreakerFruit', observed_at: '2026-10-16T14:00:00Z' } }, 'u')
+      for (const side of ['front', 'back'] as const) {
+        await queue.enqueue({
+          type: 'upload_photo', image, preview: null,
+          record: { id: `p${b}${side}`, organization_id: 'org', crop_id: 'crop', plant_node_id: `n${b}`, node_observation_id: `o${b}`, side, storage_path: `org/crop/n${b}/p${b}${side}.jpg`, content_type: 'image/jpeg', bytes: 3, sha256: 'a'.repeat(64), taken_at: '2026-10-16T14:00:05Z' },
+        }, 'u')
+      }
+    }
+    expect(queue.list('u').filter((a) => a.type === 'upload_photo')).toHaveLength(20)
+
+    const sent: string[] = []
+    let calls = 0
+    const execute = async (w: QueuedWrite): Promise<WriteResult> => {
+      calls++
+      if (calls === 12) return { ok: false, retryable: true, message: 'Wi-Fi dropped' } // the connection drops mid-way
+      if (w.type === 'upload_photo' && w.record.id === 'p7back') return { ok: false, retryable: false, message: 'Photo record: refused' }
+      sent.push(w.type === 'upload_photo' ? String(w.record.id) : String(w.record.id))
+      return { ok: true }
+    }
+    const first = await queue.sync('u', execute)
+    expect(first).toMatchObject({ interrupted: true })
+    const second = await queue.sync('u', execute)
+    expect(second).toMatchObject({ remaining: 0, failed: 1 })
+    // Everything except the refused photo was sent, each observation before its photos, in capture order.
+    expect(sent).toHaveLength(29)
+    for (let b = 1; b <= 10; b++) expect(sent.indexOf(`o${b}`)).toBeLessThan(sent.indexOf(`p${b}front`))
+    expect(queue.list('u').filter((a) => a.status === 'failed').map((a) => a.type === 'upload_photo' && a.record.id)).toEqual(['p7back'])
   })
 })

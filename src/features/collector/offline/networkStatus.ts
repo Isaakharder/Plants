@@ -7,7 +7,8 @@ import { syncOnlineState } from './onlineState'
 
 export type SyncStatus = 'online' | 'offline' | 'syncing' | 'synced' | 'error'
 
-type State = { status: SyncStatus; pending: number; error: string | null }
+/** pending: writes not yet in the database (pending + failed); photos: of those, Breaker photos waiting to upload. */
+type State = { status: SyncStatus; pending: number; photos: number; error: string | null }
 
 // ── Queue singleton (created on first use, so tests can import this module) ──
 
@@ -32,7 +33,7 @@ const photoUploader: PhotoUploader = {
 }
 
 export async function executeWrite(write: QueuedWrite): Promise<WriteResult> {
-  if (write.type === 'upload_photo') return sendPhoto(photoUploader, write.record, write.image)
+  if (write.type === 'upload_photo') return sendPhoto(photoUploader, write.record, write.image, write.preview)
   // Inserts use ON CONFLICT (id) DO NOTHING: replaying a write whose response
   // was lost leaves exactly one record.
   const insertOnce = { onConflict: 'id', ignoreDuplicates: true } as const
@@ -68,7 +69,7 @@ let _online = typeof navigator === 'undefined' ? true : navigator.onLine
 let _syncing = false
 let _justSynced = false
 let _lastError: string | null = null
-let _state: State = { status: 'online', pending: 0, error: null }
+let _state: State = { status: 'online', pending: 0, photos: 0, error: null }
 
 const listeners = new Set<() => void>()
 const syncedListeners = new Set<() => void>()
@@ -83,12 +84,13 @@ function computeState(): State {
   else if (_justSynced && unsynced === 0) status = 'synced'
   else status = 'online'
   const error = failed > 0 ? `${failed} change${failed !== 1 ? 's' : ''} failed to sync${_lastError ? `: ${_lastError}` : ''}` : null
-  return { status, pending: unsynced, error }
+  const photos = _userId ? collectorQueue().list(_userId).filter((a) => a.type === 'upload_photo').length : 0
+  return { status, pending: unsynced, photos, error }
 }
 
 function notify() {
   const next = computeState()
-  if (next.status !== _state.status || next.pending !== _state.pending || next.error !== _state.error) {
+  if (next.status !== _state.status || next.pending !== _state.pending || next.photos !== _state.photos || next.error !== _state.error) {
     _state = next
     listeners.forEach((fn) => fn())
   }
