@@ -6,6 +6,7 @@ import { CollectorLayout } from '../features/collector/CollectorLayout'
 import { RowCanvasPage } from '../features/collector/RowCanvasPage'
 import { CropDetailPage } from '../features/crops/CropDetailPage'
 import { HarvestForecastTab } from '../features/forecast/HarvestForecastTab'
+import { ProductionTotalsTab } from '../features/forecast/ProductionTotalsTab'
 import { WeeklyPlantDataTab } from '../features/projections/WeeklyPlantDataTab'
 import { queryClient } from '../lib/queryClient'
 import { NotFoundPage } from '../pages/NotFoundPage'
@@ -36,6 +37,7 @@ export function App() {
                   <Route index element={<Navigate to="weekly-plant-data" replace />} />
                   <Route path="weekly-plant-data" element={<WeeklyPlantDataTab />} />
                   <Route path="harvest-forecast" element={<HarvestForecastTab />} />
+                  <Route path="production-totals" element={<ProductionTotalsTab />} />
                 </Route>
                 <Route path="plants" element={<PlantsPage />} />
                 <Route path="photos" element={<PhotosPage />} />

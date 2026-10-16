@@ -15,6 +15,9 @@ export function ProjectionsTabs() {
       <NavLink to={`/projections/harvest-forecast${search}`} className={cls}>
         Harvest Forecast
       </NavLink>
+      <NavLink to="/projections/production-totals" className={cls}>
+        Production Totals
+      </NavLink>
     </nav>
   )
 }

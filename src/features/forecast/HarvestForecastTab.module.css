@@ -34,6 +34,10 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  /* Wide tables scroll inside the card on a phone instead of widening the page. */
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .cardHead {
