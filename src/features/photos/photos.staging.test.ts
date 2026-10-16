@@ -108,6 +108,42 @@ describe.skipIf(!enabled)('Breaker photos on staging', () => {
     await addPairCorrection(pair, 'reassign_node', other.id, 'staging test')
     expect((await load()).assignment.kind).toBe('reassign_node')
     expect((await tester.from('node_photos').select('plant_node_id').eq('node_observation_id', obsId)).data!.every((p) => p.plant_node_id === node.id)).toBe(true)
+    // A replacement joins the same Breaker record and names the photo it replaces; the old one stays.
+    {
+      const id = crypto.randomUUID()
+      const bytes = new TextEncoder().encode(`staging replacement back ${obsId}`)
+      const record = {
+        id, organization_id: crop.organization_id, crop_id: crop.id, plant_node_id: node.id, node_observation_id: obsId, side: 'back' as const,
+        storage_path: photoPath(crop.organization_id, crop.id, node.id, id, 'image/jpeg'), preview_path: null, content_type: 'image/jpeg', bytes: bytes.length,
+        sha256: await sha256Hex(bytes.buffer as ArrayBuffer), taken_at: new Date().toISOString(), capture_meta: { source: 'staging-test', purpose: 'replacement' },
+        replaces_photo_id: pair.back!.id,
+      }
+      expect(await sendPhoto(uploader(tester), record, new Blob([bytes], { type: 'image/jpeg' }), null)).toEqual({ ok: true })
+      const replaced = await load()
+      expect(replaced.back!.id).toBe(id)
+      expect(replaced.replaced.map((p) => p.id)).toEqual([pair.back!.id])
+    }
+    // An accidental second Breaker of the same node and week is marked a duplicate of the first: both are kept.
+    {
+      const dupId = crypto.randomUUID()
+      expect((await tester.from('node_observations').insert({ id: dupId, organization_id: crop.organization_id, crop_id: crop.id, plant_node_id: node.id, year, week_number: week, status: 'BreakerFruit', observed_at: new Date().toISOString() })).error).toBeNull()
+      const id = crypto.randomUUID()
+      const bytes = new TextEncoder().encode(`staging duplicate front ${dupId}`)
+      expect(await sendPhoto(uploader(tester), {
+        id, organization_id: crop.organization_id, crop_id: crop.id, plant_node_id: node.id, node_observation_id: dupId, side: 'front',
+        storage_path: photoPath(crop.organization_id, crop.id, node.id, id, 'image/jpeg'), preview_path: null, content_type: 'image/jpeg', bytes: bytes.length,
+        sha256: await sha256Hex(bytes.buffer as ArrayBuffer), taken_at: new Date().toISOString(), capture_meta: { source: 'staging-test' },
+      }, new Blob([bytes], { type: 'image/jpeg' }), null)).toEqual({ ok: true })
+      const dup = buildPairs({
+        photos: (await tester.from('node_photos').select('*').eq('node_observation_id', dupId)).data!,
+        analyses: [], corrections: [], stems: new Map(), rows: new Map(), nodes: new Map(),
+      })[0]
+      await addPairCorrection(dup, 'duplicate', null, 'staging test', obsId)
+      const marks = (await tester.from('photo_pair_corrections').select('*').eq('node_observation_id', dupId)).data!
+      expect(marks.map((m) => [m.kind, m.duplicate_of_observation_id])).toEqual([['duplicate', obsId]])
+      expect((await tester.from('node_observations').select('id').in('id', [obsId, dupId])).data).toHaveLength(2)
+    }
+
     // Clients can't change or delete stored rows or objects.
     expect((await tester.from('node_photos').update({ side: 'back' } as never).eq('node_observation_id', obsId)).error).not.toBeNull()
     const removed = await tester.storage.from(PHOTO_BUCKET).remove([pair.front!.storage_path])

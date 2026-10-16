@@ -124,8 +124,12 @@ export async function addColourEstimate(pair: PhotoPair, values: { front: number
   )
 }
 
-/** Reassigns the pair to the node really photographed, marks it unusable, or restores it as captured. Photos and observations are untouched. */
-export async function addPairCorrection(pair: PhotoPair, kind: PhotoPairCorrectionRow['kind'], correctedNodeId: string | null, note: string | null) {
+/**
+ * Reassigns the pair to the node really photographed, marks it unusable or a
+ * duplicate of another Breaker record of the same node and week, or restores
+ * it as captured. Photos and observations are untouched.
+ */
+export async function addPairCorrection(pair: PhotoPair, kind: PhotoPairCorrectionRow['kind'], correctedNodeId: string | null, note: string | null, duplicateOf: string | null = null) {
   const any = pair.front ?? pair.back!
   check(
     await supabase.from('photo_pair_corrections').insert({
@@ -134,6 +138,7 @@ export async function addPairCorrection(pair: PhotoPair, kind: PhotoPairCorrecti
       node_observation_id: pair.observationId,
       kind,
       corrected_node_id: correctedNodeId,
+      duplicate_of_observation_id: duplicateOf,
       note,
     }),
   )

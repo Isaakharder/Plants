@@ -4,6 +4,7 @@
 // colour estimate. Nothing here changes a record.
 
 import type { NodePhotoRow, PhotoColourAnalysisRow, PhotoPairCorrectionRow } from '../../lib/database.types'
+import { photosInEffect } from '../collector/photos'
 
 export type NodeInfo = { id: string; stemId: string; nodeNumber: number; label: string | null; isSideShoot: boolean }
 
@@ -46,12 +47,28 @@ export type PhotoPair = {
   week: number
   observedAt: string | null
   takenAt: string
+  /** The photo in effect for each side; replaced photos are kept in `replaced`. */
   front: NodePhotoRow | null
   back: NodePhotoRow | null
+  /** Earlier photos replaced from the collector, newest first (kept, never deleted). */
+  replaced: NodePhotoRow[]
   /** Where the photographed node was at capture (from the photo rows). */
   atCapture: Place
   /** 'as_captured', or the latest correction in effect (nodeId: the node the photos are reassigned to). */
-  assignment: { kind: 'as_captured' | 'reassign_node' | 'unusable'; node: Place | null; nodeId: string | null; note: string | null; at: string | null }
+  assignment: {
+    kind: 'as_captured' | 'reassign_node' | 'unusable' | 'duplicate'
+    node: Place | null
+    nodeId: string | null
+    note: string | null
+    at: string | null
+    /** kind 'duplicate': the Breaker record that is kept. */
+    duplicateOf?: string
+  }
+  /**
+   * Other Breaker records with photos of the same node in the same week
+   * (normally a pepper is recorded once): candidates for marking a duplicate.
+   */
+  sameNodeWeek: { observationId: string; observedAt: string | null; takenAt: string; markedDuplicate: boolean }[]
   /** The node the Breaker record (and the photos, as stored) belong to. */
   recordedNodeId: string
   /** The newest colour estimate (a correction supersedes what it corrects); null when none yet. */
@@ -85,10 +102,12 @@ export function buildPairs(input: {
   }
   const pairs: PhotoPair[] = []
   for (const [observationId, photos] of byObservation) {
-    // The latest photo of each side (a retake is a new photo of the same observation).
-    const latest = (side: 'front' | 'back') => photos.filter((p) => p.side === side).sort((a, b) => b.taken_at.localeCompare(a.taken_at))[0] ?? null
-    const front = latest('front')
-    const back = latest('back')
+    // The photo in effect for each side (a replacement names the photo it replaces; both are kept).
+    const effect = photosInEffect(photos.map((p) => ({ ...p, takenAt: p.taken_at, replacesPhotoId: p.replaces_photo_id ?? null })))
+    const unwrap = (p: (typeof effect)['front']['current']) => (p ? photos.find((x) => x.id === p.id)! : null)
+    const front = unwrap(effect.front.current)
+    const back = unwrap(effect.back.current)
+    const replaced = [...effect.front.replaced, ...effect.back.replaced].map((p) => unwrap(p)!).sort((a, b) => b.taken_at.localeCompare(a.taken_at))
     const any = front ?? back!
     const corrections = input.corrections.filter((c) => c.node_observation_id === observationId).sort((a, b) => b.created_at.localeCompare(a.created_at))
     const c = corrections[0]
@@ -97,6 +116,9 @@ export function buildPairs(input: {
       const n = input.nodes.get(c.corrected_node_id)
       assignment = { kind: 'reassign_node', node: n ? place(n.stemId, nodeName(n)) : null, nodeId: c.corrected_node_id, note: c.note, at: c.created_at }
     } else if (c?.kind === 'unusable') assignment = { kind: 'unusable', node: null, nodeId: null, note: c.note, at: c.created_at }
+    else if (c?.kind === 'duplicate' && c.duplicate_of_observation_id) {
+      assignment = { kind: 'duplicate', node: null, nodeId: null, note: c.note, at: c.created_at, duplicateOf: c.duplicate_of_observation_id }
+    }
     const history = input.analyses.filter((a) => a.node_observation_id === observationId).sort((a, b) => b.created_at.localeCompare(a.created_at))
     pairs.push({
       observationId,
@@ -107,12 +129,21 @@ export function buildPairs(input: {
       takenAt: any.taken_at,
       front,
       back,
+      replaced,
+      sameNodeWeek: [],
       atCapture: place(any.measurement_stem_id, nodeName(any)),
       recordedNodeId: any.plant_node_id,
       assignment,
       colour: history[0] ?? null,
       colourHistory: history,
     })
+  }
+  // Several Breaker records of one node in one week: each lists the others.
+  for (const p of pairs) {
+    p.sameNodeWeek = pairs
+      .filter((o) => o !== p && o.recordedNodeId === p.recordedNodeId && o.year === p.year && o.week === p.week)
+      .map((o) => ({ observationId: o.observationId, observedAt: o.observedAt, takenAt: o.takenAt, markedDuplicate: o.assignment.kind === 'duplicate' }))
+      .sort((a, b) => (a.observedAt ?? a.takenAt).localeCompare(b.observedAt ?? b.takenAt))
   }
   return pairs.sort((a, b) => b.takenAt.localeCompare(a.takenAt))
 }

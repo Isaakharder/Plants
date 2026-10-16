@@ -267,6 +267,8 @@ export type NodePhotoRow = {
   taken_at: string
   recorded_at: string
   capture_meta: Record<string, unknown>
+  /** A replacement photo: the earlier photo of the same Breaker record and side it replaces (kept). */
+  replaces_photo_id: string | null
   created_by: string | null
 }
 
@@ -297,8 +299,10 @@ export type PhotoPairCorrectionRow = {
   organization_id: string
   crop_id: string
   node_observation_id: string
-  kind: 'reassign_node' | 'unusable' | 'restore'
+  kind: 'reassign_node' | 'unusable' | 'duplicate' | 'restore'
   corrected_node_id: string | null
+  /** kind 'duplicate': the Breaker record of the same node and week that is kept. */
+  duplicate_of_observation_id: string | null
   note: string | null
   created_at: string
   created_by: string | null
@@ -435,6 +439,7 @@ export type Database = {
           width?: number | null
           height?: number | null
           capture_meta?: Record<string, unknown>
+          replaces_photo_id?: string | null
         }
         Update: never
         Relationships: [
@@ -456,7 +461,7 @@ export type Database = {
       }
       photo_pair_corrections: {
         Row: PhotoPairCorrectionRow
-        Insert: Pick<PhotoPairCorrectionRow, 'organization_id' | 'crop_id' | 'node_observation_id' | 'kind'> & Partial<Pick<PhotoPairCorrectionRow, 'corrected_node_id' | 'note'>>
+        Insert: Pick<PhotoPairCorrectionRow, 'organization_id' | 'crop_id' | 'node_observation_id' | 'kind'> & Partial<Pick<PhotoPairCorrectionRow, 'corrected_node_id' | 'duplicate_of_observation_id' | 'note'>>
         Update: never
         Relationships: []
       }

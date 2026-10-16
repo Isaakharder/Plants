@@ -168,8 +168,16 @@ connection; retries never create duplicates.
   capture), `photo_colour_analyses` (manual colour %, corrections supersede), `photo_pair_corrections`
   (reassign a pair to the node really photographed, mark it unusable, or restore it; photos,
   observations and stages are never changed).
+- **Recorded once:** opening a node already recorded as Breaker this greenhouse week shows that record
+  (time saved, front/back photos, uploaded or still on the phone) instead of the camera. **Replace
+  photos** adds new photos to that same record (`20261019120000_breaker_photo_replacements.sql`: each
+  names the photo it replaces in `replaces_photo_id`, with a reason; the earlier photo stays stored and
+  is shown on the Photos page). A taken photo is only retaken with its **Retake** button, Save waits for
+  a photo still being read, and a photo step's draft is never written back after its Breaker is saved.
 - **Desktop:** **Photos** page: front/back pairs per variety and period, full-size originals, manual
-  colour %, node corrections.
+  colour %, node corrections, replaced photos. A node with more than one Breaker record in a week is
+  flagged; **Mark this one a duplicate** adds a `duplicate` correction pointing at the record that is
+  kept (both records and their photos stay; weekly counts already count a node's Breaker once).
 - **Framing:** the photo step shows "Centre ONE pepper in the photo. Keep the whole pepper visible. Move
   leaves aside and avoid other peppers, hands and people in the background." Each photo records the
   guidance version in `capture_meta.guidance`. Convention for colour analysis: the target pepper is the
@@ -178,5 +186,7 @@ connection; retries never create duplicates.
 - **Switch:** build with `VITE_BREAKER_PHOTOS=off` to hide the camera step (Breaker recorded without
   photos, as before). Photos already queued on phones still upload. Use this to turn the feature off;
   don't redeploy an older build while phones may still hold queued photos (older builds can't send them).
-- **Rollback of the schema:** `supabase/rollback/20261019000000_breaker_photos_down.sql`, by hand, only
-  when no photo exists (it refuses otherwise).
+- **Rollback of the schema:** `supabase/rollback/20261019120000_breaker_photo_replacements_down.sql`
+  (refuses while any replacement or duplicate mark exists), then
+  `supabase/rollback/20261019000000_breaker_photos_down.sql`, by hand, only when no photo exists (it
+  refuses otherwise).

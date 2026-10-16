@@ -216,3 +216,25 @@
   background: #fdf3dc;
   color: #8a5a00;
 }
+
+.replaced {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.replaced > .note {
+  flex-basis: 100%;
+}
+
+.replacedItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 96px;
+}
+
+.replacedItem > button {
+  height: 96px;
+}

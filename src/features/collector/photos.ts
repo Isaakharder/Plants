@@ -142,3 +142,21 @@ export const photoPath = (organizationId: string, cropId: string, nodeId: string
 
 /** The preview's path, next to its original. */
 export const previewPath = (organizationId: string, cropId: string, nodeId: string, photoId: string) => `${organizationId}/${cropId}/${nodeId}/${photoId}.preview.jpg`
+
+/** A photo's place in a Breaker record's history (server rows and queued uploads alike). */
+export type PhotoVersion = { id: string; side: PhotoSide; takenAt: string; replacesPhotoId: string | null }
+
+/**
+ * The photo in effect for each side of a Breaker record: the newest photo of
+ * that side that no other photo replaces. Replaced photos stay stored and are
+ * returned as history, newest first.
+ */
+export function photosInEffect<T extends PhotoVersion>(photos: T[]): Record<PhotoSide, { current: T | null; replaced: T[] }> {
+  const replacedIds = new Set(photos.map((p) => p.replacesPhotoId).filter((id): id is string => id !== null))
+  const side = (s: PhotoSide) => {
+    const all = photos.filter((p) => p.side === s).sort((a, b) => b.takenAt.localeCompare(a.takenAt))
+    const current = all.find((p) => !replacedIds.has(p.id)) ?? all[0] ?? null
+    return { current, replaced: all.filter((p) => p !== current) }
+  }
+  return { front: side('front'), back: side('back') }
+}

@@ -62,7 +62,7 @@ export function PhotosPage() {
   if (crops.error) return <ErrorState error={crops.error} />
   if (!crop) return <EmptyState title="No varieties yet" description="Add a variety in Settings." />
 
-  const pairs = (data.data?.pairs ?? []).filter((p) => !onlyMissing || (!p.colour && p.assignment.kind !== 'unusable'))
+  const pairs = (data.data?.pairs ?? []).filter((p) => !onlyMissing || (!p.colour && p.assignment.kind !== 'unusable' && p.assignment.kind !== 'duplicate'))
   return (
     <section className={styles.page} aria-label="Breaker photos">
       <h1 className="visually-hidden">Breaker photos</h1>
@@ -157,24 +157,49 @@ function FullSize({ photo, onClose }: { photo: NodePhotoRow; onClose: () => void
   )
 }
 
+const when = (o: { observedAt: string | null; takenAt: string } | undefined) => (o ? dateTime(o.observedAt ?? o.takenAt) : 'another record')
+
+/** Earlier photos replaced from the collector: kept, shown small, with why they were replaced. */
+function Replaced({ pair, onOpen }: { pair: PhotoPair; onOpen: (p: NodePhotoRow) => void }) {
+  const current = [pair.front, pair.back].filter((p): p is NodePhotoRow => p !== null)
+  return (
+    <div className={styles.replaced}>
+      <span className={styles.note}>Replaced (kept for the record):</span>
+      {pair.replaced.map((old) => {
+        const by = [...current, ...pair.replaced].find((p) => p.replaces_photo_id === old.id)
+        const reason = by?.capture_meta?.replaceReason
+        return (
+          <span key={old.id} className={styles.replacedItem}>
+            <Thumb photo={old} label={old.side === 'front' ? 'Old front' : 'Old back'} onOpen={onOpen} />
+            {typeof reason === 'string' && <span className={styles.note}>{reason}</span>}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
 function PairCard({ pair, crop, data }: { pair: PhotoPair; crop: Crop; data: PhotoData }) {
   const refresh = useRefreshPhotos()
   const [open, setOpen] = useState<NodePhotoRow | null>(null)
   const [mode, setMode] = useState<'none' | 'colour' | 'node'>('none')
   const c = pair.colour
   return (
-    <article className={`${styles.card} ${pair.assignment.kind === 'unusable' ? styles.unusable : ''}`}>
+    <article className={`${styles.card} ${pair.assignment.kind === 'unusable' || pair.assignment.kind === 'duplicate' ? styles.unusable : ''}`}>
       <header className={styles.cardHead}>
         <strong>
           W{pair.week} · {dateTime(pair.observedAt ?? pair.takenAt)}
         </strong>
         {pair.assignment.kind === 'reassign_node' && <span className={styles.badge}>Reassigned</span>}
         {pair.assignment.kind === 'unusable' && <span className={`${styles.badge} ${styles.badgeBad}`}>Unusable</span>}
+        {pair.assignment.kind === 'duplicate' && <span className={`${styles.badge} ${styles.badgeBad}`}>Duplicate</span>}
+        {pair.replaced.length > 0 && <span className={styles.badge}>Photos replaced</span>}
       </header>
       <div className={styles.thumbs}>
         <Thumb photo={pair.front} label="Front" onOpen={setOpen} />
         <Thumb photo={pair.back} label="Back" onOpen={setOpen} />
       </div>
+      {pair.replaced.length > 0 && <Replaced pair={pair} onOpen={setOpen} />}
       <dl className={styles.meta}>
         <dt>Variety</dt>
         <dd>{crop.name}</dd>
@@ -218,13 +243,58 @@ function PairCard({ pair, crop, data }: { pair: PhotoPair; crop: Crop; data: Pho
         )
         return <p className={check.ok ? styles.agree : styles.disagree}>{check.ok ? '✓ ' : '⚠ '}{check.message}</p>
       })()}
+      {pair.assignment.kind === 'duplicate' ? (
+        <p className={styles.disagree}>
+          Duplicate of the Breaker recorded {when(pair.sameNodeWeek.find((o) => o.observationId === pair.assignment.duplicateOf))}: the same pepper recorded twice. Both records and
+          their photos are kept; only the other one is used.
+          {pair.assignment.note && <span className={styles.note}> — {pair.assignment.note}</span>}
+        </p>
+      ) : (
+        (() => {
+          // Records not yet marked duplicates: one of them must stay in use.
+          const open = pair.sameNodeWeek.filter((o) => !o.markedDuplicate)
+          if (pair.sameNodeWeek.length === 0) return null
+          if (open.length === 0) {
+            return (
+              <p className={styles.agree}>
+                ✓ Kept: the other Breaker record{pair.sameNodeWeek.length === 1 ? '' : 's'} of {pair.atCapture.nodeName} in W{pair.week} {pair.sameNodeWeek.length === 1 ? 'is' : 'are'} marked
+                as {pair.sameNodeWeek.length === 1 ? 'a duplicate' : 'duplicates'}.
+              </p>
+            )
+          }
+          return (
+            <div className={styles.disagree}>
+              <p>
+                ⚠ {pair.atCapture.nodeName} has {open.length === 1 ? 'another Breaker record' : `${open.length} other Breaker records`} in W{pair.week} (
+                {open.map((o) => when(o)).join(', ')}). A pepper is normally recorded once. If the photos show the same pepper, mark the extra record as a duplicate.
+                To replace unclear photos, use “Replace photos” in the collector instead.
+              </p>
+              <div className={styles.actions}>
+                {open.map((o) => (
+                  <button
+                    key={o.observationId}
+                    type="button"
+                    className="button button-secondary"
+                    onClick={async () => {
+                      await addPairCorrection(pair, 'duplicate', null, 'Same pepper recorded twice', o.observationId)
+                      void refresh()
+                    }}
+                  >
+                    Mark this one a duplicate of {when(o)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })()
+      )}
       {mode === 'colour' ? (
         <ColourForm pair={pair} onDone={() => { setMode('none'); void refresh() }} onCancel={() => setMode('none')} />
       ) : mode === 'node' ? (
         <NodeForm pair={pair} data={data} onDone={() => { setMode('none'); void refresh() }} onCancel={() => setMode('none')} />
       ) : (
         <div className={styles.actions}>
-          {pair.assignment.kind !== 'unusable' && (
+          {pair.assignment.kind !== 'unusable' && pair.assignment.kind !== 'duplicate' && (
             <button type="button" className="button button-primary" onClick={() => setMode('colour')}>
               {c ? 'Correct colour %' : 'Enter colour %'}
             </button>
