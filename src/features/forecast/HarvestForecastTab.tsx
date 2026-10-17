@@ -192,27 +192,19 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
         </div>
       </div>
 
-      <LockStatus
-        week={now.week}
-        current={currentRow}
-        locked={lockedThisWeek}
-        job={jobs.data?.find((j) => j.year === now.year && j.week === now.week) ?? null}
-        firstTargetStarts={firstTargetStarts.toISOString()}
-        pending={completedUnlocked.map((r) => r.iso_week)}
-        busy={busy === 'lock'}
-        onLock={(w) => void lockNow(w)}
-      />
       {error && <div className={styles.error}>{error}</div>}
 
-      {showPreliminary && stored.outdated && (
-        <div className={styles.outdated} role="status">
-          <strong>This preliminary forecast may be outdated.</strong> Records, stem checks, AFW or settings for W{originWeek} have changed since it was
-          generated ({dateTime(stored.saved!.createdAt)}).{' '}
-          <button type="button" className="button button-secondary" onClick={() => void runPreview()} disabled={busy !== null}>
-            {busy === 'preview' ? 'Generating…' : 'Regenerate'}
-          </button>
+      {/* Lock buttons stay in sight when a completed week can be locked. */}
+      {completedUnlocked.length > 0 && (
+        <div className={styles.pending}>
+          {completedUnlocked.map((r) => (
+            <button key={r.iso_week} type="button" className="button button-secondary" disabled={busy !== null} onClick={() => void lockNow(r.iso_week)}>
+              {busy === 'lock' ? 'Locking…' : `Lock W${r.iso_week} forecast now`}
+            </button>
+          ))}
         </div>
       )}
+
       {runs.isPending || sampling.isPending || stored.loading ? (
         <LoadingState />
       ) : runs.error || sampling.error ? (
@@ -225,6 +217,8 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
       ) : (
         <>
           <ForecastTable
+            onRegenerate={showPreliminary && stored.outdated ? () => void runPreview() : undefined}
+            regenerating={busy === 'preview'}
             view={view}
             scored={view.runId ? live.data?.scored.find((s) => s.run.id === view.runId) : undefined}
             actual={view.runId ? live.data?.actual.runs.find((s) => s.run.id === view.runId) : undefined}
@@ -233,9 +227,24 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
             outdated={showPreliminary && stored.outdated}
             onBackToLocked={showPreliminary && runs.data?.length ? () => setSelectedRun(runs.data![0].id) : undefined}
           />
-          <Snapshots runs={runs.data ?? []} shown={view.runId} onShow={(id) => setSelectedRun(id)} />
         </>
       )}
+
+      <details className={styles.details}>
+        <summary>Forecast details</summary>
+        <div className={styles.detailsBody}>
+          <LockStatus
+            week={now.week}
+            current={currentRow}
+            locked={lockedThisWeek}
+            job={jobs.data?.find((j) => j.year === now.year && j.week === now.week) ?? null}
+            firstTargetStarts={firstTargetStarts.toISOString()}
+          />
+          {view && <ForecastExplanation view={view} />}
+        </div>
+      </details>
+
+      {view && <Snapshots runs={runs.data ?? []} shown={view.runId} onShow={(id) => setSelectedRun(id)} />}
       {!runs.isPending && <AccuracyPanel crop={crop} accuracy={live.data?.accuracy} actual={live.data?.actual} />}
       {live.error && <div className={styles.error}>Couldn’t score forecasts: {live.error.message}</div>}
       {view && <AuditDialog open={showAudit} onClose={() => setShowAudit(false)} view={view} />}
@@ -259,9 +268,6 @@ function LockStatus(props: {
   locked: { kind: string; locked_at: string } | undefined
   job: { status: string; last_error: string | null; next_attempt_at: string } | null
   firstTargetStarts: string
-  pending: number[]
-  busy: boolean
-  onLock: (week: number) => void
 }) {
   const { week, current, locked } = props
   return (
@@ -285,15 +291,6 @@ function LockStatus(props: {
             ? JOB_TEXT[props.job.status]?.(props.job) ?? props.job.status
             : `locked on the server when W${week} sampling is marked complete and synced (on time until ${dateTime(props.firstTargetStarts)})`}
       </span>
-      {props.pending.length > 0 && (
-        <span className={styles.pending}>
-          {props.pending.map((w) => (
-            <button key={w} type="button" className="button button-secondary" disabled={props.busy} onClick={() => props.onLock(w)}>
-              {props.busy ? 'Locking…' : `Lock W${w} forecast now`}
-            </button>
-          ))}
-        </span>
-      )}
     </div>
   )
 }
@@ -315,11 +312,15 @@ function ForecastTable({
   accuracy,
   actualAccuracy,
   outdated,
+  onRegenerate,
+  regenerating,
   onBackToLocked,
 }: {
   view: ForecastView
   /** A saved preliminary forecast whose data changed since it was generated. */
   outdated?: boolean
+  onRegenerate?: () => void
+  regenerating?: boolean
   /** The locked forecast scored against what was recorded since (locked lifecycle forecasts only). */
   scored?: ScoredRun
   /** The locked forecast against the actual kg entered (locked forecasts). */
@@ -330,10 +331,9 @@ function ForecastTable({
 }) {
   const marketing = view.weeks.filter((w) => w.window === 'marketing')
   const outlook = view.weeks.filter((w) => w.window === 'outlook')
-  const showCases = view.caseWeightKg !== null
   const observed = Boolean(scored)
   const withActual = Boolean(actual)
-  const columns = 5 + (showCases ? 1 : 0) + (observed ? 4 : 0) + (withActual ? 2 : 0)
+  const columns = 6 + (observed ? 4 : 0) + (withActual ? 2 : 0)
   const scoredWeek = (h: number) => scored?.weeks.find((w) => w.horizon === h)
   const actualWeek = (h: number) => actual?.weeks.find((w) => w.horizon === h)
   const horizonStatus = (h: number) =>
@@ -343,14 +343,16 @@ function ForecastTable({
   const row = (w: ForecastView['weeks'][number]) => {
     if (!w.available) {
       return (
-        <tr key={w.horizon} className={`${w.window === 'outlook' ? styles.outlookRow : ''} ${styles.unavailableRow}`} title={w.unavailableReason ?? undefined}>
+        <tr key={w.horizon} className={`${w.window === 'outlook' ? styles.outlookRow : ''} ${styles.unavailableRow}`} title={w.unavailableReason ?? 'Not available'}>
           <th scope="row">
             W{w.week}
             <span className={styles.ahead}>+{w.horizon}</span>
           </th>
-          <td colSpan={columns - 1} className={styles.unavailable}>
-            Not available{breakerOnly ? ' · needs full lifecycle data' : ''}
-          </td>
+          {Array.from({ length: columns - 1 }, (_, i) => (
+            <td key={i} className={styles.dash}>
+              —
+            </td>
+          ))}
         </tr>
       )
     }
@@ -367,11 +369,11 @@ function ForecastTable({
         </th>
         <td>{formatCount(w.cropFruit)}</td>
         <td title={w.afwSource ?? 'No AFW entered for this variety: enter one in Weekly Plant Data to calculate kg and cases.'}>
-          {afwNeeded ? <span className={styles.afwNeeded}>AFW needed</span> : w.afwG!.toFixed(0)}
+          {afwNeeded ? '—' : w.afwG!.toFixed(0)}
           {w.afwKind === 'grower' && <span className={styles.grower}>Grower</span>}
         </td>
         <td className={styles.kg}>{afwNeeded ? '—' : formatCount(w.kg)}</td>
-        {showCases && <td>{afwNeeded ? '—' : formatCount(w.cases)}</td>}
+        <td>{afwNeeded ? '—' : formatCount(w.cases)}</td>
         {withActual && (
           <>
             <td className={styles.observed} title={a?.status === 'awaiting_actual' ? 'Enter the actual kg in Weekly Plant Data' : undefined}>
@@ -408,7 +410,7 @@ function ForecastTable({
             </span>
           ) : (
             <span className={styles.lowConfidence} title={hs ? `Not yet validated: ${hs.reasons.join('; ')}` : 'Not yet validated by live forecasts'}>
-              Low confidence
+              Low<span className={styles.hideNarrow}> confidence</span>
             </span>
           )}
         </td>
@@ -416,29 +418,25 @@ function ForecastTable({
     )
   }
 
+  const afwMissing = view.weeks.some((w) => w.available && w.afwG === null)
+  const incompleteWalk = view.coverage.visited !== null && view.coverage.visited < view.coverage.expected
+  const anyUnavailable = view.weeks.some((w) => !w.available)
   const fiveClosed = scored && scored.weeks.filter((w) => w.horizon <= MARKETING_WEEKS).every((w) => w.status === 'settled' || w.status === 'unreliable')
   const observedFive = fiveClosed ? scored!.weeks.filter((w) => w.horizon <= MARKETING_WEEKS) : null
   return (
     <div className={styles.card}>
       <div className={styles.cardHead}>
-        <div>
-          <h2 className={styles.title}>
-            Forecast from W{view.originWeek} sampling
-            <span className={`${styles.badge} ${styles[`badge_${view.status}`]}`}>{STATUS_LABEL[view.status]}</span>
-            {outdated && <span className={`${styles.badge} ${styles.badge_incomplete}`}>Possibly outdated</span>}
-            <span className={`${styles.badge} ${styles.badge_basis}`}>{breakerOnly ? 'Next week from Breakers' : 'Full lifecycle · 8 weeks'}</span>
-            {view.confidence.level === 'experimental' && <span className={`${styles.badge} ${styles.badge_experimental}`}>Experimental</span>}
-            {view.coverage.visited !== null && view.coverage.visited < view.coverage.expected && (
-              <span className={`${styles.badge} ${styles.badge_incomplete}`}>
-                Incomplete walkthrough{view.coverage.share !== null && view.coverage.share < LOW_COVERAGE ? ' · low coverage' : ''}
-              </span>
-            )}
-          </h2>
-          <p className={styles.subtitle}>
-            {statusExplanation(view)} {view.source === 'locked' ? 'Locked' : 'Computed'} {dateTime(view.at)} · records observed to {dateTime(view.observedCutoff)} ·{' '}
-            {view.sampleStems} sampled stems
-          </p>
-        </div>
+        <h2 className={styles.compactTitle}>
+          Forecast from W{view.originWeek}
+          <span className={styles.titleSep}>·</span>
+          <span className={view.status === 'official' || view.status === 'late' ? styles.statusOfficial : styles.statusPreliminary}>{STATUS_LABEL[view.status]}</span>
+          {view.confidence.level === 'experimental' && (
+            <>
+              <span className={styles.titleSep}>·</span>
+              <span className={styles.statusExperimental}>Experimental</span>
+            </>
+          )}
+        </h2>
         {onBackToLocked && (
           <button type="button" className="button button-link" onClick={onBackToLocked}>
             Back to locked forecasts
@@ -446,13 +444,24 @@ function ForecastTable({
         )}
       </div>
 
-      {breakerOnly && view.breakers && <BreakerSummary view={view} />}
-
-      {view.confidence.reasons.length > 0 && (
-        <ul className={styles.reasons}>
-          {view.confidence.reasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
+      {(outdated || afwMissing || incompleteWalk) && (
+        <ul className={styles.warnings}>
+          {outdated && (
+            <li>
+              May be outdated: W{view.originWeek} data changed since it was generated.{' '}
+              {onRegenerate && (
+                <button type="button" className="button button-link" onClick={onRegenerate} disabled={regenerating}>
+                  {regenerating ? 'Generating…' : 'Regenerate'}
+                </button>
+              )}
+            </li>
+          )}
+          {afwMissing && <li>No AFW entered: kg and cases need an AFW (Weekly Plant Data).</li>}
+          {incompleteWalk && (
+            <li>
+              Incomplete walkthrough: {view.coverage.visited} of {view.coverage.expected} stems{view.coverage.share !== null && view.coverage.share < LOW_COVERAGE ? ' (low coverage)' : ''}.
+            </li>
+          )}
         </ul>
       )}
 
@@ -460,14 +469,16 @@ function ForecastTable({
         <thead>
           <tr>
             <th scope="col">Week</th>
-            <th scope="col" title="Peppers expected to be harvested on the whole crop: sampled peppers × picking stems ÷ sampled stems">
+            <th scope="col" title="Peppers expected to be harvested on the whole crop">
               Peppers
             </th>
-            <th scope="col" title="Forecast average fruit weight, grams (Grower: the AFW you entered for that week)">
+            <th scope="col" title="Average fruit weight, grams (Grower: the AFW you entered for that week)">
               AFW g
             </th>
-            <th scope="col">kg</th>
-            {showCases && <th scope="col">Cases ({view.caseWeightKg} kg)</th>}
+            <th scope="col">Kg</th>
+            <th scope="col" title={view.caseWeightKg ? `${view.caseWeightKg} kg per case` : 'Set a case weight to show cases'}>
+              Cases
+            </th>
             {withActual && (
               <>
                 <th scope="col" className={styles.observedHead} title="Actual kilograms harvested that week, entered in Weekly Plant Data (the newest entry)">
@@ -497,23 +508,15 @@ function ForecastTable({
         </thead>
         <tbody>
           <tr className={styles.groupRow}>
-            <th colSpan={columns}>Marketing forecast · weeks 1–{MARKETING_WEEKS}</th>
+            <th colSpan={columns}>Weeks 1–{MARKETING_WEEKS}</th>
           </tr>
           {marketing.map(row)}
           <tr className={styles.totalRow}>
             <th scope="row">Weeks 1–{MARKETING_WEEKS} total</th>
-            {view.marketing.cropFruit === null ? (
-              <td colSpan={2 + (showCases ? 1 : 0) + 1} className={styles.unavailable}>
-                Not available{breakerOnly ? ': only next week is forecast while Breakers only are recorded' : ''}
-              </td>
-            ) : (
-              <>
-                <td>{formatCount(view.marketing.cropFruit)}</td>
-                <td />
-                <td className={styles.kg}>{formatCount(view.marketing.kg)}</td>
-                {showCases && <td>{formatCount(view.marketing.cases)}</td>}
-              </>
-            )}
+            <td>{formatCount(view.marketing.cropFruit)}</td>
+            <td />
+            <td className={styles.kg}>{formatCount(view.marketing.kg)}</td>
+            <td>{formatCount(view.marketing.cases)}</td>
             {withActual && (
               <>
                 <td />
@@ -535,14 +538,38 @@ function ForecastTable({
             <td />
           </tr>
           <tr className={`${styles.groupRow} ${styles.outlookGroup}`}>
-            <th colSpan={columns}>
-              Longer-range outlook · weeks {MARKETING_WEEKS + 1}–{FORECAST_WEEKS} <span className={styles.groupNote}>not in the marketing total</span>
-            </th>
+            <th colSpan={columns}>Weeks {MARKETING_WEEKS + 1}–{FORECAST_WEEKS} · outlook</th>
           </tr>
           {outlook.map(row)}
         </tbody>
       </table>
 
+      {anyUnavailable && (
+        <p className={styles.footnote}>
+          — {breakerOnly ? 'Only Breakers are recorded, so only next week is forecast; longer-range weeks need full lifecycle observations.' : 'Not enough full lifecycle history for this week yet.'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** Forecast details (collapsible, below the table): status, basis, Breaker counts, assumptions. */
+function ForecastExplanation({ view }: { view: ForecastView }) {
+  const breakerOnly = view.basis === 'breaker_only'
+  return (
+    <>
+      <p className={styles.subtitle}>
+        {statusExplanation(view)} {view.source === 'locked' ? 'Locked' : 'Computed'} {dateTime(view.at)} · records observed to {dateTime(view.observedCutoff)} ·{' '}
+        {view.sampleStems} sampled stems · {breakerOnly ? 'Next week from Breakers' : 'Full lifecycle · 8 weeks'}
+      </p>
+      {breakerOnly && view.breakers && <BreakerSummary view={view} />}
+      {view.confidence.reasons.length > 0 && (
+        <ul className={styles.reasons}>
+          {view.confidence.reasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
       {view.fate && (
         <p className={styles.fate}>
           Of the fruit on the plants now (crop scale), the model expects {formatCount(view.fate.harvested)} to be harvested within {FORECAST_WEEKS} weeks,{' '}
@@ -550,7 +577,7 @@ function ForecastTable({
           after week {FORECAST_WEEKS}.
         </p>
       )}
-    </div>
+    </>
   )
 }
 

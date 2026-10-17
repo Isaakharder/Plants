@@ -376,3 +376,94 @@
   color: var(--danger);
   font-size: var(--text-sm);
 }
+
+/* ── Compact layout (2026-10-16): numbers first, details below ── */
+.compactTitle {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.titleSep {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.statusPreliminary {
+  color: #92400e;
+}
+
+.statusOfficial {
+  color: var(--primary);
+}
+
+.statusExperimental {
+  color: #6b21a8;
+  font-weight: 600;
+}
+
+.warnings {
+  margin: 0;
+  padding: 8px 12px 8px 28px;
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.warnings li + li {
+  margin-top: 2px;
+}
+
+.dash {
+  color: var(--text-muted);
+}
+
+.footnote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.details > summary {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style-position: inside;
+}
+
+.detailsBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 16px 16px;
+}
+
+/* Phones: the six columns fit without scrolling; kg and cases stay in view. */
+@media (max-width: 640px) {
+  .card > .table th,
+  .card > .table td {
+    padding: 6px 4px;
+    font-size: 13px;
+  }
+
+  .card > .table .ahead,
+  .card > .table .grower,
+  .hideNarrow {
+    display: none;
+  }
+
+  .card {
+    padding: var(--space-3);
+  }
+}
