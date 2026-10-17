@@ -413,3 +413,9 @@ enabled = true
 # formatted with uppercase keywords, indent 2, max width 180, trailing commas,
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
+
+# Climate import endpoint (GrowLinkAgent + manual uploads). The agent has no
+# Supabase session, so the platform's JWT check is off and every route
+# authenticates itself (upload key, or a signed-in owner for /manual).
+[functions.climate]
+verify_jwt = false
