@@ -446,6 +446,8 @@ select.compactSelect {
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85em;
+  /* Long addresses and hashes wrap instead of widening the page on phones. */
+  overflow-wrap: anywhere;
 }
 
 .diff {
