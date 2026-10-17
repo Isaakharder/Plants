@@ -7,6 +7,8 @@
 //   reset     the counter restarted (the day changed, or a reset hour): this value
 //   gap       the previous hour is missing: no value (not spread over the gap)
 //   decrease  the total fell without a reset: a counter problem, no value
+//   after_decrease  the hour after such a fall: one of the two readings is wrong,
+//             so this difference can't be trusted either, no value
 //   first     no earlier reading
 // Daily totals are the day's last valid reading; complete only when the day's
 // last hour (23:00) is there and nothing went wrong that day.
@@ -21,7 +23,7 @@ export type CumulativePoint = {
   value: number | null
 }
 
-export type IncrementStatus = 'ok' | 'reset' | 'gap' | 'decrease' | 'first' | 'missing'
+export type IncrementStatus = 'ok' | 'reset' | 'gap' | 'decrease' | 'after_decrease' | 'first' | 'missing'
 
 export type Increment = { hourUtc: string; localDate: string; localHour: number; value: number | null; status: IncrementStatus }
 
@@ -40,6 +42,7 @@ export function cumulativeIncrements(points: CumulativePoint[], options: Cumulat
   const sorted = [...points].sort((a, b) => Date.parse(a.hourUtc) - Date.parse(b.hourUtc))
   const out: Increment[] = []
   let prev: CumulativePoint | null = null
+  let prevFell = false
   for (const p of sorted) {
     const base = { hourUtc: p.hourUtc, localDate: p.localDate, localHour: p.localHour }
     if (p.value === null) {
@@ -51,10 +54,13 @@ export function cumulativeIncrements(points: CumulativePoint[], options: Cumulat
     } else {
       const consecutive = Date.parse(p.hourUtc) - Date.parse(prev.hourUtc) === HOUR
       const restarted = p.localDate !== prev.localDate || resetHours.has(p.localHour)
+      const fell = consecutive && p.value < prev.value! - tolerance && !restarted
       if (!consecutive) out.push({ ...base, value: null, status: 'gap' })
+      else if (fell) out.push({ ...base, value: null, status: 'decrease' })
+      else if (prevFell && !restarted) out.push({ ...base, value: null, status: 'after_decrease' })
       else if (p.value >= prev.value! - tolerance) out.push({ ...base, value: Math.max(0, p.value - prev.value!), status: 'ok' })
-      else if (restarted) out.push({ ...base, value: p.value, status: 'reset' })
-      else out.push({ ...base, value: null, status: 'decrease' })
+      else out.push({ ...base, value: p.value, status: 'reset' })
+      prevFell = fell
     }
     prev = p
   }

@@ -19,6 +19,7 @@ import {
   isoWeek,
   isValidDate,
   localToUtcCandidates,
+  wallClock,
   wallMinutes,
   type LocalDateTime,
 } from './zonedTime.ts'
@@ -101,7 +102,7 @@ export type ParsedFile = {
   time: {
     filenameLocal: string | null
     systemLocal: string | null
-    method: 'filename' | 'system' | null
+    method: 'filename' | 'system' | 'review' | null
     hourLocal: string | null
     hourUtc: string | null
     dateOrder: 'MDY' | 'DMY' | 'either' | null
@@ -115,7 +116,22 @@ export type ParseOptions = {
   timeZone?: string
   /** When the file arrived (agent uploads): settles the repeated autumn hour. */
   receivedAt?: Date
+  /**
+   * Review of a quarantined file: the whole UTC hour a reviewer assigned. It
+   * settles only timing problems; a file that can't be read stays quarantined.
+   */
+  hourOverrideUtc?: string
 }
+
+/** Problems about the file's hour only (a reviewer can settle these). */
+export const TIME_PROBLEMS = new Set([
+  'filename_time_off_hour',
+  'ambiguous_system_date',
+  'system_time_off_hour',
+  'no_timestamp',
+  'nonexistent_local_time',
+  'repeated_hour_ambiguous',
+])
 
 // ---------------------------------------------------------------------------
 // Text and CSV
@@ -418,6 +434,15 @@ export function parseBlockSummary(bytes: Uint8Array, filename: string, options: 
         quarantine('repeated_hour_ambiguous', `${time.hourLocal} happens twice (clocks went back) and can't be placed without review.`)
       }
     }
+  }
+
+  if (options.hourOverrideUtc !== undefined) {
+    const t = Date.parse(options.hourOverrideUtc)
+    if (!Number.isFinite(t) || t % 3_600_000 !== 0) throw new Error('The assigned hour must be a whole UTC hour.')
+    for (let i = problems.length - 1; i >= 0; i--) if (TIME_PROBLEMS.has(problems[i].code)) problems.splice(i, 1)
+    time.method = 'review'
+    time.hourUtc = new Date(t).toISOString()
+    time.hourLocal = formatLocal(wallClock(t, timeZone))
   }
 
   const status = problems.length === 0 ? 'parsed' : 'quarantined'

@@ -7,6 +7,7 @@ import { useCrop, useUpdateCrop } from './api'
 import { ColorDot, StatusBadge } from './CropBadges'
 import { CropForm } from './CropForm'
 import { DeleteCropDialog } from './DeleteCropDialog'
+import { CropClimateZones } from '../climate/CropClimateZones'
 import { cropToForm } from './cropValidation'
 import { colorLabel, cropDescription, cropStatus, type Crop } from './model'
 import styles from './CropDetailPage.module.css'
@@ -110,6 +111,8 @@ function CropDetail({ crop }: { crop: Crop }) {
           <Detail label="Season length" value={`${formatInteger(daysBetween(crop.planting_date, crop.pullout_date))} days`} />
         </dl>
       </section>
+
+      <CropClimateZones crop={crop} />
 
       <section className={styles.panel}>
         <h2 className={styles.sectionTitle}>Details</h2>

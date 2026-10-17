@@ -54,6 +54,30 @@ const deps: Deps = {
     if (error) throw new Error(`${error.code ?? ''} ${error.message}`.trim())
     return data as IngestResult
   },
+  async isOwner(userId, organizationId) {
+    const { data, error } = await db.rpc('climate_user_is_owner', { p_user_id: userId, p_organization_id: organizationId })
+    if (error) throw new Error(error.message)
+    return data === true
+  },
+  async loadFile(fileId) {
+    const { data, error } = await db
+      .from('climate_import_files')
+      .select('id, organization_id, source_id, original_filename, hour_state, raw_bytes')
+      .eq('id', fileId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!data) return null
+    // bytea arrives as \x followed by hex.
+    const hex = String(data.raw_bytes).replace(/^\\x/, '')
+    const bytes = new Uint8Array(hex.length / 2)
+    for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(2 * i, 2 * i + 2), 16)
+    return { ...data, bytes }
+  },
+  async resolveQuarantined(fileId, userId, parsed, note) {
+    const { data, error } = await db.rpc('climate_resolve_quarantined_file', { p_file_id: fileId, p_user_id: userId, p_parsed: parsed, p_note: note })
+    if (error) throw new Error(`${error.code ?? ''} ${error.message}`.trim())
+    return data
+  },
   now: () => new Date(),
   allowedOrigins,
   log(event, detail) {

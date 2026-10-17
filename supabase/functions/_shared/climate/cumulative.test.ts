@@ -59,7 +59,8 @@ describe('hourly increments of a daily running total', () => {
       ['first', null],
       ['ok', expect.closeTo(55.5, 6)],
       ['decrease', null],
-      ['ok', expect.closeTo(18, 6)],
+      // The next hour's difference rests on the suspect reading: not trusted either.
+      ['after_decrease', null],
     ])
   })
 

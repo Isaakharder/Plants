@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { handle, sha256Hex, toBase64, type Deps, type IngestArgs, type IngestResult } from './handler.ts'
+import type { ParsedFile } from './blockSummary.ts'
+import { handle, sha256Hex, toBase64, type Deps, type IngestArgs, type IngestResult, type StoredFile } from './handler.ts'
 
 const KEY = 'plk_0123456789_' + 'a'.repeat(64)
 const FILE = 'Block Summary_20261017_100009.csv'
@@ -22,6 +23,11 @@ function deps(over: Partial<Deps> = {}) {
       const r: IngestResult = { status: a.parsed.status === 'parsed' ? 'created' : 'quarantined', import_id: `f${stored.size + 1}`, hour_utc: a.parsed.time.hourUtc, hour_local: a.parsed.time.hourLocal, readings: a.parsed.readings.length, file_status: 'active' }
       stored.set(a.sha256, r)
       return r
+    },
+    isOwner: async (userId, orgId) => userId === 'u1' && orgId === 'o1',
+    loadFile: async () => null,
+    resolveQuarantined: async () => {
+      throw new Error('not expected')
     },
     now: () => new Date('2026-10-17T14:00:20Z'),
     allowedOrigins: ['https://plants.example'],
@@ -165,5 +171,51 @@ describe('climate endpoint: manual import', () => {
     expect(pre.headers.get('access-control-allow-origin')).toBe('https://plants.example')
     const other = await handle(post(form([[FILE, bytes]]), 'user-jwt', 'https://evil.example'), d)
     expect(other.headers.get('access-control-allow-origin')).toBeNull()
+  })
+})
+
+describe('climate endpoint: quarantine review', () => {
+  // A file named without a timestamp whose System date reads both ways (10/5/2026): quarantined at upload.
+  const text = new TextDecoder('windows-1252').decode(bytes).replace('10/17/2026', '10/5/2026')
+  const ambiguous = Uint8Array.from([...text].map((c) => (c === '°' ? 0xb0 : c === '²' ? 0xb2 : c.charCodeAt(0))))
+  const stored: StoredFile = { id: '6a0d2c1e-0000-4000-8000-0000000000f1', organization_id: 'o1', source_id: 's1', original_filename: '100009.csv', hour_state: 'none', bytes: ambiguous }
+  const reviewPost = (body: unknown, token = 'user-jwt') =>
+    new Request(`${BASE}/review`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+  it('re-reads the stored bytes with the assigned hour and records the decision', async () => {
+    const calls: { parsed: ParsedFile; note: string }[] = []
+    const { d } = deps({
+      loadFile: async (id) => (id === stored.id ? stored : null),
+      resolveQuarantined: async (fileId, _u, parsed, note) => {
+        calls.push({ parsed, note })
+        return { file_id: fileId, state: 'active', readings: parsed.readings.length, hour_utc: parsed.time.hourUtc! }
+      },
+    })
+    const res = await handle(reviewPost({ file_id: stored.id, hour_utc: '2026-10-05T14:00:00Z', note: 'Climate PC date is month-first' }), d)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ status: 'resolved', state: 'active', readings: 138, hour_local: '2026-10-05 10:00:00' })
+    expect(calls[0].parsed.time.method).toBe('review')
+    expect(calls[0].parsed.problems).toEqual([])
+    expect(calls[0].note).toBe('Climate PC date is month-first')
+  })
+
+  it('requires an owner, a note and a whole hour; a non-quarantined file is refused', async () => {
+    const { d } = deps({ loadFile: async () => stored })
+    expect((await handle(reviewPost({ file_id: stored.id, hour_utc: '2026-10-05T14:00:00Z', note: 'x' }, 'bad-jwt'), d)).status).toBe(401)
+    expect((await handle(reviewPost({ file_id: stored.id, hour_utc: '2026-10-05T14:00:00Z', note: ' ' }), d)).status).toBe(422)
+    expect((await handle(reviewPost({ file_id: stored.id, hour_utc: '2026-10-05T14:30:00Z', note: 'x' }), d)).status).toBe(422)
+    const other = deps({ loadFile: async () => ({ ...stored, organization_id: 'o2' }) })
+    expect((await handle(reviewPost({ file_id: stored.id, hour_utc: '2026-10-05T14:00:00Z', note: 'x' }), other.d)).status).toBe(403)
+    const missing = deps()
+    expect((await handle(reviewPost({ file_id: stored.id, hour_utc: '2026-10-05T14:00:00Z', note: 'x' }), missing.d)).status).toBe(403)
+    const active = deps({ loadFile: async () => ({ ...stored, hour_state: 'active' }) })
+    expect((await handle(reviewPost({ file_id: stored.id, hour_utc: '2026-10-05T14:00:00Z', note: 'x' }), active.d)).status).toBe(409)
+  })
+
+  it('a file that can’t be read stays quarantined whatever the hour', async () => {
+    const { d } = deps({ loadFile: async () => ({ ...stored, bytes: new TextEncoder().encode('not a block summary') }) })
+    const res = await handle(reviewPost({ file_id: stored.id, hour_utc: '2026-10-05T14:00:00Z', note: 'try' }), d)
+    expect(res.status).toBe(422)
+    expect((await res.json()).problems.map((p: { code: string }) => p.code)).toEqual(['no_zone_header'])
   })
 })

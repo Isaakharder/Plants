@@ -6,6 +6,7 @@ import styles from './AppLayout.module.css'
 
 const NAV_ITEMS = [
   { to: '/projections', label: 'Projections' },
+  { to: '/climate', label: 'Climate' },
   { to: '/plants', label: 'Plants' },
   { to: '/photos', label: 'Photos' },
   { to: '/settings', label: 'Settings' },
@@ -13,9 +14,9 @@ const NAV_ITEMS = [
 
 export function AppLayout() {
   const organization = useOrganization()
-  // Projections and Plants have no page header, so they sit closer under the top bar.
+  // Projections, Climate and Plants have no page header, so they sit closer under the top bar.
   const { pathname } = useLocation()
-  const compact = pathname.startsWith('/projections') || pathname.startsWith('/plants')
+  const compact = pathname.startsWith('/projections') || pathname.startsWith('/climate') || pathname.startsWith('/plants')
 
   return (
     <div className={styles.shell}>

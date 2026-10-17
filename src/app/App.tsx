@@ -8,6 +8,9 @@ import { CropDetailPage } from '../features/crops/CropDetailPage'
 import { HarvestForecastTab } from '../features/forecast/HarvestForecastTab'
 import { ProductionTotalsTab } from '../features/forecast/ProductionTotalsTab'
 import { WeeklyPlantDataTab } from '../features/projections/WeeklyPlantDataTab'
+import { ClimateImports } from '../features/climate/ClimateImports'
+import { ClimateMonitor } from '../features/climate/ClimateMonitor'
+import { ClimatePage } from '../pages/ClimatePage'
 import { queryClient } from '../lib/queryClient'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { PlantsPage } from '../pages/PlantsPage'
@@ -38,6 +41,11 @@ export function App() {
                   <Route path="weekly-plant-data" element={<WeeklyPlantDataTab />} />
                   <Route path="harvest-forecast" element={<HarvestForecastTab />} />
                   <Route path="production-totals" element={<ProductionTotalsTab />} />
+                </Route>
+                <Route path="climate" element={<ClimatePage />}>
+                  <Route index element={<Navigate to="monitor" replace />} />
+                  <Route path="monitor" element={<ClimateMonitor />} />
+                  <Route path="imports" element={<ClimateImports />} />
                 </Route>
                 <Route path="plants" element={<PlantsPage />} />
                 <Route path="photos" element={<PhotosPage />} />

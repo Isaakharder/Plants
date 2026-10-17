@@ -4,6 +4,8 @@
 //   GET  …/api/v1/climate/ping      agent key → { organization_name, key_label, source_name, server_time }
 //   POST …/api/v1/climate/imports   agent key; JSON { filename, file_hash?, raw_csv_base64, agent_version?, readings? }
 //   POST …/manual                   signed-in owner; multipart: source_id + files (several)
+//   POST …/review                    signed-in owner; JSON { file_id, hour_utc, note }: a quarantined
+//                                    file re-read from its stored bytes with the hour assigned
 //
 // A 2xx answer means the original bytes and the import's status are committed.
 // Anything the server can't store answers 5xx so the agent keeps the file and
@@ -44,12 +46,24 @@ export type IngestResult = {
   file_status: string
 }
 
+export type StoredFile = {
+  id: string
+  organization_id: string
+  source_id: string
+  original_filename: string
+  hour_state: string
+  bytes: Uint8Array
+}
+
 export type Deps = {
   authenticateAgent(key: string, ip: string | null): Promise<AgentAuth | null>
   /** The signed-in user behind a Supabase access token, or null. */
   userFromToken(token: string): Promise<{ id: string } | null>
   sourceTimeZone(sourceId: string): Promise<string | null>
   ingest(args: IngestArgs): Promise<IngestResult>
+  isOwner(userId: string, organizationId: string): Promise<boolean>
+  loadFile(fileId: string): Promise<StoredFile | null>
+  resolveQuarantined(fileId: string, userId: string, parsed: ParsedFile, note: string): Promise<{ file_id: string; state: string; readings: number; hour_utc: string }>
   now(): Date
   allowedOrigins: string[]
   log(event: string, detail: Record<string, unknown>): void
@@ -146,7 +160,15 @@ async function ingestBytes(
 }
 
 const route = (path: string) =>
-  path.endsWith('/api/v1/climate/ping') ? 'ping' : path.endsWith('/api/v1/climate/imports') ? 'imports' : path.endsWith('/manual') ? 'manual' : null
+  path.endsWith('/api/v1/climate/ping')
+    ? 'ping'
+    : path.endsWith('/api/v1/climate/imports')
+      ? 'imports'
+      : path.endsWith('/manual')
+        ? 'manual'
+        : path.endsWith('/review')
+          ? 'review'
+          : null
 
 export async function handle(req: Request, deps: Deps): Promise<Response> {
   const cors = corsHeaders(req, deps)
@@ -156,6 +178,7 @@ export async function handle(req: Request, deps: Deps): Promise<Response> {
     if (!which) throw new HttpError(404, 'not_found', 'Not found.')
 
     if (which === 'manual') return await manual(req, deps, cors)
+    if (which === 'review') return await review(req, deps, cors)
 
     // Agent endpoints: the key decides the organization and source.
     const key = bearer(req)
@@ -245,4 +268,38 @@ async function manual(req: Request, deps: Deps, cors: Record<string, string>): P
   }
   deps.log('ingest', { channel: 'manual', user: user.id, files: results.length })
   return json(200, { status: 'ok', results }, cors)
+}
+
+async function review(req: Request, deps: Deps, cors: Record<string, string>): Promise<Response> {
+  if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed', 'Use POST.')
+  const token = bearer(req)
+  const user = token ? await deps.userFromToken(token) : null
+  if (!user) throw new HttpError(401, 'unauthorized', 'Sign in to review climate imports.')
+  let body: Record<string, unknown>
+  try {
+    body = await req.json()
+  } catch {
+    throw new HttpError(400, 'invalid_json', 'The body is not valid JSON.')
+  }
+  const fileId = typeof body.file_id === 'string' && /^[0-9a-f-]{36}$/i.test(body.file_id) ? body.file_id : null
+  const hourUtc = typeof body.hour_utc === 'string' ? body.hour_utc : null
+  const note = typeof body.note === 'string' ? body.note.trim() : ''
+  if (!fileId || !hourUtc) throw new HttpError(422, 'invalid_request', 'file_id and hour_utc are required.')
+  if (!note) throw new HttpError(422, 'note_required', 'A note explaining the decision is required.')
+  const t = Date.parse(hourUtc)
+  if (!Number.isFinite(t) || t % 3_600_000 !== 0) throw new HttpError(422, 'invalid_hour', 'hour_utc must be a whole hour.')
+
+  const file = await deps.loadFile(fileId)
+  // Same answer for a missing file and someone else's: nothing about it is revealed.
+  if (!file || !(await deps.isOwner(user.id, file.organization_id))) throw new HttpError(403, 'forbidden', 'Only an organization owner can review this file.')
+  if (file.hour_state !== 'none') throw new HttpError(409, 'not_quarantined', 'This file is not quarantined.')
+
+  const timeZone = (await deps.sourceTimeZone(file.source_id)) ?? 'America/Toronto'
+  const parsed = parseBlockSummary(file.bytes, file.original_filename, { timeZone, hourOverrideUtc: new Date(t).toISOString() })
+  if (parsed.status !== 'parsed') {
+    return json(422, { status: 'error', error: 'still_unreadable', message: 'The file can\'t be read even with an assigned hour.', problems: parsed.problems }, cors)
+  }
+  const r = await deps.resolveQuarantined(file.id, user.id, parsed, note)
+  deps.log('review', { file_id: file.id, user: user.id, state: r.state })
+  return json(200, { status: 'resolved', ...r, hour_local: parsed.time.hourLocal, warnings: parsed.warnings.map((w) => w.code) }, cors)
 }

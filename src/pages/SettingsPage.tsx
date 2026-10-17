@@ -1,5 +1,6 @@
 import { PageHeader } from '../components/PageHeader'
 import { AttentionRulesSection } from '../features/attentionRules/AttentionRulesSection'
+import { ClimateSettingsSection } from '../features/climate/ClimateSettingsSection'
 import { VarietiesSection } from '../features/crops/VarietiesSection'
 import { MobileStatusOptionsSection } from '../features/statusOptions/MobileStatusOptionsSection'
 
@@ -10,6 +11,7 @@ export function SettingsPage() {
       <VarietiesSection />
       <AttentionRulesSection />
       <MobileStatusOptionsSection />
+      <ClimateSettingsSection />
     </>
   )
 }

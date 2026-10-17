@@ -211,6 +211,18 @@ describe('Block Summary parser: dates, clocks and daylight saving', () => {
   })
 })
 
+describe('Block Summary parser: an hour assigned at review', () => {
+  it('settles timing problems only', () => {
+    const p = parseBlockSummary(withSystem('3/14/2027', '02:00', '10'), 'Block Summary_20270314_020005.csv', { hourOverrideUtc: '2027-03-14T07:00:00Z' })
+    expect(p.status).toBe('parsed')
+    expect(p.time).toMatchObject({ method: 'review', hourUtc: '2027-03-14T07:00:00.000Z', hourLocal: '2027-03-14 03:00:00' })
+    const broken = parseBlockSummary(new TextEncoder().encode('x'), 'x.csv', { hourOverrideUtc: '2027-03-14T07:00:00Z' })
+    expect(broken.status).toBe('quarantined')
+    expect(broken.problems.map((x) => x.code)).toEqual(['no_zone_header'])
+    expect(() => parseBlockSummary(fixture(OCT17), OCT17, { hourOverrideUtc: '2026-10-17T14:30:00Z' })).toThrow()
+  })
+})
+
 const REAL = process.env.CLIMATE_REAL_SAMPLES
 describe.skipIf(!REAL)('Block Summary parser: real exports (local only, never committed)', () => {
   const names = REAL ? readdirSync(REAL).filter((n) => n.toLowerCase().endsWith('.csv')) : []

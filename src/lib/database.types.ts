@@ -502,6 +502,168 @@ export type ForecastLockJobRow = {
 
 export type LockReadiness = { state: 'ready' | 'waiting_for_sync' | 'incomplete' | 'superseded' | 'locked'; checked_in_db: number | null; checked_seen: number | null; detail: string | null }
 
+// ---- Climate (20261027000000_climate_ingest.sql, 20261028000000_climate_review_and_monitoring.sql) ----
+// Written only through functions (and the `climate` Edge Function); the app reads.
+
+export type ClimateSourceRow = {
+  id: string
+  organization_id: string
+  kind: 'ridder_synopta_block_summary'
+  name: string
+  time_zone: string
+  created_at: string
+  created_by: string | null
+}
+
+export type ClimateAgentKeyRow = {
+  id: string
+  organization_id: string
+  source_id: string
+  label: string
+  key_prefix: string
+  created_at: string
+  created_by: string | null
+  expires_at: string | null
+  revoked_at: string | null
+  revoked_by: string | null
+  last_used_at: string | null
+}
+
+export type ClimateZoneRow = {
+  id: string
+  organization_id: string
+  source_id: string
+  /** Exactly as the climate computer labels the column ("Zone 8"); the identifier. */
+  source_label: string
+  zone_number: number | null
+  display_name: string | null
+  status: 'active' | 'retired'
+  first_seen_hour: string | null
+  last_seen_hour: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ClimateFileState = 'active' | 'conflict' | 'superseded' | 'none'
+
+export type ClimateProblem = { code: string; message: string }
+
+export type ClimateImportFileRow = {
+  id: string
+  organization_id: string
+  source_id: string
+  sha256: string
+  /** bytea: '\\x' + hex. Select it only when needed (download, compare). */
+  raw_bytes: string
+  byte_size: number
+  original_filename: string
+  encoding: string | null
+  channel: 'agent' | 'manual'
+  agent_key_id: string | null
+  uploaded_by: string | null
+  agent_version: string | null
+  received_at: string
+  parser_version: string
+  parse_status: 'parsed' | 'quarantined'
+  problems: ClimateProblem[]
+  warnings: ClimateProblem[]
+  filename_local: string | null
+  system_date_raw: string | null
+  system_time_raw: string | null
+  week_number_raw: string | null
+  metadata: Record<string, unknown>
+  hour_utc: string | null
+  hour_local: string | null
+  time_method: 'filename' | 'system' | 'review' | null
+  date_order: 'MDY' | 'DMY' | 'either' | null
+  clock_offset_minutes: number | null
+  hour_state: ClimateFileState
+  reviewed_at: string | null
+  reviewed_by: string | null
+  review_note: string | null
+}
+
+export type ClimateReadingRow = {
+  id: number
+  organization_id: string
+  source_id: string
+  file_id: string
+  zone_id: string
+  hour_utc: string
+  row_label: string
+  metric: string
+  unit: string | null
+  unit_raw: string | null
+  raw_text: string
+  value: number | null
+  flags: string[]
+}
+
+export type ClimateImportAttemptRow = {
+  id: number
+  organization_id: string | null
+  source_id: string | null
+  file_id: string | null
+  sha256: string | null
+  filename: string | null
+  channel: 'agent' | 'manual'
+  agent_key_id: string | null
+  uploaded_by: string | null
+  outcome: 'created' | 'duplicate' | 'conflict' | 'quarantined'
+  detail: Record<string, unknown>
+  created_at: string
+}
+
+export type ClimateFileReviewRow = {
+  id: number
+  organization_id: string
+  source_id: string
+  file_id: string
+  action: 'activate' | 'set_aside' | 'resolve_quarantine' | 'superseded_by_review'
+  state_before: string
+  state_after: string
+  replaced_file_id: string | null
+  hour_utc: string | null
+  parser_version: string | null
+  note: string
+  reviewed_by: string
+  reviewed_at: string
+}
+
+export type CropClimateZoneRow = {
+  id: string
+  organization_id: string
+  crop_id: string
+  zone_id: string
+  valid_from: string
+  /** Exclusive; null = open-ended. */
+  valid_until: string | null
+  area_share: number | null
+  change_id: string
+  reason: string | null
+  recorded_at: string
+  recorded_by: string | null
+  superseded_at: string | null
+  superseded_by: string | null
+}
+
+/** [epoch seconds, value, excluded (0/1), flags or area share]. */
+export type ClimatePoint = [number, number | null, 0 | 1, string[] | number | null]
+export type ClimateSeries = { zone_id: string; metric: string; unit: string | null; source_label?: string; points: ClimatePoint[] }
+/** [date, hours with a usable value, mean, min, max, excluded count]. */
+export type ClimateDailyDay = [string, number, number | null, number | null, number | null, number]
+export type ClimateDailySeries = { zone_id: string; metric: string; days: ClimateDailyDay[] }
+export type ClimateImportStatus = {
+  last_success: { received_at: string; filename: string; channel: 'agent' | 'manual'; hour_utc: string; hour_local: string } | null
+  latest_hour: string | null
+  first_hour: string | null
+  files: Partial<Record<ClimateFileState, number>> | null
+  attempts_7d: Partial<Record<ClimateImportAttemptRow['outcome'], number>> | null
+  to_review: number
+  missing_7d: number
+  agent_last_used: string | null
+}
+
 // ---- Breaker photos (20261019000000_breaker_photos.sql) ----
 // Append-only. Images are in the private Storage bucket 'node-photos'.
 
@@ -809,14 +971,34 @@ export type Database = {
         Update: never
         Relationships: []
       }
+      climate_sources: { Row: ClimateSourceRow; Insert: never; Update: never; Relationships: [] }
+      climate_agent_keys: { Row: ClimateAgentKeyRow; Insert: never; Update: never; Relationships: [] }
+      climate_zones: { Row: ClimateZoneRow; Insert: never; Update: never; Relationships: [] }
+      climate_import_files: { Row: ClimateImportFileRow; Insert: never; Update: never; Relationships: [] }
+      climate_readings: { Row: ClimateReadingRow; Insert: never; Update: never; Relationships: [] }
+      climate_import_attempts: { Row: ClimateImportAttemptRow; Insert: never; Update: never; Relationships: [] }
+      climate_file_reviews: { Row: ClimateFileReviewRow; Insert: never; Update: never; Relationships: [] }
+      crop_climate_zones: { Row: CropClimateZoneRow; Insert: never; Update: never; Relationships: [] }
     }
     Views: {
+      climate_readings_active: { Row: ClimateReadingRow; Relationships: [] }
       node_latest_statuses: {
         Row: Omit<NodeObservationRow, 'created_by'> & { measurement_stem_id: string; measurement_row_id: string }
         Relationships: []
       }
     }
     Functions: {
+      climate_create_source: { Args: { p_organization_id: string; p_name: string }; Returns: ClimateSourceRow }
+      climate_create_agent_key: { Args: { p_source_id: string; p_label: string; p_expires_at?: string | null }; Returns: { id: string; key_prefix: string; key: string } }
+      climate_revoke_agent_key: { Args: { p_key_id: string }; Returns: undefined }
+      climate_set_zone_display_name: { Args: { p_zone_id: string; p_display_name: string | null }; Returns: undefined }
+      climate_review_file: { Args: { p_file_id: string; p_action: 'activate' | 'set_aside'; p_note: string }; Returns: { file_id: string; state: string; replaced_file_id?: string | null } }
+      climate_series: { Args: { p_source_id: string; p_zone_ids: string[]; p_metrics: string[]; p_from: string; p_to: string }; Returns: ClimateSeries[] }
+      climate_daily: { Args: { p_source_id: string; p_zone_ids: string[]; p_metrics: string[]; p_from: string; p_to: string }; Returns: ClimateDailySeries[] }
+      climate_missing_hours: { Args: { p_source_id: string; p_from: string; p_to: string }; Returns: [string, string, number][] }
+      climate_import_status: { Args: { p_source_id: string }; Returns: ClimateImportStatus }
+      set_crop_climate_zones: { Args: { p_crop_id: string; p_from: string; p_zones: { zone_id: string; area_share?: number | null }[]; p_reason?: string | null }; Returns: string }
+      crop_climate_series: { Args: { p_crop_id: string; p_metrics: string[]; p_from: string; p_to: string; p_as_of?: string }; Returns: ClimateSeries[] }
       create_organization: {
         Args: { org_name: string }
         Returns: OrganizationRow

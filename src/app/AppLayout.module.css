@@ -114,8 +114,13 @@
   }
   .brand { grid-area: brand; }
   .signOut { grid-area: signout; }
-  .nav { grid-area: nav; justify-content: space-between; }
-  .navLink { flex: 1; text-align: center; padding: 8px 12px; }
+  /* Five items: tighter on phones, and scroll sideways rather than widen the page. */
+  .nav { grid-area: nav; justify-content: space-between; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .navLink { flex: 1; text-align: center; padding: 8px 12px; white-space: nowrap; }
+}
+
+@media (max-width: 440px) {
+  .navLink { padding: 8px 6px; font-size: var(--text-sm); }
   .orgName { display: none; }
   .main { padding-top: var(--space-6); }
   .mainCompact { padding-top: var(--space-4); }
