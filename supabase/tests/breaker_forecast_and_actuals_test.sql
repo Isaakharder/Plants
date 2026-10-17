@@ -124,6 +124,13 @@ begin
     raise exception 'FAIL: share above 100%%';
   exception when check_violation then null;
   end;
+  begin
+    insert into public.forecast_basis_settings (organization_id, crop_id, from_year, from_week, basis, harvest_ready_share) values ('aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 2026, 43, 'breaker_only', -0.01);
+    raise exception 'FAIL: a negative share';
+  exception when check_violation then null;
+  end;
+  -- 0% is allowed (20261026): an explicit "nothing harvest-ready" setting.
+  insert into public.forecast_basis_settings (organization_id, crop_id, from_year, from_week, basis, harvest_ready_share) values ('aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 2026, 53, 'breaker_only', 0);
   if (select basis from public.forecast_basis_at('aaaaaaaa-0000-4000-8000-00000000dc01', 202641)) <> 'lifecycle' then raise exception 'FAIL: W41 lifecycle'; end if;
   select * into r from public.forecast_basis_at('aaaaaaaa-0000-4000-8000-00000000dc01', 202650);
   if r.basis <> 'breaker_only' or r.harvest_ready_share <> 0.85 or r.from_week <> 42 then raise exception 'FAIL: W50 %', r; end if;

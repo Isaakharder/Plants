@@ -467,3 +467,45 @@
     padding: var(--space-3);
   }
 }
+
+/* Ready % (Breakers only): editable on a preliminary forecast's next-week row. */
+.table td.readyCell {
+  text-align: left;
+}
+
+.readyEdit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.readyInput {
+  width: 64px;
+  padding: 4px 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.readyButton {
+  padding: 4px 8px;
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 640px) {
+  .readyInput {
+    width: 40px;
+    padding: 2px 4px;
+    font-size: 13px;
+  }
+
+  .card > .table th,
+  .card > .table td {
+    padding: 6px 3px;
+    font-size: 12px;
+  }
+
+  .card > .table thead th {
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+}

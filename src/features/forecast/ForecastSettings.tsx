@@ -42,14 +42,15 @@ export function ForecastSettings({ crop, open, onClose }: { crop: Crop; open: bo
   const y = Number(year)
   const w = Number(week)
   const pct = Number(share.replace(',', '.'))
-  const valid = Number.isInteger(y) && y >= 2000 && y <= 2100 && Number.isInteger(w) && w >= 1 && w <= 53 && (basis === 'lifecycle' || (Number.isFinite(pct) && pct >= 5 && pct <= 100))
+  const valid = Number.isInteger(y) && y >= 2000 && y <= 2100 && Number.isInteger(w) && w >= 1 && w <= 53 && (basis === 'lifecycle' || (Number.isFinite(pct) && pct >= 0 && pct <= 100))
 
   return (
     <Dialog open={open} title={`Forecast settings · ${crop.name}`} onClose={onClose} className={styles.auditDialog}>
       <p className={styles.subtitle}>
         What this variety’s forecast rests on, from a week on. <strong>Full lifecycle</strong>: the eight-week forecast from SetFruit, MatureGreen and Breaker
         records. <strong>Breakers only</strong>: the Friday walkthrough records Breakers only, so the forecast covers next week: this Friday’s Breakers × the
-        harvest-ready share (experimental 85% from Mathieu 2026). Changes are added as new entries; nothing is overwritten.
+        harvest-ready share (experimental 85% from Mathieu 2026). To adjust the share for a week, edit <strong>Ready %</strong> in the forecast table; here you
+        choose the basis, from which week, and a starting share when switching to Breakers only. Changes are added as new entries; nothing is overwritten.
       </p>
 
       <h3 className={styles.replayTitle}>In effect</h3>
@@ -108,8 +109,8 @@ export function ForecastSettings({ crop, open, onClose }: { crop: Crop; open: bo
           </label>
           {basis === 'breaker_only' && (
             <label className="field">
-              <span className="field-label">Harvest-ready %</span>
-              <input className="input" inputMode="decimal" value={share} onChange={(e) => setShare(e.target.value)} aria-invalid={!(pct >= 5 && pct <= 100)} />
+              <span className="field-label">Starting Ready %</span>
+              <input className="input" inputMode="decimal" value={share} onChange={(e) => setShare(e.target.value)} aria-invalid={!(pct >= 0 && pct <= 100)} />
             </label>
           )}
         </div>
