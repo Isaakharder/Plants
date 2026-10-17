@@ -176,6 +176,8 @@
   font-size: 11px;
   font-weight: 600;
   font-style: normal;
+  line-height: 15px;
+  vertical-align: 1px;
 }
 
 .fate {
@@ -473,29 +475,51 @@
   text-align: left;
 }
 
+/* Every cell centred on one line; the Ready % field fits inside the normal row height. */
+.table td,
+.table tbody th {
+  vertical-align: middle;
+}
+
 .readyEdit {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  /* Baseline-aligned, so its digits sit on the same line as the row's values.
+     Taller than a line of text: the negative margin keeps it from growing the row. */
+  margin-block: -3px;
 }
 
-.readyInput {
-  width: 64px;
-  padding: 4px 6px;
+/* Overrides the global .input / .button touch size (48px) inside the table only. */
+.table .readyInput {
+  width: calc(4ch + 14px);
+  min-height: 0;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: inherit;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.readyButton {
-  padding: 4px 8px;
+.table .readyButton {
+  min-height: 0;
+  height: 22px;
+  padding: 0 8px;
   font-size: var(--text-xs);
+  line-height: 20px;
 }
 
 @media (max-width: 640px) {
-  .readyInput {
-    width: 40px;
-    padding: 2px 4px;
-    font-size: 13px;
+  .table .readyInput {
+    width: calc(4ch + 8px);
+    height: 20px;
+    padding: 0 3px;
+  }
+
+  .table .readyButton {
+    height: 20px;
+    padding: 0 6px;
   }
 
   .card > .table th,
