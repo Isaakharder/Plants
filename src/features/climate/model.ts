@@ -67,6 +67,41 @@ export function formatLocalHour(epochS: number, timeZone = GREENHOUSE_TIME_ZONE)
 export type LinePoint = { t: number; v: number | null; excluded: boolean }
 export type Line = { id: string; label: string; points: LinePoint[]; emphasis?: boolean }
 
+/**
+ * The chart's value axis: the data's range with a little room. Values that differ only by
+ * floating-point noise (e.g. a weighted mean of equal readings: 2.6 and 2.6000000000000005)
+ * count as one value, so the axis never gets a near-zero span.
+ */
+export function valueRange(values: (number | null)[], bars = false): { yMin: number; yMax: number } {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const v of values) {
+    if (v === null || !Number.isFinite(v)) continue
+    if (v < lo) lo = v
+    if (v > hi) hi = v
+  }
+  if (lo === Infinity) return { yMin: 0, yMax: 1 }
+  if (bars) lo = Math.min(0, lo)
+  if (hi - lo < 1e-9 * Math.max(1, Math.abs(hi))) {
+    lo -= 1
+    hi += 1
+  }
+  const pad = (hi - lo) * 0.08
+  return { yMin: bars ? lo : lo - pad, yMax: hi + pad }
+}
+
+/** Round tick values for an axis; at most a dozen, whatever the range. */
+export function niceTicks(min: number, max: number, count = 4): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max < min) return []
+  if (max - min < 1e-9 * Math.max(1, Math.abs(max))) return [min]
+  const step0 = (max - min) / count
+  const mag = 10 ** Math.floor(Math.log10(step0))
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= step0) ?? step0
+  const out: number[] = []
+  for (let i = Math.ceil(min / step); i * step <= max + step * 1e-9 && out.length < 12; i++) out.push(Math.round(i * step * 1e6) / 1e6)
+  return out
+}
+
 export function pointsOf(series: Pick<ClimateSeries, 'points'> | undefined): LinePoint[] {
   return (series?.points ?? []).map(([t, v, excluded]) => ({ t, v: excluded ? null : v, excluded: excluded === 1 }))
 }

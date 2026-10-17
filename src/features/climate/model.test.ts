@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { ClimatePoint, ClimateSeries } from '../../lib/database.types'
 import {
   combineZones,
+  niceTicks,
+  valueRange,
   dailyFromPoints,
   exclusionWarnings,
   missingWarning,
@@ -132,5 +134,22 @@ describe('area shares', () => {
     expect(parseAreaShares(['60', ''])).toEqual({ error: 'Give an area % for every zone, or leave them all blank.' })
     expect(parseAreaShares(['60', '30'])).toEqual({ error: 'Area % add up to 90, not 100.' })
     expect(parseAreaShares(['0', '100'])).toMatchObject({ error: expect.any(String) })
+  })
+})
+
+describe('chart axis', () => {
+  it('values equal but for floating-point noise give a sane axis (no endless ticks)', () => {
+    const r = valueRange([2.6, 2.6000000000000005, null, 2.6])
+    expect(r.yMax - r.yMin).toBeGreaterThan(1)
+    expect(niceTicks(2.6, 2.6000000000000005)).toEqual([2.6])
+    expect(niceTicks(r.yMin, r.yMax).length).toBeLessThanOrEqual(12)
+  })
+
+  it('ordinary ranges get round ticks; bars start at zero', () => {
+    expect(niceTicks(18.2, 24.9)).toEqual([20, 22, 24])
+    expect(valueRange([12, 96], true).yMin).toBe(0)
+    expect(niceTicks(0, 1e-300).length).toBeLessThanOrEqual(12)
+    expect(niceTicks(NaN, 1)).toEqual([])
+    expect(valueRange([])).toEqual({ yMin: 0, yMax: 1 })
   })
 })

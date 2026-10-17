@@ -3,7 +3,7 @@
 // for excluded readings, and a hover/tap readout. Radiation is drawn as bars.
 
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { formatLocalHour, type Line } from './model'
+import { formatLocalHour, niceTicks, valueRange, type Line } from './model'
 import styles from './Climate.module.css'
 
 const HEIGHT = 150
@@ -33,36 +33,13 @@ function useWidth() {
   return { ref, width }
 }
 
-function niceTicks(min: number, max: number, count = 4): number[] {
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return []
-  if (min === max) return [min]
-  const step0 = (max - min) / count
-  const mag = 10 ** Math.floor(Math.log10(step0))
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= step0) ?? step0
-  const out: number[] = []
-  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) out.push(Math.round(v * 1e6) / 1e6)
-  return out
-}
-
 export function ClimateChart({ lines, from, to, unit, decimals, gaps, bars = false }: Props) {
   const { ref, width } = useWidth()
   const [hover, setHover] = useState<number | null>(null)
   const plotW = width - PAD.left - PAD.right
   const plotH = HEIGHT - PAD.top - PAD.bottom
 
-  const { yMin, yMax } = useMemo(() => {
-    const values = lines.flatMap((l) => l.points.map((p) => p.v)).filter((v): v is number => v !== null)
-    if (values.length === 0) return { yMin: 0, yMax: 1 }
-    let lo = Math.min(...values)
-    let hi = Math.max(...values)
-    if (bars) lo = Math.min(0, lo)
-    if (lo === hi) {
-      lo -= 1
-      hi += 1
-    }
-    const padY = (hi - lo) * 0.08
-    return { yMin: bars ? lo : lo - padY, yMax: hi + padY }
-  }, [lines, bars])
+  const { yMin, yMax } = useMemo(() => valueRange(lines.flatMap((l) => l.points.map((p) => p.v)), bars), [lines, bars])
 
   const x = (t: number) => PAD.left + ((t - from) / Math.max(1, to - from)) * plotW
   const y = (v: number) => PAD.top + (1 - (v - yMin) / (yMax - yMin)) * plotH
