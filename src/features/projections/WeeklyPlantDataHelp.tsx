@@ -8,8 +8,8 @@ export function WeeklyPlantDataHelp({
   onClose,
   stemsPerM2,
   areaM2,
-  hiddenAges,
-  startMarker,
+  hiddenAges: _hiddenAges,
+  startMarker: _startMarker,
 }: {
   open: boolean
   onClose: () => void
@@ -59,32 +59,21 @@ export function WeeklyPlantDataHelp({
               <dd>Peppers first recorded as set that week, per sampled m². Every set week starts its own cohort.</dd>
             </div>
             <div>
-              <dt>+0 … +10</dt>
+              <dt>Cohort</dt>
               <dd>
-                Every set week starts its own cohort at +0 and moves one row down and one column right each week; a cell is the share of that
-                original cohort first harvested at exactly that age. Cells show whole percentages; hover for the exact value and the counts.
-                {hiddenAges.length > 0 && <> Ages with no harvests in this year are hidden ({hiddenAges.map((a) => `+${a}`).join(', ')}).</>}
+                What became of the peppers set that week, as recorded: <strong>harvested</strong>, <strong>aborted</strong>, <strong>pruned</strong>,{' '}
+                <strong>unresolved</strong> (no outcome recorded by +10 weeks, once the window has closed; not counted as lost) and{' '}
+                <strong>still on plant</strong>. The bar always adds up to the week’s sets; nothing is assumed to be harvested.
               </dd>
             </div>
             <div>
-              <dt>Following a cohort</dt>
+              <dt>Cohort details</dt>
               <dd>
-                Click a week’s Sets/m²{startMarker && <> (or its <span className={styles.startSample}>●</span> at +0)</>} to highlight that cohort’s
-                ladder; click again or press Esc to release. Hovering previews a cohort while none is selected.
-              </dd>
-            </div>
-            <div>
-              <dt>
-                <span className={styles.baselineSample}>12.3%</span>
-              </dt>
-              <dd>From the baseline set cohort. Those peppers may have set before sampling began, so their real set → harvest delay may be longer.</dd>
-            </div>
-            <div>
-              <dt>Cohort Loss</dt>
-              <dd>
-                Shown above the table when following a cohort: of the peppers set that week, the share aborted, pruned or still unresolved by +10,
-                once its +10 window closes, with Aborted, Pruned and Unresolved by +10 listed separately. A Harvested record at +11 or later still
-                counts in Harvested/m².
+                Click a week’s Sets/m² or its Cohort bar to open the cohort under that week (one at a time; click again or press Esc to close). It shows
+                the outcome and, for each week of age (+3 … +10), the share first harvested that week, in %, per m² or kg (kg uses that harvest week’s
+                AFW). A week is shown as <em>0%</em> only when it was sampled and nothing was harvested; otherwise it reads <em>not sampled</em>,{' '}
+                <em>not recorded</em> (Breakers-only weeks: Harvested isn’t recorded), <em>⚠</em> (partial visit or harvests possibly not recorded),{' '}
+                <em>this week</em> or <em>not yet</em>. A baseline cohort’s peppers may have set before sampling began, so their ages may be longer.
               </dd>
             </div>
           </dl>

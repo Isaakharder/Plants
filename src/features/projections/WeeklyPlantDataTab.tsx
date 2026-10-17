@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { formatInteger } from '../../lib/format'
@@ -12,6 +12,7 @@ import {
   useSamplingWeeks,
   useSaveWeeklyHarvestActual,
   useSaveWeeklyHarvestAfw,
+  useHarvestWeekFlags,
   useSetHarvestCohorts,
   useWeeklyFruitLoss,
   useWeeklyHarvestActuals,
@@ -23,17 +24,11 @@ import {
 import {
   LADDER_AGES,
   AFW_MAX_G,
-  cellAtAge,
-  cohortBand,
-  cohortCellTitle,
-  cohortKey,
   coverageKind,
   coverageLabel,
   coverageTitle,
   cropYears,
   defaultYear,
-  followCaption,
-  formatCohortPercent,
   formatFruitLoss,
   fruitLossTitle,
   formatRate,
@@ -41,17 +36,18 @@ import {
   parseAfw,
   pickedKg,
   pickedKgTitle,
-  summarize,
   weekTiming,
   weeksFromFirstSample,
-  type CohortCell,
-  type CohortSummary,
   type SamplingWeekRow,
-  type SetHarvestCohortRow,
   type WeeklyFruitLossRow,
   type WeekTiming,
 } from './model'
 import { ProjectionsTabs } from './ProjectionsTabs'
+import { CohortBar, CohortDetailPanel } from './CohortDetail'
+import { cohortDetail, type TimelineContext } from './cohortTimeline'
+import { useBasisSettings } from '../forecast/api'
+import { basisAt } from '../forecast/engine/basis'
+import { weekIndex } from '../forecast/engine/weeks'
 import { SamplingDetail } from './SamplingDetail'
 import { WeeklyPlantDataHelp } from './WeeklyPlantDataHelp'
 import styles from './WeeklyPlantDataTab.module.css'
@@ -67,9 +63,8 @@ export function WeeklyPlantDataTab() {
   const [params, setParams] = useSearchParams()
   const [showSampling, setShowSampling] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
-  // The followed cohort: a click locks it, hovering previews one while nothing is locked.
-  const [locked, setLocked] = useState<string | null>(null)
-  const [hovered, setHovered] = useState<string | null>(null)
+  // The one expanded cohort row (variety · year · set week); clicking it again closes it.
+  const [expanded, setExpanded] = useState<string | null>(null)
   const today = useGreenhouseWeek()
 
   const sorted = useMemo(() => sortCrops(crops.data ?? []), [crops.data])
@@ -101,12 +96,29 @@ export function WeeklyPlantDataTab() {
     [shownWeeks, cohortRows],
   )
   const hiddenAges = LADDER_AGES.filter((age) => !ages.includes(age))
-  // Every cell of a cohort carries the same summary; keep one per cohort for the caption.
-  const summaries = useMemo(() => {
-    const byKey = new Map<string, CohortSummary>()
-    for (const row of cohorts.data ?? []) for (const cell of row.cells) byKey.set(cohortKey(cell.set_year, cell.set_week), summarize(cell))
-    return byKey
-  }, [cohorts.data])
+  // Cohort detail per set week (display only): ages labelled by what is known about each harvest week.
+  const flags = useHarvestWeekFlags(crop?.id, year)
+  const basisSettings = useBasisSettings(crop?.id)
+  // Cheap (one entry per shown week): computed on each render.
+  const details = (() => {
+    if (!year || !cohorts.data) return new Map<number, ReturnType<typeof cohortDetail>>()
+    const settings = (basisSettings.data ?? []).map((r) => ({
+      fromYear: r.from_year,
+      fromWeek: r.from_week,
+      basis: r.basis,
+      harvestReadyShare: r.harvest_ready_share,
+      createdAt: r.created_at,
+    }))
+    const ctx: TimelineContext = {
+      currentYw: today.year * 100 + today.week,
+      sampling: samplingRows,
+      breakerOnly: (y, w) => basisAt(settings, weekIndex(y, w), Number.POSITIVE_INFINITY, 'lifecycle').basis === 'breaker_only',
+      flagged: flags.data ?? new Map(),
+    }
+    return new Map(shownWeeks.map((w) => [w.iso_week, cohortDetail(cohorts.data!, year, w.iso_week, w.sets_per_m2, ctx)]))
+  })()
+  const expandKey = (week: number) => `${crop?.id}:${year}:${week}`
+  const toggleCohort = (week: number) => setExpanded((cur) => (cur === expandKey(week) ? null : expandKey(week)))
   const draftKey = (week: number) => `${crop?.id}:${year}:${week}`
   const savedAfw = (week: number) => afw.data?.get(week) ?? null
   const afwText = (week: number) => drafts[draftKey(week)] ?? (savedAfw(week) === null ? '' : String(savedAfw(week)))
@@ -154,12 +166,6 @@ export function WeeklyPlantDataTab() {
     next.select()
   }
 
-  const active = locked ?? hovered
-  const follow = {
-    active,
-    preview: (key: string | null) => setHovered(key),
-    toggle: (key: string) => setLocked((current) => (current === key ? null : key)),
-  }
 
   const select = (next: { crop?: string; year?: number }) => {
     if (unsaved && !window.confirm('You have unsaved AFW changes. Discard them?')) return
@@ -256,7 +262,9 @@ export function WeeklyPlantDataTab() {
       ) : (
         <>
         <div className={styles.captionRow}>
-          <FollowCaption summary={active ? summaries.get(active) : undefined} year={year} locked={locked !== null} onClear={() => setLocked(null)} />
+          <div className={styles.caption}>
+            <span className={styles.captionHint}>Click a week’s Sets/m² or Cohort bar to follow that week’s fruit through harvest.</span>
+          </div>
           <div className={styles.afwBar} aria-live="polite">
             {saveAfw.error && <span className={styles.afwError}>Couldn’t save AFW: {saveAfw.error.message}</span>}
             {invalid > 0 && <span className={styles.afwError}>{invalid} AFW {invalid === 1 ? 'value isn’t' : 'values aren’t'} a weight in grams (0.1–{AFW_MAX_G}).</span>}
@@ -277,20 +285,18 @@ export function WeeklyPlantDataTab() {
             )}
           </div>
         </div>
-        <div ref={tableRef} className={styles.tableWrap} onKeyDown={(e) => e.key === 'Escape' && setLocked(null)}>
+        <div ref={tableRef} className={styles.tableWrap} onKeyDown={(e) => e.key === 'Escape' && setExpanded(null)}>
           <table className={styles.table}>
             <thead>
               <tr>
                 <th scope="col">Week</th>
                 <th scope="col" className={styles.stemsHead} title="Sampled stems visited that week ÷ stems in the sample">Stems</th>
                 <th scope="col">Sets/m²</th>
+                <th scope="col" className={styles.cohortHead} title="What became of the peppers set that week: harvested · aborted · pruned · unresolved · still on plant. Click for details.">
+                  Cohort
+                </th>
                 <th scope="col">Breakers/m²</th>
                 <th scope="col">Harvested/m²</th>
-                {ages.map((d, i) => (
-                  <th key={d} scope="col" className={[styles.age, i === 0 ? styles.firstDelay : ''].filter(Boolean).join(' ')}>
-                    +{d}
-                  </th>
-                ))}
                 <th scope="col" className={styles.afwHead} title="Harvest-week AFW: average grams per pepper harvested that week">AFW g</th>
                 <th scope="col" className={styles.pickedHead} title="Estimated kg picked that calendar week: Harvested/m² × crop area × that week's AFW">Picked kg</th>
                 <th scope="col" className={styles.actualHead} title="Actual kilograms harvested that week, entered by hand (click to enter or correct; every entry is kept)">Actual kg</th>
@@ -298,20 +304,32 @@ export function WeeklyPlantDataTab() {
               </tr>
             </thead>
             <tbody>
-              {shownWeeks.map((w) => (
-                <tr key={w.iso_week} className={w.is_sampled ? undefined : styles.unsampled}>
+              {shownWeeks.map((w) => {
+                const detail = details.get(w.iso_week) ?? null
+                const open = expanded === expandKey(w.iso_week)
+                return (
+                <Fragment key={w.iso_week}>
+                <tr className={[w.is_sampled ? '' : styles.unsampled, open ? styles.cohortOpenRow : ''].filter(Boolean).join(' ') || undefined}>
                   <th scope="row">
                     <span className={styles.week}>W{w.iso_week}</span>
                     {w.is_baseline && <span className={styles.tag}>Baseline</span>}
                     {w.is_provisional && <span className={`${styles.tag} ${styles.provisional}`}>In progress</span>}
                   </th>
                   <CoverageTd week={w.iso_week} row={samplingRows.get(w.iso_week)} />
-                  <SetsTd row={cohortRows.get(w.iso_week)} value={formatRate(w.sets_per_m2)} follow={follow} />
+                  <td>
+                    {detail && detail.sets > 0 ? (
+                      <button type="button" className={styles.setsButton} onClick={() => toggleCohort(w.iso_week)} aria-expanded={open} title={`Follow the W${w.iso_week} cohort (${detail.sets} sets)`}>
+                        {formatRate(w.sets_per_m2)}
+                      </button>
+                    ) : (
+                      formatRate(w.sets_per_m2)
+                    )}
+                  </td>
+                  <td className={styles.cohortCell}>
+                    <CohortBar detail={detail} open={open} onToggle={() => toggleCohort(w.iso_week)} />
+                  </td>
                   <td>{formatRate(w.breakers_per_m2)}</td>
                   <td>{formatRate(w.harvested_per_m2)}</td>
-                  {ages.map((d, i) => (
-                    <CohortTd key={d} cell={cellAtAge(cohortRows.get(w.iso_week), d)} year={year} week={w.iso_week} divider={i === 0} follow={follow} />
-                  ))}
                   <td className={styles.afwCell}>
                     <input
                       data-afw
@@ -336,7 +354,16 @@ export function WeeklyPlantDataTab() {
                   <ActualTd week={w.iso_week} actual={actuals.data?.get(w.iso_week)} onOpen={() => setActualWeek(w.iso_week)} />
                   <FruitLossTd week={w.iso_week} row={fruitLossRows.get(w.iso_week)} />
                 </tr>
-              ))}
+                {open && detail && (
+                  <tr className={styles.cohortDetailRow}>
+                    <td colSpan={10}>
+                      <CohortDetailPanel detail={detail} afwOf={(week) => afwValue(week)} areaM2={crop.area_m2} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -479,82 +506,6 @@ function CoverageTd({ week, row }: { week: number; row: SamplingWeekRow | undefi
     <td className={classes} title={coverageTitle(week, row)}>
       {coverageLabel(row)}
       {row?.state === 'complete' && <span className={styles.coverageComplete} aria-label="sampling marked complete"> ✓</span>}
-    </td>
-  )
-}
-
-const BAND_CLASS = [styles.band0, styles.band1, styles.band2]
-
-type Follow = { active: string | null; preview: (key: string | null) => void; toggle: (key: string) => void }
-
-/** Hover previews a cohort, click locks it. */
-function followHandlers(key: string, follow: Follow) {
-  return {
-    onMouseEnter: () => follow.preview(key),
-    onMouseLeave: () => follow.preview(null),
-    onClick: () => follow.toggle(key),
-  }
-}
-
-function FollowCaption({ summary, year, locked, onClear }: { summary: CohortSummary | undefined; year: number; locked: boolean; onClear: () => void }) {
-  return (
-    <div className={styles.caption} aria-live="polite">
-      {summary ? (
-        <>
-          <span>{followCaption(summary, year)}</span>
-          {locked && (
-            <button type="button" className="button button-link" onClick={onClear}>
-              Clear
-            </button>
-          )}
-        </>
-      ) : (
-        <span className={styles.captionHint}>Click a week’s Sets/m² to follow that cohort down the table.</span>
-      )}
-    </div>
-  )
-}
-
-/** Sets/m² starts the row's own cohort: clicking it follows that cohort. */
-function SetsTd({ row, value, follow }: { row: SetHarvestCohortRow | undefined; value: string; follow: Follow }) {
-  const start = row?.cells[0]
-  if (!start || start.cohort_sets === 0) return <td>{value}</td>
-  const key = cohortKey(start.set_year, start.set_week)
-  return (
-    <td className={follow.active === key ? styles.ladderActive : undefined}>
-      <button type="button" className={styles.setsButton} title={`Follow the W${start.set_week} cohort (${start.cohort_sets} sets)`} aria-pressed={follow.active === key} {...followHandlers(key, follow)}>
-        {value}
-      </button>
-    </td>
-  )
-}
-
-function CohortTd({ cell, year, week, divider, follow }: { cell: CohortCell | undefined; year: number; week: number; divider: boolean; follow: Follow }) {
-  // The cohort's start (+0) shows a marker instead of a percentage.
-  const first = cell?.delay === 0
-  if (!cell || cell.cohort_sets === 0) return <td className={[styles.age, divider ? styles.firstDelay : ''].filter(Boolean).join(' ')}>—</td>
-  const key = cohortKey(cell.set_year, cell.set_week)
-  const classes = [
-    styles.age,
-    divider ? styles.firstDelay : '',
-    BAND_CLASS[cohortBand(cell.set_year, cell.set_week)],
-    follow.active === key ? styles.ladderActive : '',
-  ].filter(Boolean).join(' ')
-
-  if (first) {
-    return (
-      <td className={classes}>
-        <button type="button" className={styles.startMarker} title={cohortCellTitle(cell, year, week)} aria-pressed={follow.active === key} {...followHandlers(key, follow)}>
-          ●
-        </button>
-      </td>
-    )
-  }
-  return (
-    <td className={classes} title={cohortCellTitle(cell, year, week)} {...followHandlers(key, follow)}>
-      <span className={[cell.percent === 0 ? styles.zero : '', cell.is_baseline_cohort && cell.percent !== null ? styles.baselineCell : ''].filter(Boolean).join(' ') || undefined}>
-        {formatCohortPercent(cell.percent)}
-      </span>
     </td>
   )
 }

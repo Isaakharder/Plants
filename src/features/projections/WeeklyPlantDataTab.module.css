@@ -739,3 +739,208 @@
 .actualNote {
   color: var(--text-muted);
 }
+
+/* ── Cohort column and expandable cohort row (2026-10-16) ── */
+.cohortHead {
+  text-align: left;
+}
+
+.cohortCell {
+  padding: 0 8px;
+  text-align: left;
+}
+
+.dash {
+  color: var(--text-muted);
+}
+
+.cohortBar {
+  display: flex;
+  width: 72px;
+  height: 12px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-muted);
+  cursor: pointer;
+}
+
+.cohortBar:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.segHarvested { background: #2f7d3b; }
+.segAborted { background: #c0392b; }
+.segPruned { background: #b7791f; }
+.segUnresolved { background: repeating-linear-gradient(45deg, #9aa0a6 0 2px, #d7dadd 2px 4px); }
+.segOnPlant { background: #d9e8d4; }
+
+.cohortOpenRow > * {
+  background: var(--primary-soft) !important;
+}
+
+.cohortDetailRow > td {
+  padding: 0 !important;
+  text-align: left !important;
+  background: var(--surface-muted);
+}
+
+.cohortDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 14px;
+  border-left: 3px solid var(--primary);
+  /* Readable width on wide screens; the panel stays in view while the table scrolls sideways. */
+  position: sticky;
+  left: 0;
+  max-width: min(100vw - 48px, 900px);
+  white-space: normal;
+}
+
+.cohortDetailHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.unitToggle {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.unitToggle button {
+  padding: 3px 10px;
+  border: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.unitToggle button + button {
+  border-left: 1px solid var(--border-strong);
+}
+
+.unitToggle .unitActive {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.outcomeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0;
+}
+
+.outcomeList div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.outcomeList dt {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.outcomeList dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.legendSwatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.ageStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ageCell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 64px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.ageLabel {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.ageLabel span {
+  font-weight: 400;
+}
+
+.ageValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Gaps never look like a 0% harvest. */
+.age_not_recorded,
+.age_not_sampled,
+.age_future {
+  border-style: dashed;
+  background: transparent;
+}
+
+.age_not_recorded .ageValue,
+.age_not_sampled .ageValue,
+.age_future .ageValue,
+.age_in_progress .ageValue {
+  font-weight: 400;
+  font-style: italic;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.age_incomplete {
+  border-color: #e0b45c;
+  background: #fffaeb;
+}
+
+.ageWarn {
+  color: #b7791f;
+}
+
+.cohortNotes {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 640px) {
+  .cohortDetail {
+    padding: 10px 10px 12px;
+    max-width: calc(100vw - 40px);
+  }
+
+  .ageCell {
+    min-width: 56px;
+  }
+}

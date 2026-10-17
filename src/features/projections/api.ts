@@ -158,3 +158,36 @@ export function useSaveWeeklyHarvestActual(organizationId: string, cropId: strin
     onSuccess: () => Promise.all([queryClient.invalidateQueries({ queryKey: actualsKey(cropId, year) }), queryClient.invalidateQueries({ queryKey: ['forecast'] })]),
   })
 }
+
+// ── Harvest weeks flagged by data quality (cohort detail labels) ───────────
+
+/**
+ * Weeks of `year` whose harvest recording is flagged (harvests possibly not
+ * recorded, incomplete visit, or confirmed as a recording error), with the
+ * reason, for labelling cohort ages. Read only; flags reviewed as legitimate
+ * are left out.
+ */
+export function useHarvestWeekFlags(cropId: string | undefined, year: number | undefined) {
+  return useQuery({
+    queryKey: ['projections', 'harvestWeekFlags', cropId, year] as const,
+    enabled: Boolean(cropId && year),
+    queryFn: async (): Promise<Map<number, string>> => {
+      const { data, error } = await supabase.rpc('crop_quality_flags', { p_crop_id: cropId! })
+      if (error) throw error
+      const out = new Map<number, string>()
+      for (const f of data) {
+        if (f.scope !== 'week' || Math.floor(f.yw / 100) !== year || f.review_decision === 'legitimate') continue
+        const reason =
+          f.review_decision === 'recording_error'
+            ? 'Confirmed recording error'
+            : f.rule_id === 'harvest_not_recorded'
+              ? 'Harvests possibly not recorded'
+              : f.rule_id === 'incomplete_visit'
+                ? 'Incomplete visit'
+                : null
+        if (reason && !out.has(f.yw % 100)) out.set(f.yw % 100, reason)
+      }
+      return out
+    },
+  })
+}
