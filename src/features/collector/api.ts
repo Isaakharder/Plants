@@ -22,6 +22,7 @@ import type { QueuedAction, QueuedWrite } from './offline/offlineQueue'
 import { mergeRowCanvas, mergeRowCards, mergeWeekProgress } from './offline/optimisticStore'
 import type {
   CollectorCrop,
+  HarvestableMark,
   LatestNodeStatus,
   MeasurementRow,
   MeasurementStem,
@@ -334,10 +335,36 @@ export async function fetchRowCanvas(rowId: string): Promise<RowCanvasData> {
   return {
     row,
     stems,
+    harvestable: row ? await fetchHarvestableThisWeek(row.crop_id, new Set(nodes.map((n) => n.id))) : [],
     nodes: nodes.map(({ measurement_stems: _stem, ...node }) => node),
     statuses,
     growth: growth.map(({ measurement_stems: _stem, ...reading }) => ({ ...reading, growth_cm: Number(reading.growth_cm) })),
     visits: recentVisits(visits.map(({ measurement_stems: _stem, ...visit }) => visit)),
+  }
+}
+
+/**
+ * This greenhouse week's Harvestable marks of the crop, kept for the row's
+ * nodes. Optional: if they can't be read the canvas still loads (statuses,
+ * Breakers and stem checks never depend on them) and shows no marks.
+ */
+async function fetchHarvestableThisWeek(cropId: string, nodeIds: Set<string>): Promise<HarvestableMark[]> {
+  const { year, week } = greenhouseIsoWeek()
+  try {
+    const marks = await fetchAll((after, limit, withCount) => {
+      let q = supabase
+        .from('harvestable_marks')
+        .select('id, plant_node_id, year, week_number, harvestable, observed_at', withCount ? { count: 'exact' as const } : undefined)
+        .eq('crop_id', cropId)
+        .eq('year', year)
+        .eq('week_number', week)
+      if (after) q = q.gt('id', after)
+      return q.order('id').limit(limit)
+    }, (m) => m.id)
+    return marks.filter((m) => nodeIds.has(m.plant_node_id))
+  } catch (err) {
+    console.warn('[collector] Harvestable marks not loaded', err)
+    return []
   }
 }
 
@@ -590,6 +617,27 @@ export function useCollectorActions() {
         for (const p of photos) {
           await submitPhoto(node, observationId, p, { captureSeconds: meta.captureSeconds, purpose: 'replacement', replaceReason: meta.reason }, replaces[p.side] ?? null)
         }
+      },
+
+      /**
+       * Harvestable this week (or taken back with harvestable = false): a
+       * separate record, so the node's status, its Breaker date and photos
+       * are untouched. Counts for the greenhouse week of the tap only.
+       */
+      async recordHarvestable(node: PlantNode, harvestable: boolean): Promise<HarvestableMark> {
+        const { year, week } = currentGreenhouseWeek()
+        const record = {
+          id: newId(),
+          organization_id: node.organization_id,
+          crop_id: node.crop_id,
+          plant_node_id: node.id,
+          year,
+          week_number: week,
+          harvestable,
+          observed_at: new Date().toISOString(),
+        }
+        await submit({ type: 'record_harvestable', record })
+        return record
       },
 
       /**

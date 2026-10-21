@@ -56,6 +56,8 @@ export async function executeWrite(write: QueuedWrite): Promise<WriteResult> {
         return supabase.from('stem_visits').upsert(write.record, insertOnce)
       case 'record_sampling_event':
         return supabase.from('sampling_week_events').upsert(write.record, insertOnce)
+      case 'record_harvestable':
+        return supabase.from('harvestable_marks').upsert(write.record, insertOnce)
     }
   })()
   if (!res.error) return { ok: true }

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
+import type { WeeklyHarvestableRow } from '../../lib/database.types'
 import { normalizeFruitLoss, normalizeSamplingWeek, normalizeWeek, type SamplingWeekRow, type SetHarvestCohortRow, type WeeklyFruitLossRow, type WeeklyPlantDataRow } from './model'
 
 /**
@@ -43,6 +44,19 @@ export function useWeeklyFruitLoss(cropId: string | undefined, year: number | un
       const { data, error } = await supabase.rpc('weekly_fruit_loss', { p_crop_id: cropId!, p_year: year! })
       if (error) throw error
       return data.map(normalizeFruitLoss)
+    },
+  })
+}
+
+/** Harvestable counts per week of the year (weekly_harvestable); weeks without marks are absent. */
+export function useWeeklyHarvestable(cropId: string | undefined, year: number | undefined) {
+  return useQuery({
+    queryKey: ['projections', 'weeklyHarvestable', cropId, year] as const,
+    enabled: Boolean(cropId && year),
+    queryFn: async (): Promise<Map<number, WeeklyHarvestableRow>> => {
+      const { data, error } = await supabase.rpc('weekly_harvestable', { p_crop_id: cropId!, p_year: year! })
+      if (error) throw error
+      return new Map(data.map((r) => [r.iso_week, r]))
     },
   })
 }

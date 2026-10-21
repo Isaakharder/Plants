@@ -17,6 +17,7 @@ import {
   useWeeklyFruitLoss,
   useWeeklyHarvestActuals,
   useWeeklyHarvestAfw,
+  useWeeklyHarvestable,
   useWeeklyPlantData,
   type ActualWeek,
   type AfwChange,
@@ -48,6 +49,7 @@ import { cohortDetail, type TimelineContext } from './cohortTimeline'
 import { useBasisSettings } from '../forecast/api'
 import { basisAt } from '../forecast/engine/basis'
 import { weekIndex } from '../forecast/engine/weeks'
+import { harvestableKgTitle, harvestableWeek } from './harvestable'
 import { SamplingDetail } from './SamplingDetail'
 import { WeeklyPlantDataHelp } from './WeeklyPlantDataHelp'
 import styles from './WeeklyPlantDataTab.module.css'
@@ -80,6 +82,7 @@ export function WeeklyPlantDataTab() {
   const afw = useWeeklyHarvestAfw(crop?.id, year)
   const saveAfw = useSaveWeeklyHarvestAfw(organization.id, crop?.id, year)
   const actuals = useWeeklyHarvestActuals(crop?.id, year)
+  const harvestable = useWeeklyHarvestable(crop?.id, year)
   const [actualWeek, setActualWeek] = useState<number | null>(null)
   // Typed but unsaved AFWs, per crop · year · harvest week (text as typed).
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -299,6 +302,9 @@ export function WeeklyPlantDataTab() {
                 <th scope="col">Harvested/m²</th>
                 <th scope="col" className={styles.afwHead} title="Harvest-week AFW: average grams per pepper harvested that week">AFW g</th>
                 <th scope="col" className={styles.pickedHead} title="Estimated kg picked that calendar week: Harvested/m² × crop area × that week's AFW">Picked kg</th>
+                <th scope="col" title="Peppers marked Harvestable that week in the collector (each counted once). This week only; never added to later weeks.">Harvestable</th>
+                <th scope="col" title="Harvestable peppers ÷ sampled m² (a week still in progress uses the last sampled week's area)">Harvestable/m²</th>
+                <th scope="col" title="Estimated kg of the Harvestable peppers that week: Harvestable/m² × crop area × AFW">Harvestable kg</th>
                 <th scope="col" className={styles.actualHead} title="Actual kilograms harvested that week, entered by hand (click to enter or correct; every entry is kept)">Actual kg</th>
                 <th scope="col" className={styles.lossHead} title="Fruit lost that calendar week ÷ fruit on the plants at the start of the week">Fruit Loss %</th>
               </tr>
@@ -351,12 +357,28 @@ export function WeeklyPlantDataTab() {
                     areaM2={crop.area_m2}
                     timing={weekTiming(year, w.iso_week, today)}
                   />
+                  {(() => {
+                    const row = harvestable.data?.get(w.iso_week)
+                    if (!row) return <><td>—</td><td>—</td><td>—</td></>
+                    const h = harvestableWeek(row, weeks.data ?? [], afwValue, crop.area_m2)
+                    const picked = pickedKg(w.harvested_per_m2, afwValue(w.iso_week), crop.area_m2)
+                    return (
+                      <>
+                        <td title={`${h.marked} marked Harvestable in W${h.week}: ${h.harvested} since recorded Harvested, ${h.remaining} still to pick`}>
+                          {formatInteger(h.marked)}
+                          {h.harvested > 0 && <span className={styles.tag}>{h.harvested} picked</span>}
+                        </td>
+                        <td>{formatRate(h.perM2)}</td>
+                        <td title={harvestableKgTitle(h, crop.area_m2, picked)}>{h.kg === null ? '—' : formatInteger(Math.round(h.kg))}</td>
+                      </>
+                    )
+                  })()}
                   <ActualTd week={w.iso_week} actual={actuals.data?.get(w.iso_week)} onOpen={() => setActualWeek(w.iso_week)} />
                   <FruitLossTd week={w.iso_week} row={fruitLossRows.get(w.iso_week)} />
                 </tr>
                 {open && detail && (
                   <tr className={styles.cohortDetailRow}>
-                    <td colSpan={10}>
+                    <td colSpan={13}>
                       <CohortDetailPanel detail={detail} afwOf={(week) => afwValue(week)} areaM2={crop.area_m2} />
                     </td>
                   </tr>

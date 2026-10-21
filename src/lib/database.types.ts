@@ -254,6 +254,29 @@ export type StemVisitRow = {
   created_by: string | null
 }
 
+/** A pepper marked ready to pick in a greenhouse week (harvestable = false takes it back). Never a node status. */
+export type HarvestableMarkRow = {
+  id: string
+  organization_id: string
+  crop_id: string
+  plant_node_id: string
+  year: number
+  week_number: number
+  harvestable: boolean
+  observed_at: string
+  recorded_at: string
+  created_by: string | null
+}
+
+/** One ISO week's Harvestable count (weekly_harvestable()); weeks without marks are absent. */
+export type WeeklyHarvestableRow = {
+  iso_week: number
+  /** Peppers marked Harvestable that week (latest mark per pepper). */
+  harvestable: number
+  /** Of those, recorded Harvested in the same week. */
+  harvested_same_week: number
+}
+
 export type SamplingWeekEvent = 'completed' | 'reopened'
 
 /** A crop's weekly sampling marked complete or reopened; the latest event per week is its state. */
@@ -906,6 +929,12 @@ export type Database = {
         Update: never
         Relationships: []
       }
+      harvestable_marks: {
+        Row: HarvestableMarkRow
+        Insert: Pick<HarvestableMarkRow, 'id' | 'organization_id' | 'crop_id' | 'plant_node_id' | 'year' | 'week_number' | 'harvestable' | 'observed_at'>
+        Update: never
+        Relationships: []
+      }
       sampling_week_events: {
         Row: SamplingWeekEventRow
         Insert: Pick<SamplingWeekEventRow, 'id' | 'organization_id' | 'crop_id' | 'year' | 'week_number' | 'event' | 'observed_at'> & {
@@ -1014,6 +1043,10 @@ export type Database = {
       weekly_fruit_loss: {
         Args: { p_crop_id: string; p_year: number; p_as_of?: string }
         Returns: WeeklyFruitLossRow[]
+      }
+      weekly_harvestable: {
+        Args: { p_crop_id: string; p_year: number }
+        Returns: WeeklyHarvestableRow[]
       }
       sampling_weeks: {
         Args: { p_crop_id: string; p_year: number; p_as_of?: string }

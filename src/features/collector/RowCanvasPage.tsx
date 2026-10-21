@@ -21,6 +21,9 @@ import { checkedStemIds, nextUncheckedIndex } from './samplingProgress';
 import { BreakerCapture, type CaptureMode } from './BreakerCapture';
 import { BreakerRecorded } from './BreakerRecorded';
 import { BreakerCarryOver } from './BreakerCarryOver';
+import { HarvestableToggle } from './HarvestableToggle';
+import { HARVESTABLE_ENABLED, canMarkHarvestable } from './harvestable';
+import { harvestableNodes } from './offline/optimisticStore';
 import { BREAKER_PHOTOS_ENABLED, type PreparedPhoto } from './photos';
 import { captureDrafts, draftAlreadySaved, draftKey, freshDrafts, type CaptureDraft } from './offline/captureDrafts';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -224,6 +227,12 @@ export function RowCanvasPage() {
     return result;
   }, [canvasQuery.data, currentYear, currentWeek]);
 
+  // Peppers marked Harvestable this greenhouse week (queued marks included, so it works offline).
+  const harvestableNow = useMemo(
+    () => harvestableNodes(canvasQuery.data?.harvestable ?? [], { year: currentYear, week: currentWeek }),
+    [canvasQuery.data, currentYear, currentWeek],
+  );
+
   // Readings that carry a top node, oldest first, for the Veg column.
   const vegHistoryByStem = useMemo(() => {
     const result: Record<string, StemGrowthMeasurement[]> = {};
@@ -385,6 +394,25 @@ export function RowCanvasPage() {
         : `Node ${statusPickerCtx.node.node_number}`;
       const still = status === 'BreakerFruit' && breakerEarlier(statusPickerCtx.stem.id, statusPickerCtx.node.id);
       setMessage(still ? `${nodeLabel}: still Breaker (W${currentWeek})` : `${nodeLabel}: ${STATUS_LABEL[status]}`);
+      closeBreakerStep();
+      setStatusPickerCtx(null);
+    } catch (err: unknown) {
+      setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** Harvestable this week (or Undo): a separate record; the node's status is not changed. */
+  async function handleHarvestable(harvestable: boolean) {
+    if (!statusPickerCtx) return;
+    setSaving(true);
+    try {
+      await actions.recordHarvestable(statusPickerCtx.node, harvestable);
+      const nodeLabel = statusPickerCtx.node.is_side_shoot
+        ? (statusPickerCtx.node.node_label ?? 'Shoot')
+        : `Node ${statusPickerCtx.node.node_number}`;
+      setMessage(harvestable ? `${nodeLabel}: Harvestable (W${currentWeek})` : `${nodeLabel}: Harvestable taken back`);
       closeBreakerStep();
       setStatusPickerCtx(null);
     } catch (err: unknown) {
@@ -725,6 +753,7 @@ export function RowCanvasPage() {
                           <AttentionBadges attention={attentionByNode.get(shoot.id)} onOpen={() => setAttentionCtx({ stem: activeStem!, node: shoot })} />
                           </span>
                           <span className="shoot-node-cell-label">{cellLabel}</span>
+                          {HARVESTABLE_ENABLED && harvestableNow.has(shoot.id) && <span className="node-harvestable-label">Harvestable</span>}
                         </div>
                       );
                     })}
@@ -774,6 +803,7 @@ export function RowCanvasPage() {
                           {shortStatusLabel(nodeStatus)}
                         </span>
                       )}
+                      {HARVESTABLE_ENABLED && harvestableNow.has(node.id) && <span className="node-harvestable-label">Harvestable</span>}
                     </div>
 
                     {/* Right zone: shoots (odd node) on the right; otherwise the node number */}
@@ -974,6 +1004,20 @@ export function RowCanvasPage() {
                 </select>
               </div>
             )}
+            {HARVESTABLE_ENABLED && pickerStepNow !== 'capture' && typeof pickerStepNow !== 'object' && (() => {
+              const latest = (statusesByStem[statusPickerCtx.stem.id] ?? []).find(s => s.plant_node_id === statusPickerCtx.node.id);
+              const mark = harvestableNow.get(statusPickerCtx.node.id) ?? null;
+              if (!canMarkHarvestable(latest?.status, mark !== null)) return null;
+              return (
+                <HarvestableToggle
+                  week={currentWeek}
+                  mark={mark}
+                  saving={saving}
+                  onMark={() => void handleHarvestable(true)}
+                  onUndo={() => void handleHarvestable(false)}
+                />
+              );
+            })()}
             {pickerStepNow === 'capture' ? (
               <BreakerCapture
                 userId={userId}

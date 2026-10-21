@@ -101,6 +101,23 @@ export function WeeklyPlantDataHelp({
                 Only recorded harvests count; — until the week has been sampled, and nothing is projected. The in-progress week may be incomplete.
               </dd>
             </div>
+            <div>
+              <dt>Harvestable</dt>
+              <dd>
+                Peppers marked Harvestable (ready to pick) in the collector that week, each counted once. A same-week estimate: it counts for that
+                week only, never carries into the next week, and doesn’t change Breakers, Harvested, cohorts or the Harvest Forecast. “n picked”:
+                marked peppers recorded Harvested later that week; they are already in Picked kg, so only the rest is added to the week’s projection
+                (see the Harvestable kg tooltip).
+              </dd>
+            </div>
+            <div>
+              <dt>Harvestable/m² · kg</dt>
+              <dd>
+                Harvestable ÷ sampled m². A week still in progress (or not sampled) uses the last sampled week’s area, since a midweek count comes
+                before that week’s walkthrough. Kg: Harvestable/m² × {formatInteger(areaM2)} m² × AFW ÷ 1000, using that week’s AFW or else the most
+                recent one entered.
+              </dd>
+            </div>
           </dl>
         </section>
 

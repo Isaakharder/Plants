@@ -1569,3 +1569,53 @@
   font-size: 13px;
   color: var(--gray-700);
 }
+
+/* ── Harvestable this week (status picker + canvas label) ─────────────────── */
+
+.collector-app .harvestable-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  min-height: 48px;
+}
+
+.collector-app .harvestable-toggle--off {
+  justify-content: center;
+  background: #15803d;
+  border: 1px solid #166534;
+  color: #fff;
+}
+
+.collector-app .harvestable-toggle--on {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.collector-app .harvestable-toggle--on small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--gray-700);
+}
+
+.collector-app .harvestable-toggle--on .btn {
+  flex: none;
+}
+
+.collector-app .node-harvestable-label {
+  font-size: 8px;
+  font-weight: 700;
+  color: #15803d;
+  text-align: center;
+  white-space: nowrap;
+  line-height: 1;
+}

@@ -6,7 +6,7 @@
 // queue (which survives reloads) and the IDs never change.
 // Every function is idempotent: applying it to already-merged data is a no-op.
 
-import type { LatestNodeStatus, MobileRowCard, RowCanvasData, StemGrowthMeasurement, StemVisit, WeekProgressData } from '../types'
+import type { HarvestableMark, LatestNodeStatus, MobileRowCard, RowCanvasData, StemGrowthMeasurement, StemVisit, WeekProgressData } from '../types'
 import type { QueuedAction } from './offlineQueue'
 
 const stamp = (a: QueuedAction) => {
@@ -53,6 +53,7 @@ export function mergeRowCanvas(data: RowCanvasData, rowId: string, queued: Queue
   const statuses = new Map(data.statuses.map((s) => [s.plant_node_id, s]))
   const growth = new Map(data.growth.map((g) => [`${g.measurement_stem_id}:${g.year}:${g.week_number}`, g]))
   const visits = new Map((data.visits ?? []).map((v) => [v.id, v]))
+  const harvestable = new Map((data.harvestable ?? []).map((m) => [m.id, m]))
 
   for (const a of queued) {
     switch (a.type) {
@@ -95,10 +96,34 @@ export function mergeRowCanvas(data: RowCanvasData, rowId: string, queued: Queue
       case 'record_stem_visit':
         if (stems.some((s) => s.id === a.record.measurement_stem_id)) visits.set(a.record.id, stemVisitOf(a.record))
         break
+      case 'record_harvestable':
+        if (nodes.some((n) => n.id === a.record.plant_node_id)) harvestable.set(a.record.id, harvestableMarkOf(a.record))
+        break
     }
   }
 
-  return { row, stems, nodes, statuses: [...statuses.values()], growth: [...growth.values()], visits: [...visits.values()] }
+  return { row, stems, nodes, statuses: [...statuses.values()], growth: [...growth.values()], visits: [...visits.values()], harvestable: [...harvestable.values()] }
+}
+
+const harvestableMarkOf = (r: HarvestableMark): HarvestableMark => ({
+  id: r.id,
+  plant_node_id: r.plant_node_id,
+  year: r.year,
+  week_number: r.week_number,
+  harvestable: r.harvestable,
+  observed_at: r.observed_at,
+})
+
+/** Nodes marked Harvestable in a greenhouse week: the latest mark per node in that week wins (a false takes it back). */
+export function harvestableNodes(marks: readonly HarvestableMark[], week: { year: number; week: number }): Map<string, HarvestableMark> {
+  const latest = new Map<string, HarvestableMark>()
+  for (const m of marks) {
+    if (m.year !== week.year || m.week_number !== week.week) continue
+    const cur = latest.get(m.plant_node_id)
+    if (!cur || m.observed_at >= cur.observed_at) latest.set(m.plant_node_id, m)
+  }
+  for (const [id, m] of latest) if (!m.harvestable) latest.delete(id)
+  return latest
 }
 
 const stemVisitOf = (r: StemVisit): StemVisit => ({

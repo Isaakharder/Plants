@@ -9,7 +9,7 @@
 //   * Each entry remembers the user who made it and is only replayed under that
 //     user's session; organization_id is inside the record itself.
 //   * Vegetative growth, node deactivation, "✓ Stem checked", "Mark sampling
-//     complete" and Breaker photos are queued too. A photo's image (and
+//     complete", Harvestable marks and Breaker photos are queued too. A photo's image (and
 //     preview) are stored in the queue entry itself (IndexedDB keeps Blobs), so
 //     they survive reloads and offline days until they have been uploaded.
 
@@ -27,6 +27,8 @@ export type QueuedWrite =
   | { type: 'upsert_growth'; record: Insert<'stem_growth_measurements'> }
   | { type: 'record_stem_visit'; record: Insert<'stem_visits'> }
   | { type: 'record_sampling_event'; record: Insert<'sampling_week_events'> }
+  /** Harvestable this week (or taken back): a separate record, never a node status. */
+  | { type: 'record_harvestable'; record: Insert<'harvestable_marks'> }
   /**
    * A Breaker photo: the original image and its small preview, kept on the
    * device until uploaded, and its record. Queued after its observation.
@@ -256,6 +258,7 @@ function dependsOnNode(action: QueuedAction, nodeId: string): boolean {
     case 'deactivate_node':
       return action.record.id === nodeId
     case 'upload_photo':
+    case 'record_harvestable':
       return action.record.plant_node_id === nodeId
     default:
       return false
