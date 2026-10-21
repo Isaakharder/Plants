@@ -4,6 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
+import type { DailyTotalRow } from './dailyTotals'
 import type { ImportOutcome } from './importMessages'
 import type {
   ClimateAgentKeyRow,
@@ -104,6 +105,20 @@ export function useDaily(sourceId: string | undefined, zoneIds: string[], metric
     enabled: enabled && Boolean(sourceId) && zoneIds.length > 0,
     queryFn: async () =>
       check(await supabase.rpc('climate_daily', { p_source_id: sourceId!, p_zone_ids: zoneIds, p_metrics: metrics, p_from: fromDate, p_to: toDate })) as ClimateDailySeries[],
+  })
+}
+
+/** Daily values of the running totals (radiation and drain greenhouse-wide; irrigation for these zones). */
+export function useDailyTotals(sourceId: string | undefined, fromDate: string, toDate: string, irrigationZoneIds: string[], enabled = true) {
+  return useQuery({
+    queryKey: climateKeys.series('dailyTotals', sourceId, irrigationZoneIds, fromDate, toDate),
+    enabled: enabled && Boolean(sourceId),
+    queryFn: async () =>
+      (check(await supabase.rpc('climate_daily_totals', { p_source_id: sourceId!, p_from: fromDate, p_to: toDate, p_zone_ids: irrigationZoneIds })) as DailyTotalRow[]).map((r) => ({
+        ...r,
+        final_value: r.final_value === null ? null : Number(r.final_value),
+        running_value: r.running_value === null ? null : Number(r.running_value),
+      })),
   })
 }
 

@@ -11,7 +11,7 @@ import type { ClimateReadingRow } from '../../lib/database.types'
 import { localToUtcCandidates } from '../../../supabase/functions/_shared/climate/zonedTime.ts'
 import { downloadOriginal, useClimateZones, useFileDetail, useResolveQuarantine, useReviewFile, type FileDetail } from './api'
 import { StateBadge } from './StateBadge'
-import { GREENHOUSE_TIME_ZONE, sortZones, zoneName } from './model'
+import { GREENHOUSE_TIME_ZONE, sortZones, zoneName, isUsedMeasurement } from './model'
 import styles from './Climate.module.css'
 
 const ACTION_LABEL: Record<string, string> = {
@@ -273,9 +273,11 @@ function ReadingsTable({ readings, zoneOrder, zoneLabel }: { readings: ClimateRe
   const rows = [...new Set(readings.map((r) => r.row_label))]
   const zoneIds = zoneOrder.filter((id) => readings.some((r) => r.zone_id === id))
   const cell = new Map(readings.map((r) => [`${r.zone_id}|${r.row_label}`, r]))
+  const used = (r: ClimateReadingRow) => isUsedMeasurement(r.metric, zoneLabel(r.zone_id))
+  const rowUsed = (row: string) => readings.some((r) => r.row_label === row && used(r))
   return (
     <details>
-      <summary className={styles.small}>Readings as received ({readings.length})</summary>
+      <summary className={styles.small}>Readings as received ({readings.length}; greyed: kept but not used)</summary>
       <div className={styles.tableWrap}>
         <table className={styles.table}>
           <thead>
@@ -289,11 +291,15 @@ function ReadingsTable({ readings, zoneOrder, zoneLabel }: { readings: ClimateRe
           <tbody>
             {rows.map((row) => (
               <tr key={row}>
-                <td>{row}</td>
+                <td className={rowUsed(row) ? undefined : styles.muted}>
+                  {row}
+                  {!rowUsed(row) && <span className={styles.range}>not used</span>}
+                </td>
                 {zoneIds.map((z) => {
                   const r = cell.get(`${z}|${row}`)
+                  const cls = !r ? undefined : !used(r) ? styles.muted : r.flags.length > 0 ? styles.flagged : undefined
                   return (
-                    <td key={z} className={r && r.flags.length > 0 ? styles.flagged : undefined} title={r?.flags.join(', ') || undefined}>
+                    <td key={z} className={cls} title={r ? [r.flags.join(', '), used(r) ? '' : 'Kept as received; not one of the six measurements used'].filter(Boolean).join(' · ') || undefined : undefined}>
                       {r?.raw_text ?? ''}
                     </td>
                   )

@@ -1024,6 +1024,21 @@ export type Database = {
       climate_review_file: { Args: { p_file_id: string; p_action: 'activate' | 'set_aside'; p_note: string }; Returns: { file_id: string; state: string; replaced_file_id?: string | null } }
       climate_series: { Args: { p_source_id: string; p_zone_ids: string[]; p_metrics: string[]; p_from: string; p_to: string }; Returns: ClimateSeries[] }
       climate_daily: { Args: { p_source_id: string; p_zone_ids: string[]; p_metrics: string[]; p_from: string; p_to: string }; Returns: ClimateDailySeries[] }
+      climate_daily_totals: {
+        Args: { p_source_id: string; p_from: string; p_to: string; p_zone_ids?: string[] | null }
+        Returns: {
+          local_date: string
+          metric: 'radiation_sum' | 'drain_percentage' | 'irrigation_cumulative'
+          zone_id: string
+          final_hour: number
+          final_value: number | null
+          status: 'final' | 'running' | 'incomplete' | 'no_data'
+          running_value: number | null
+          running_hour: number | null
+          restart_hour: number | null
+          problems: string[]
+        }[]
+      }
       climate_missing_hours: { Args: { p_source_id: string; p_from: string; p_to: string }; Returns: [string, string, number][] }
       climate_import_status: { Args: { p_source_id: string }; Returns: ClimateImportStatus }
       set_crop_climate_zones: { Args: { p_crop_id: string; p_from: string; p_zones: { zone_id: string; area_share?: number | null }[]; p_reason?: string | null }; Returns: string }

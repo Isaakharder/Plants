@@ -84,21 +84,21 @@ declare
   m jsonb;
   st jsonb;
 begin
-  -- Hourly series: only the zones and metrics asked for; the active 09:00 file (22, not 99); pH 0.0 marked excluded.
+  -- Hourly series: only the zones and metrics asked for; the active 09:00 file (22, not 99).
+  -- pH is not one of the six measurements (20261031): its stored readings are never returned.
   s := public.climate_series(src, array[z1], array['air_temperature', 'ph'], '2026-10-17 12:00+00', '2026-10-17 17:00+00');
-  if jsonb_array_length(s) <> 2 then raise exception 'FAIL: series %', s; end if;
+  if jsonb_array_length(s) <> 1 then raise exception 'FAIL: series %', s; end if;
   if (select string_agg((p->>1), ',') from jsonb_array_elements(s) e, jsonb_array_elements(e->'points') p where e->>'metric' = 'air_temperature') <> '20,22,24,26' then
     raise exception 'FAIL: temperature points %', s;
   end if;
-  if (select (e->'points'->0->>2) from jsonb_array_elements(s) e where e->>'metric' = 'ph') <> '1' then raise exception 'FAIL: pH 0.0 not excluded'; end if;
   if public.climate_series(src, array[z1], array['air_temperature'], '2026-01-01', '2026-10-17') <> '[]'::jsonb then raise exception 'FAIL: more than 93 days allowed'; end if;
 
-  -- Daily: mean/min/max of usable values on the Toronto date; pH 0.0 counted as excluded, not as a value.
+  -- Daily: mean/min/max of usable values on the Toronto date; pH is not summarised at all.
   d := public.climate_daily(src, array[z1, z2], array['air_temperature', 'ph'], '2026-10-17', '2026-10-17');
   if (select e->'days'->0 from jsonb_array_elements(d) e where e->>'zone_id' = z1::text and e->>'metric' = 'air_temperature') <> '["2026-10-17", 4, 23.000, 20, 26, 0]'::jsonb then
     raise exception 'FAIL: daily temperature %', d;
   end if;
-  if (select e->'days'->0 from jsonb_array_elements(d) e where e->>'metric' = 'ph') <> '["2026-10-17", 0, null, null, null, 4]'::jsonb then
+  if exists (select 1 from jsonb_array_elements(d) e where e->>'metric' = 'ph') then
     raise exception 'FAIL: daily pH %', d;
   end if;
 

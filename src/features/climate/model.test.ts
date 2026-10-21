@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import * as model from './model'
 import type { ClimatePoint, ClimateSeries } from '../../lib/database.types'
 import {
   combineZones,
@@ -8,8 +9,6 @@ import {
   exclusionWarnings,
   missingWarning,
   parseAreaShares,
-  radiationIncrements,
-  radiationWarning,
   weekKey,
   weeklyRows,
   type Assignment,
@@ -20,24 +19,6 @@ import {
 const T10 = Date.parse('2026-10-17T14:00:00Z') / 1000
 const H = 3600
 const lp = (t: number, v: number | null): LinePoint => ({ t, v, excluded: false })
-
-describe('radiation increments for charts', () => {
-  it('converts the running total hour by hour; a gap or a fall gives no value and is counted', () => {
-    const pts: ClimatePoint[] = [
-      [T10, 100, 0, []],
-      [T10 + H, 160, 0, []],
-      // 12:00 missing
-      [T10 + 3 * H, 260, 0, []],
-      [T10 + 4 * H, 250, 0, []],
-      [T10 + 5 * H, 290, 0, []],
-    ]
-    const r = radiationIncrements(pts)
-    expect(r.points.map((p) => p.v)).toEqual([null, 60, null, null, null])
-    expect(r.statuses).toMatchObject({ first: 1, ok: 1, gap: 1, decrease: 1, after_decrease: 1 })
-    expect(radiationWarning(r.statuses)!.text).toBe('Radiation: 3 hours can’t be converted to an hourly amount (1 after a missing hour, 2 around a fall in the running total).')
-    expect(radiationWarning({ ok: 3, reset: 0, gap: 0, decrease: 0, after_decrease: 0, first: 1, missing: 0 })).toBeNull()
-  })
-})
 
 describe('a planting’s zones combined', () => {
   const zones = new Map<string, LinePoint[]>([
@@ -105,14 +86,14 @@ describe('summaries', () => {
 describe('data-quality warnings', () => {
   it('names the zones and reasons of excluded readings', () => {
     const series: ClimateSeries[] = [
-      { zone_id: 'z7', metric: 'ec', unit: 'mS/cm', points: [[T10, 0, 1, ['ec_zero_suspect']], [T10 + H, 0, 1, ['ec_zero_suspect']]] },
-      ...['z1', 'z2', 'z3', 'z4'].map((z) => ({ zone_id: z, metric: 'ph', unit: 'pH', points: [[T10, 0, 1, ['ph_zero_sentinel']]] as ClimatePoint[] })),
+      { zone_id: 'z7', metric: 'co2', unit: 'ppm', points: [[T10, 9999, 1, ['out_of_range']], [T10 + H, 9999, 1, ['out_of_range']]] },
+      ...['z1', 'z2', 'z3', 'z4'].map((z) => ({ zone_id: z, metric: 'relative_humidity', unit: '%', points: [[T10, null, 1, ['not_numeric']]] as ClimatePoint[] })),
       { zone_id: 'z1', metric: 'air_temperature', unit: '°C', points: [[T10, 21, 0, []]] },
     ]
     const w = exclusionWarnings(series, (id) => `Zone ${id.slice(1)}`)
     expect(w.map((x) => x.text)).toEqual([
-      'EC: Zone 7 reported 0.0 EC (suspicious) — 2 readings excluded.',
-      'pH: 4 zones reported 0.0 pH (sensor not reporting) — 4 readings excluded.',
+      'CO₂: Zone 7 reported values outside the physical range — 2 readings excluded.',
+      'Humidity: 4 zones reported values that aren’t numbers — 4 readings excluded.',
     ])
   })
 
@@ -151,5 +132,16 @@ describe('chart axis', () => {
     expect(niceTicks(0, 1e-300).length).toBeLessThanOrEqual(12)
     expect(niceTicks(NaN, 1)).toEqual([])
     expect(valueRange([])).toEqual({ yMin: 0, yMax: 1 })
+  })
+})
+
+describe('the six measurements', () => {
+  it('uses radiation and drain from column B (Zone 1) only, and no EC or pH', () => {
+    const { isUsedMeasurement } = model
+    expect(['air_temperature', 'relative_humidity', 'co2', 'irrigation_cumulative'].every((m) => isUsedMeasurement(m, 'Zone 7'))).toBe(true)
+    expect(isUsedMeasurement('radiation_sum', 'Zone 1')).toBe(true)
+    expect(isUsedMeasurement('radiation_sum', 'Zone 15')).toBe(false)
+    expect(isUsedMeasurement('drain_percentage', 'Zone 15')).toBe(false)
+    expect(['ec', 'ph', 'group_activation_time', 'unknown'].some((m) => isUsedMeasurement(m, 'Zone 1'))).toBe(false)
   })
 })

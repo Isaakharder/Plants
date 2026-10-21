@@ -2,28 +2,39 @@
 // accepted files' original readings; nothing here invents a value: a missing,
 // excluded or unsafe value stays missing and is reported.
 
-import { cumulativeIncrements, dailyTotals, type CumulativePoint, type IncrementStatus } from '../../../supabase/functions/_shared/climate/cumulative.ts'
 import { isoWeek, wallClock } from '../../../supabase/functions/_shared/climate/zonedTime.ts'
-import type { ClimateDailyDay, ClimatePoint, ClimateSeries, ClimateZoneRow, CropClimateZoneRow } from '../../lib/database.types'
+import type { ClimateDailyDay, ClimateSeries, ClimateZoneRow, CropClimateZoneRow } from '../../lib/database.types'
 
 export const GREENHOUSE_TIME_ZONE = 'America/Toronto'
 
 /** Chart colours: the planting (or first zone) in the app's green, then distinct hues. */
 export const LINE_COLORS = ['#2f6b3f', '#c4362c', '#1f6fb2', '#e07a1f', '#7a4bb5', '#0f8f86', '#b0428b', '#5d6a60']
 
-export type ChartMetric = 'air_temperature' | 'relative_humidity' | 'co2' | 'ec' | 'radiation'
+/**
+ * The hourly measurements, per zone (daily mean of valid hours). The other
+ * three of the six measurements are running totals: see dailyTotals.ts.
+ */
+export type ChartMetric = 'air_temperature' | 'relative_humidity' | 'co2'
 
 export const CHART_METRICS: { key: ChartMetric; label: string; unit: string; decimals: number; source: string }[] = [
   { key: 'air_temperature', label: 'Temperature', unit: '°C', decimals: 1, source: 'air_temperature' },
   { key: 'relative_humidity', label: 'Humidity', unit: '%', decimals: 0, source: 'relative_humidity' },
   { key: 'co2', label: 'CO₂', unit: 'ppm', decimals: 0, source: 'co2' },
-  { key: 'ec', label: 'EC', unit: 'mS/cm', decimals: 1, source: 'ec' },
-  // Radiation is exported as a running total since midnight; charts show each hour's increment.
-  { key: 'radiation', label: 'Radiation', unit: 'J/cm² per hour', decimals: 1, source: 'radiation_sum' },
 ]
 
-/** Metrics fetched for the page (database names). */
-export const SOURCE_METRICS = [...CHART_METRICS.map((m) => m.source), 'ph']
+/**
+ * Whether a stored reading is one of the six measurements Plants uses (as
+ * climate_is_measurement() in the database): radiation and drain only from
+ * column B ("Zone 1"). Older files also hold EC, pH, group activation time and
+ * Zone 15's radiation and drain: kept as received, never used.
+ */
+export function isUsedMeasurement(metric: string, zoneLabel: string): boolean {
+  if (metric === 'radiation_sum' || metric === 'drain_percentage') return zoneLabel === 'Zone 1'
+  return metric === 'air_temperature' || metric === 'relative_humidity' || metric === 'co2' || metric === 'irrigation_cumulative'
+}
+
+/** Hourly metrics fetched for the page (database names). */
+export const SOURCE_METRICS = CHART_METRICS.map((m) => m.source)
 
 export const zoneName = (z: Pick<ClimateZoneRow, 'display_name' | 'source_label'>) => z.display_name?.trim() || z.source_label
 
@@ -104,26 +115,6 @@ export function niceTicks(min: number, max: number, count = 4): number[] {
 
 export function pointsOf(series: Pick<ClimateSeries, 'points'> | undefined): LinePoint[] {
   return (series?.points ?? []).map(([t, v, excluded]) => ({ t, v: excluded ? null : v, excluded: excluded === 1 }))
-}
-
-/** Hourly radiation increments from a running-total series; unsafe hours stay null. */
-export function radiationIncrements(points: ClimatePoint[], timeZone = GREENHOUSE_TIME_ZONE): { points: LinePoint[]; statuses: Record<IncrementStatus, number> } {
-  const cps: CumulativePoint[] = points.map(([t, v, excluded]) => ({
-    hourUtc: new Date(t * 1000).toISOString(),
-    localDate: localDate(t, timeZone),
-    localHour: localHour(t, timeZone),
-    value: excluded ? null : v,
-  }))
-  const inc = cumulativeIncrements(cps)
-  const statuses: Record<IncrementStatus, number> = { ok: 0, reset: 0, gap: 0, decrease: 0, after_decrease: 0, first: 0, missing: 0 }
-  for (const i of inc) statuses[i.status]++
-  return { points: inc.map((i) => ({ t: Date.parse(i.hourUtc) / 1000, v: i.value, excluded: i.status === 'decrease' || i.status === 'after_decrease' })), statuses }
-}
-
-export function radiationDailyTotals(points: ClimatePoint[], timeZone = GREENHOUSE_TIME_ZONE) {
-  return dailyTotals(
-    points.map(([t, v, excluded]) => ({ hourUtc: new Date(t * 1000).toISOString(), localDate: localDate(t, timeZone), localHour: localHour(t, timeZone), value: excluded ? null : v })),
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -239,8 +230,6 @@ export function weeklyRows(days: ClimateDailyDay[]): SummaryRow[] {
 // ---------------------------------------------------------------------------
 
 const FLAG_TEXT: Record<string, string> = {
-  ph_zero_sentinel: 'reported 0.0 pH (sensor not reporting)',
-  ec_zero_suspect: 'reported 0.0 EC (suspicious)',
   out_of_range: 'reported values outside the physical range',
   not_numeric: 'reported values that aren’t numbers',
   unexpected_unit: 'reported an unexpected unit',
@@ -266,17 +255,9 @@ export function exclusionWarnings(series: ClimateSeries[], zoneLabel: (id: strin
   return [...groups.entries()].map(([key, g]) => {
     const zones = [...g.zones]
     const who = zones.length > 3 ? `${zones.length} zones` : zones.join(', ')
-    const metric = g.metric === 'ph' ? 'pH' : (CHART_METRICS.find((m) => m.source === g.metric)?.label ?? g.metric)
+    const metric = CHART_METRICS.find((m) => m.source === g.metric)?.label ?? g.metric
     return { key, tone: 'warn' as const, text: `${metric}: ${who} ${FLAG_TEXT[g.flag]} — ${g.n} reading${g.n === 1 ? '' : 's'} excluded.` }
   })
-}
-
-export function radiationWarning(statuses: Record<IncrementStatus, number>): QualityWarning | null {
-  const fell = statuses.decrease + statuses.after_decrease
-  const unsafe = statuses.gap + fell
-  if (unsafe === 0) return null
-  const parts = [statuses.gap ? `${statuses.gap} after a missing hour` : '', fell ? `${fell} around a fall in the running total` : ''].filter(Boolean)
-  return { key: 'radiation', tone: 'warn', text: `Radiation: ${unsafe} hour${unsafe === 1 ? '' : 's'} can’t be converted to an hourly amount (${parts.join(', ')}).` }
 }
 
 /** "3 hours missing (17 Oct 11:00; 15 Sep 16:00 – 18 Sep 00:00 …)". */

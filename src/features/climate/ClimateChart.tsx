@@ -1,6 +1,6 @@
 // A compact hourly chart (inline SVG, no chart library): one line per zone,
 // breaks where an hour is missing, shaded hours without data, hollow red marks
-// for excluded readings, and a hover/tap readout. Radiation is drawn as bars.
+// for excluded readings, and a hover/tap readout. (Bars are available for hourly amounts; none use them now.)
 
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { formatLocalHour, niceTicks, valueRange, type Line } from './model'

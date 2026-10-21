@@ -33,33 +33,36 @@ describe('Block Summary parser: a 17 Oct 10:00 export (synthetic values, real st
     expect(p.meta.headerLabel).toBe('Block heating')
   })
 
-  it('keeps every non-blank cell as an original reading, with exact labels, units and text', () => {
+  it('reads only the six measurements, with exact labels, units and text', () => {
     const count = (metric: string) => p.readings.filter((r) => r.metric === metric).length
     expect(count('air_temperature')).toBe(22)
     expect(count('relative_humidity')).toBe(22)
     expect(count('co2')).toBe(22)
-    expect(count('ec')).toBe(22)
-    expect(count('ph')).toBe(22)
     expect(count('irrigation_cumulative')).toBe(22)
-    // Reported only under Zones 1 and 15; nothing is copied to other zones.
-    expect(p.readings.filter((r) => r.metric === 'radiation_sum').map((r) => [r.zone, r.raw_text])).toEqual([
-      ['Zone 1', '96.5'],
-      ['Zone 15', '96.5'],
-    ])
-    expect(p.readings.filter((r) => r.metric === 'drain_percentage').map((r) => r.zone)).toEqual(['Zone 1', 'Zone 15'])
-    expect(p.readings).toHaveLength(22 * 6 + 2 + 2 + 2)
+    // Greenhouse-wide, from column B only (Zone 15 repeats radiation and has its own drain figure).
+    expect(p.readings.filter((r) => r.metric === 'radiation_sum').map((r) => [r.zone, r.raw_text])).toEqual([['Zone 1', '96.5']])
+    expect(p.readings.filter((r) => r.metric === 'drain_percentage').map((r) => r.zone)).toEqual(['Zone 1'])
+    expect(p.readings).toHaveLength(22 * 4 + 1 + 1)
+    expect(new Set(p.readings.map((r) => r.metric))).toEqual(new Set(['air_temperature', 'relative_humidity', 'co2', 'irrigation_cumulative', 'radiation_sum', 'drain_percentage']))
+    // EC, pH and group activation time stay in the stored file, not as readings, and aren't warnings.
+    expect(p.meta.notReadRows).toEqual(['Average EC [mS/cm]', 'Average pH', 'Group activation time [hh:mm]'])
+    expect(p.meta.unknownRows).toEqual([])
+    expect(p.warnings).toEqual([])
     const t1 = p.readings.find((r) => r.zone === 'Zone 1' && r.metric === 'air_temperature')!
     expect(t1).toEqual({ zone: 'Zone 1', row_label: 'Air temperature [°C]', metric: 'air_temperature', unit: '°C', unit_raw: '°C', raw_text: '22.4', value: 22.4, flags: [] })
     expect(p.readings.find((r) => r.metric === 'radiation_sum')!.row_label).toBe('Radiation sum [J/cm²]')
     expect(p.readings.find((r) => r.metric === 'irrigation_cumulative')!).toMatchObject({ unit: 'ml/dripper', unit_raw: 'ml/dripp', raw_text: '0' })
-    expect(p.readings.find((r) => r.metric === 'group_activation_time')!).toMatchObject({ raw_text: 'Real time - --:--', value: null, flags: ['no_value'] })
   })
 
-  it('flags zero pH, a zero EC and zero irrigation instead of accepting them silently', () => {
-    expect(p.readings.filter((r) => r.metric === 'ph').every((r) => r.flags.includes('ph_zero_sentinel'))).toBe(true)
-    expect(p.readings.filter((r) => r.flags.includes('ec_zero_suspect')).map((r) => r.zone)).toEqual(['Zone 7'])
+  it('flags zero irrigation instead of accepting it silently', () => {
     expect(p.readings.filter((r) => r.metric === 'irrigation_cumulative').every((r) => r.flags.includes('irrigation_zero'))).toBe(true)
     expect(p.readings.find((r) => r.zone === 'Zone 1' && r.metric === 'co2')!.flags).toEqual([])
+  })
+
+  it('quarantines a file whose column B is not Zone 1 (the greenhouse-wide values could be misplaced)', () => {
+    const q = parseBlockSummary(variant((t) => t.replace('"Block heating","Zone 1","Zone 2"', '"Block heating","Zone 2","Zone 1"')), OCT17)
+    expect(q.status).toBe('quarantined')
+    expect(q.problems.map((x) => x.code)).toEqual(['unexpected_layout'])
   })
 
   it('takes the hour from the filename (Toronto, EDT) and checks it against the file’s System date and time', () => {
@@ -102,14 +105,15 @@ describe('Block Summary parser: encoding and layout', () => {
     expect(b.readings).toEqual(a.readings)
   })
 
-  it('keeps an unrecognised row as is, and notes an unexpected unit', () => {
+  it('does not read an unrecognised row (noted), and notes an unexpected unit', () => {
     const p = parseBlockSummary(
       variant((t) => t.replace('"RH [%]"', '"RH [g/kg]"').replace('"Weather system"', '"Pipe temperature [°C]","45.5","","","","","","","","","","","","","","","","","","","","","","","",""\r\n"Weather system"')),
       OCT17,
     )
     expect(p.status).toBe('parsed')
     expect(p.warnings.map((w) => w.code).sort()).toEqual(['unexpected_unit', 'unrecognised_row'])
-    expect(p.readings.find((r) => r.metric === 'unknown')).toMatchObject({ zone: 'Zone 1', row_label: 'Pipe temperature [°C]', raw_text: '45.5', value: 45.5, flags: ['unrecognised_row'] })
+    expect(p.meta.unknownRows).toEqual(['Pipe temperature [°C]'])
+    expect(p.readings.some((r) => r.row_label === 'Pipe temperature [°C]')).toBe(false)
     expect(p.readings.find((r) => r.metric === 'relative_humidity')).toMatchObject({ unit: null, unit_raw: 'g/kg', flags: ['unexpected_unit'] })
   })
 
@@ -251,5 +255,26 @@ describe.skipIf(!REAL)('Block Summary parser: real exports (local only, never co
     expect(p.readings.length).toBeGreaterThan(0)
     expect(p.time.method).toBe('filename')
     expect(p.time.hourLocal!.slice(0, 13).replace(/[- ]/g, '')).toBe(name.match(/(\d{8})_(\d{2})/)!.slice(1).join(''))
+  })
+})
+
+// The user's 21 Oct 13:00 export (cells checked by the user: B6 radiation, B10 drain, B13 time, B14 date).
+const OCT21 = 'Block Summary_20261021_130002.csv'
+describe.skipIf(!REAL || !readdirSync(REAL).includes(OCT21))('Block Summary parser: the real 21 Oct 13:00 export (local only)', () => {
+  const p = REAL ? parseBlockSummary(new Uint8Array(readFileSync(join(REAL, OCT21))), OCT21) : (null as never)
+  const one = (metric: string, zone: string) => p.readings.find((r) => r.metric === metric && r.zone === zone)
+  it('reads the six measurements from the documented cells', () => {
+    expect(p.encoding).toBe('windows-1252')
+    expect(p.status).toBe('parsed')
+    expect(p.time).toMatchObject({ hourLocal: '2026-10-21 13:00:00', systemLocal: '2026-10-21 13:00:00', clockOffsetMinutes: 0 })
+    expect(one('radiation_sum', 'Zone 1')).toMatchObject({ row_label: 'Radiation sum [J/cm²]', raw_text: '736.3', unit: 'J/cm²' })
+    expect(one('drain_percentage', 'Zone 1')).toMatchObject({ row_label: 'Cumulative drain water percentage [%]', raw_text: '38.9' })
+    expect(p.readings.filter((r) => r.metric === 'radiation_sum' || r.metric === 'drain_percentage')).toHaveLength(2)
+    expect(p.readings.filter((r) => r.metric === 'irrigation_cumulative').map((r) => r.raw_text).slice(0, 3)).toEqual(['758', '813', '758'])
+    expect(one('irrigation_cumulative', 'Zone 22')!.raw_text).toBe('713')
+    expect(one('air_temperature', 'Zone 22')).toMatchObject({ row_label: 'Air temperature [°C]', raw_text: '27.0' })
+    expect(one('co2', 'Zone 21')!.raw_text).toBe('799')
+    expect(p.readings.some((r) => /EC|pH|activation/.test(r.row_label))).toBe(false)
+    expect(p.readings).toHaveLength(22 * 4 + 2)
   })
 })

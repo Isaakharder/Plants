@@ -4,11 +4,11 @@
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
-import type { ClimateSeries } from '../../lib/database.types'
 import { useCrops } from '../crops/api'
 import { sortCrops } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
-import { useClimateSource, useClimateZones, useCropClimateZones, useCropSeries, useDaily, useImportStatus, useMissingHours, useSeries, useZoneUse } from './api'
+import { useClimateSource, useClimateZones, useCropClimateZones, useCropSeries, useDaily, useDailyTotals, useImportStatus, useMissingHours, useSeries, useZoneUse } from './api'
+import { TOTAL_METRICS, totalCell, weeklyTotals, type DailyTotalRow, type TotalMetric } from './dailyTotals'
 import { ClimateChart } from './ClimateChart'
 import { useNow } from './useNow'
 import { todayIso } from '../../lib/dates'
@@ -23,12 +23,8 @@ import {
   localDate,
   missingWarning,
   pointsOf,
-  radiationDailyTotals,
-  radiationIncrements,
-  radiationWarning,
   SOURCE_METRICS,
   sortZones,
-  weekKey,
   weeklyRows,
   zoneName,
   type Assignment,
@@ -89,7 +85,9 @@ function Monitor({ sourceId, timeZone }: { sourceId: string; timeZone: string })
   const mode = params.get('view') === 'planting' ? 'planting' : 'zones'
   const range: RangeKey = (params.get('range') as RangeKey) in RANGES ? (params.get('range') as RangeKey) : '7d'
   const summary = params.get('summary') === 'weekly' ? 'weekly' : 'daily'
-  const summaryMetric = (CHART_METRICS.find((m) => m.key === params.get('metric'))?.key ?? 'air_temperature') as ChartMetric
+  const metricParam = params.get('metric')
+  const summaryMetric: SummaryMetric =
+    (CHART_METRICS.find((m) => m.key === metricParam)?.key ?? TOTAL_METRICS.find((m) => m.key === metricParam)?.key ?? 'air_temperature') as SummaryMetric
   const selected = (params.get('zones') ?? '').split(',').filter((id) => zoneById.has(id))
   const zoneIds = selected.length > 0 ? selected : zones.slice(0, 1).map((z) => z.id)
   const plantings = useMemo(() => {
@@ -129,19 +127,17 @@ function Monitor({ sourceId, timeZone }: { sourceId: string; timeZone: string })
   const seriesError = mode === 'zones' ? zoneSeries.error : cropSeries.error
   const seriesPending = mode === 'zones' ? zoneSeries.isPending && zoneIds.length > 0 : cropSeries.isPending && Boolean(cropId)
   const assignments: Assignment[] = useMemo(() => (cropZones.data ?? []).filter((a) => a.superseded_at === null), [cropZones.data])
+  // Radiation and drain: column B ("Zone 1"), shared by every zone and planting. Irrigation: the zones shown.
+  const greenhouseZoneId = zones.find((z) => z.source_label === 'Zone 1')?.id
+  const irrigationZoneIds =
+    mode === 'zones' ? zoneIds : [...new Set(assignments.filter((a) => a.valid_from <= todayIso() && (a.valid_until === null || a.valid_until > todayIso())).map((a) => a.zone_id))]
   const gaps = (missing.data ?? []).map(([s, e]) => [Date.parse(s) / 1000, Date.parse(e) / 1000] as [number, number])
 
   const charts = CHART_METRICS.map((m) => {
     const order = (id: string) => (mode === 'zones' ? zoneIds.indexOf(id) : zones.findIndex((z) => z.id === id))
     const ofMetric = series.filter((s) => s.metric === m.source).sort((a, b) => order(a.zone_id) - order(b.zone_id))
-    const statuses = { ok: 0, reset: 0, gap: 0, decrease: 0, after_decrease: 0, first: 0, missing: 0 }
     const zoneLines: (Line & { color: string })[] = ofMetric.map((s) => {
-      let points: LinePoint[]
-      if (m.key === 'radiation') {
-        const r = radiationIncrements(s.points, timeZone)
-        points = r.points
-        for (const k of Object.keys(statuses) as (keyof typeof statuses)[]) statuses[k] += r.statuses[k]
-      } else points = pointsOf(s)
+      const points: LinePoint[] = pointsOf(s)
       const idx = mode === 'zones' ? zoneIds.indexOf(s.zone_id) : ofMetric.indexOf(s)
       return { id: s.zone_id, label: label(s.zone_id), points, color: LINE_COLORS[(idx + 1) % LINE_COLORS.length] }
     })
@@ -153,13 +149,12 @@ function Monitor({ sourceId, timeZone }: { sourceId: string; timeZone: string })
       combinedNote = weighted ? null : 'Area shares not set: the planting line is a plain mean of its zones'
       lines = [{ id: 'planting', label: weighted ? 'Planting (area-weighted)' : 'Planting (unweighted)', points: combined, color: LINE_COLORS[0], emphasis: true }, ...zoneLines.map((l) => ({ ...l, color: `${l.color}99` }))]
     }
-    return { m, lines, statuses, combinedNote }
+    return { m, lines, combinedNote }
   })
 
   const warnings: QualityWarning[] = [
     missingWarning(missing.data ?? [], timeZone),
     ...exclusionWarnings(series, label),
-    radiationWarning(charts.find((c) => c.m.key === 'radiation')!.statuses),
   ].filter((w): w is QualityWarning => w !== null)
   if (mode === 'planting' && cropId && assignments.length === 0) warnings.push({ key: 'nozones', tone: 'warn', text: 'This planting has no climate zones assigned.' })
 
@@ -258,18 +253,19 @@ function Monitor({ sourceId, timeZone }: { sourceId: string; timeZone: string })
               </div>
             </div>
             {lines.length === 0 ? (
-              <p className={styles.empty}>
-                {m.key === 'radiation' ? 'Not reported for these zones (the climate computer reports radiation under some zones only).' : 'No readings in this period.'}
-              </p>
+              <p className={styles.empty}>No readings in this period.</p>
             ) : (
-              <ClimateChart lines={lines} from={start} to={end} unit={m.unit} decimals={m.decimals} gaps={gaps} bars={m.key === 'radiation'} />
+              <ClimateChart lines={lines} from={start} to={end} unit={m.unit} decimals={m.decimals} gaps={gaps} />
             )}
           </div>
         ))
       )}
 
+      <RunningTotals sourceId={sourceId} greenhouseZoneId={greenhouseZoneId} irrigationZoneIds={irrigationZoneIds} label={label} start={start} end={end} gaps={gaps} />
+
       <Summaries
         sourceId={sourceId}
+        irrigationZoneIds={irrigationZoneIds}
         timeZone={timeZone}
         mode={mode}
         zoneIds={zoneIds}
@@ -323,10 +319,84 @@ function PlantingZones({ assignments, label }: { assignments: Assignment[]; labe
 // Daily / weekly summaries
 // ---------------------------------------------------------------------------
 
-type Column = { id: string; label: string; color: string; rows: SummaryRow[]; radiation?: boolean }
+type SummaryMetric = ChartMetric | TotalMetric
+type Column = { id: string; label: string; color: string; rows: SummaryRow[] }
+
+// ---------------------------------------------------------------------------
+// Running totals: radiation and drain (greenhouse), irrigation (per zone)
+// ---------------------------------------------------------------------------
+
+/** The exported running totals hour by hour; a day's value is its final reading (see the summary below). */
+function RunningTotals(props: {
+  sourceId: string
+  greenhouseZoneId: string | undefined
+  irrigationZoneIds: string[]
+  label: (id: string) => string
+  start: number
+  end: number
+  gaps: [number, number][]
+}) {
+  const { sourceId, greenhouseZoneId, irrigationZoneIds, label, start, end, gaps } = props
+  const fromIso = new Date(start * 1000).toISOString()
+  const toIso = new Date(end * 1000).toISOString()
+  const greenhouse = useSeries(sourceId, greenhouseZoneId ? [greenhouseZoneId] : [], ['radiation_sum', 'drain_percentage'], fromIso, toIso)
+  const irrigation = useSeries(sourceId, irrigationZoneIds, ['irrigation_cumulative'], fromIso, toIso)
+  const NOTES: Record<TotalMetric, string> = {
+    radiation_sum: 'Whole greenhouse (cell B6). Restarts about 08:00 (until then it still shows the previous day’s total); the day’s value is the 23:00 reading.',
+    irrigation_cumulative: 'Per zone (row 9), since midnight; the day’s value is the 23:00 reading.',
+    drain_percentage: 'Whole greenhouse (cell B10), since midnight; the day’s value is the 22:00 reading.',
+  }
+  return (
+    <>
+      {TOTAL_METRICS.map((m) => {
+        const q = m.greenhouse ? greenhouse : irrigation
+        const series = (q.data ?? []).filter((s) => s.metric === m.key)
+        const lines = series.map((s, i) => ({
+          id: s.zone_id,
+          label: m.greenhouse ? 'Greenhouse (all zones)' : label(s.zone_id),
+          points: pointsOf(s),
+          color: LINE_COLORS[(m.greenhouse ? 0 : irrigationZoneIds.indexOf(s.zone_id) + 1) % LINE_COLORS.length] ?? LINE_COLORS[i % LINE_COLORS.length],
+        }))
+        return (
+          <div key={m.key} className={styles.chartCard}>
+            <div className={styles.chartHead}>
+              <h3 className={styles.chartTitle}>
+                {m.label} <span className={styles.unit}>{m.unit}, running total</span>
+              </h3>
+              <div className={styles.legend}>
+                {lines.length > 1 &&
+                  lines.map((l) => (
+                    <span key={l.id} className={styles.legendItem}>
+                      <span className={styles.swatch} style={{ background: l.color }} />
+                      {l.label}
+                    </span>
+                  ))}
+              </div>
+            </div>
+            <p className={`${styles.small} ${styles.muted}`}>{NOTES[m.key]}</p>
+            {q.error ? (
+              <ErrorState error={q.error} />
+            ) : q.isPending && (m.greenhouse ? Boolean(greenhouseZoneId) : irrigationZoneIds.length > 0) ? (
+              <LoadingState />
+            ) : lines.length === 0 ? (
+              <p className={styles.empty}>No readings in this period.</p>
+            ) : (
+              <ClimateChart lines={lines} from={start} to={end} unit={m.unit} decimals={m.decimals} gaps={gaps} />
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Daily / weekly summaries
+// ---------------------------------------------------------------------------
 
 function Summaries(props: {
   sourceId: string
+  irrigationZoneIds: string[]
   timeZone: string
   mode: 'zones' | 'planting'
   zoneIds: string[]
@@ -335,63 +405,37 @@ function Summaries(props: {
   label: (id: string) => string
   end: number
   summary: 'daily' | 'weekly'
-  metric: ChartMetric
+  metric: SummaryMetric
   onSummary: (s: 'daily' | 'weekly') => void
-  onMetric: (m: ChartMetric) => void
+  onMetric: (m: SummaryMetric) => void
 }) {
-  const { sourceId, timeZone, mode, zoneIds, cropId, assignments, label, end, summary, metric } = props
+  const { sourceId, irrigationZoneIds, timeZone, mode, zoneIds, cropId, assignments, label, end, summary, metric } = props
   const days = summary === 'daily' ? 14 : 56
   const toDate = localDate(end - 1, timeZone)
   const fromDate = localDate(end - days * 86400, timeZone)
   const fromIso = new Date((end - days * 86400) * 1000).toISOString()
   const toIso = new Date(end * 1000).toISOString()
-  const def = CHART_METRICS.find((m) => m.key === metric)!
-  const isRadiation = metric === 'radiation'
+  const hourlyDef = CHART_METRICS.find((m) => m.key === metric)
+  const totalDef = TOTAL_METRICS.find((m) => m.key === metric)
 
-  const daily = useDaily(sourceId, zoneIds, [def.source], fromDate, toDate, mode === 'zones' && !isRadiation)
-  const radiation = useSeries(mode === 'zones' && isRadiation ? sourceId : undefined, zoneIds, ['radiation_sum'], fromIso, toIso)
-  const crop = useCropSeries(mode === 'planting' ? cropId : undefined, [def.source], fromIso, toIso)
+  const daily = useDaily(sourceId, zoneIds, hourlyDef ? [hourlyDef.source] : [], fromDate, toDate, mode === 'zones' && Boolean(hourlyDef))
+  const crop = useCropSeries(mode === 'planting' && hourlyDef ? cropId : undefined, hourlyDef ? [hourlyDef.source] : [], fromIso, toIso)
+  const totals = useDailyTotals(sourceId, fromDate, toDate, irrigationZoneIds, Boolean(totalDef))
 
   const toRows = (d: Parameters<typeof dailyRows>[0]) => (summary === 'daily' ? dailyRows(d) : weeklyRows(d)).reverse()
   const columns: Column[] = []
-  const pending = mode === 'zones' ? (isRadiation ? radiation.isPending : daily.isPending) : crop.isPending
-  const error = mode === 'zones' ? (isRadiation ? radiation.error : daily.error) : crop.error
-
-  const radiationColumn = (s: ClimateSeries): SummaryRow[] => {
-    const totals = radiationDailyTotals(s.points, timeZone)
-    if (summary === 'daily')
-      return dailyRows(totals.map((t) => [t.localDate, t.hoursPresent, t.total, null, null, t.complete ? 0 : 1])).reverse()
-    const byWeek = new Map<string, SummaryRow>()
-    for (const t of totals) {
-      const w = weekKey(t.localDate)
-      const row = byWeek.get(w.key) ?? { key: w.key, label: `W${w.week} ${w.year}`, hours: 0, expectedHours: 7, mean: 0, min: null, max: null, excluded: 0 }
-      if (t.complete && t.total !== null) {
-        row.mean = (row.mean ?? 0) + t.total
-        row.hours++
-      } else row.excluded++
-      byWeek.set(w.key, row)
-    }
-    return [...byWeek.values()].sort((a, b) => b.key.localeCompare(a.key))
-  }
-
-  if (mode === 'zones') {
-    if (isRadiation) {
-      for (const s of radiation.data ?? []) columns.push({ id: s.zone_id, label: label(s.zone_id), color: LINE_COLORS[(zoneIds.indexOf(s.zone_id) + 1) % LINE_COLORS.length], rows: radiationColumn(s), radiation: true })
-    } else {
-      for (const s of daily.data ?? []) columns.push({ id: s.zone_id, label: label(s.zone_id), color: LINE_COLORS[(zoneIds.indexOf(s.zone_id) + 1) % LINE_COLORS.length], rows: toRows(s.days) })
-    }
-  } else if (crop.data) {
-    if (isRadiation) {
-      crop.data.forEach((s, i) => columns.push({ id: s.zone_id, label: label(s.zone_id), color: LINE_COLORS[(i + 1) % LINE_COLORS.length], rows: radiationColumn(s), radiation: true }))
-    } else {
-      const byZone = new Map(crop.data.map((s) => [s.zone_id, pointsOf(s)]))
-      const combined = combineZones(byZone, assignments, timeZone)
-      columns.push({ id: 'planting', label: combined.some((p) => p.method === 'weighted') ? 'Planting (weighted)' : 'Planting (unweighted)', color: LINE_COLORS[0], rows: toRows(dailyFromPoints(combined, timeZone)) })
-      crop.data.forEach((s, i) => columns.push({ id: s.zone_id, label: label(s.zone_id), color: LINE_COLORS[(i + 1) % LINE_COLORS.length], rows: toRows(dailyFromPoints(pointsOf(s), timeZone)) }))
-    }
+  if (hourlyDef && mode === 'zones') {
+    for (const s of daily.data ?? []) columns.push({ id: s.zone_id, label: label(s.zone_id), color: LINE_COLORS[(zoneIds.indexOf(s.zone_id) + 1) % LINE_COLORS.length], rows: toRows(s.days) })
+  } else if (hourlyDef && crop.data) {
+    const byZone = new Map(crop.data.map((s) => [s.zone_id, pointsOf(s)]))
+    const combined = combineZones(byZone, assignments, timeZone)
+    columns.push({ id: 'planting', label: combined.some((p) => p.method === 'weighted') ? 'Planting (weighted)' : 'Planting (unweighted)', color: LINE_COLORS[0], rows: toRows(dailyFromPoints(combined, timeZone)) })
+    crop.data.forEach((s, i) => columns.push({ id: s.zone_id, label: label(s.zone_id), color: LINE_COLORS[(i + 1) % LINE_COLORS.length], rows: toRows(dailyFromPoints(pointsOf(s), timeZone)) }))
   }
   const keys = [...new Set(columns.flatMap((c) => c.rows.map((r) => r.key)))].sort().reverse()
   const rowLabel = new Map(columns.flatMap((c) => c.rows.map((r) => [r.key, r.label] as const)))
+  const q = totalDef ? totals : mode === 'zones' ? daily : crop
+  const pending = q.isPending && (totalDef ? true : mode === 'zones' ? zoneIds.length > 0 : Boolean(cropId))
 
   return (
     <div className={styles.card}>
@@ -406,8 +450,8 @@ function Summaries(props: {
               Weekly
             </button>
           </div>
-          <select className={`input ${styles.compactSelect}`} value={metric} onChange={(e) => props.onMetric(e.target.value as ChartMetric)} aria-label="Metric">
-            {CHART_METRICS.map((m) => (
+          <select className={`input ${styles.compactSelect}`} value={metric} onChange={(e) => props.onMetric(e.target.value as SummaryMetric)} aria-label="Measurement">
+            {[...CHART_METRICS, ...TOTAL_METRICS].map((m) => (
               <option key={m.key} value={m.key}>
                 {m.label}
               </option>
@@ -416,16 +460,18 @@ function Summaries(props: {
         </div>
       </div>
       <p className={`${styles.small} ${styles.muted}`}>
-        {isRadiation
-          ? `Radiation total per day (J/cm²): only days with a reading at 23:00 and no counter problem are complete.${summary === 'weekly' ? ' Weeks add up their complete days.' : ''}`
-          : `Mean (min–max) of usable hourly values in ${def.unit}; flagged readings are left out. Hours with data are shown when fewer than expected.`}
+        {totalDef
+          ? `${totalDef.label} per day (${totalDef.unit}): the ${totalDef.key === 'drain_percentage' ? '22:00' : '23:00'} reading${totalDef.greenhouse ? ', the same for every zone and planting' : ', per zone'}. Running totals are never added up or averaged; a day without that reading shows its running value, marked “so far” (today) or “incomplete”.${summary === 'weekly' ? (totalDef.weekly === 'sum' ? ' Weeks add up their final days.' : ' Weeks average their final days.') : ''}`
+          : `Mean (min–max) of usable hourly values in ${hourlyDef!.unit}; flagged readings are left out. Hours with data are shown when fewer than expected.`}
       </p>
-      {error ? (
-        <ErrorState error={error} />
-      ) : pending && (mode === 'zones' ? zoneIds.length > 0 : Boolean(cropId)) ? (
+      {q.error ? (
+        <ErrorState error={q.error} />
+      ) : pending ? (
         <LoadingState />
+      ) : totalDef ? (
+        <TotalsTable rows={(totals.data ?? []).filter((r) => r.metric === totalDef.key)} def={totalDef} weekly={summary === 'weekly'} label={label} irrigationZoneIds={irrigationZoneIds} />
       ) : columns.length === 0 ? (
-        <p className={styles.empty}>{isRadiation ? 'Not reported for these zones.' : 'No readings in this period.'}</p>
+        <p className={styles.empty}>No readings in this period.</p>
       ) : (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -447,7 +493,7 @@ function Summaries(props: {
                 <tr key={k}>
                   <td>{rowLabel.get(k)}</td>
                   {columns.map((c) => (
-                    <SummaryCell key={c.id} row={c.rows.find((r) => r.key === k)} decimals={def.decimals} radiation={Boolean(c.radiation)} weekly={summary === 'weekly'} />
+                    <SummaryCell key={c.id} row={c.rows.find((r) => r.key === k)} decimals={hourlyDef!.decimals} />
                   ))}
                 </tr>
               ))}
@@ -459,17 +505,82 @@ function Summaries(props: {
   )
 }
 
-function SummaryCell({ row, decimals, radiation, weekly }: { row: SummaryRow | undefined; decimals: number; radiation: boolean; weekly: boolean }) {
-  if (!row || row.mean === null) return <td className={styles.muted}>—</td>
-  if (radiation) {
-    const partial = row.excluded > 0
+const DAY = new Intl.DateTimeFormat('en-CA', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
+
+/** Daily values of a running total: final ones plain, partial ones marked; weekly: final days only. */
+function TotalsTable(props: { rows: DailyTotalRow[]; def: (typeof TOTAL_METRICS)[number]; weekly: boolean; label: (id: string) => string; irrigationZoneIds: string[] }) {
+  const { rows, def, weekly, label, irrigationZoneIds } = props
+  const zoneIds = def.greenhouse ? [...new Set(rows.map((r) => r.zone_id))] : irrigationZoneIds.filter((id) => rows.some((r) => r.zone_id === id))
+  if (zoneIds.length === 0) return <p className={styles.empty}>{def.greenhouse ? 'No readings in this period.' : 'Choose a zone to see its irrigation.'}</p>
+  const colLabel = (id: string) => (def.greenhouse ? 'Greenhouse (all zones)' : label(id))
+  const byZone = new Map(zoneIds.map((id) => [id, rows.filter((r) => r.zone_id === id)]))
+  if (weekly) {
+    const perZone = new Map(zoneIds.map((id) => [id, weeklyTotals(byZone.get(id)!, def.weekly)]))
+    const weeks = perZone.get(zoneIds[0])!
     return (
-      <td className={partial ? styles.partial : undefined} title={partial ? (weekly ? `${row.excluded} incomplete day(s) left out` : 'Incomplete day: running total so far') : undefined}>
-        {weekly ? row.mean.toFixed(0) : `${partial ? '≥ ' : ''}${row.mean.toFixed(1)}`}
-        {weekly && <span className={styles.range}>{row.hours}/7 days</span>}
-      </td>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Week</th>
+              {zoneIds.map((id) => <th key={id}>{colLabel(id)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {weeks.map((w) => (
+              <tr key={w.key}>
+                <td>{w.label}</td>
+                {zoneIds.map((id) => {
+                  const x = perZone.get(id)!.find((y) => y.key === w.key)!
+                  const partial = x.finalDays < x.days
+                  return (
+                    <td key={id} className={partial ? styles.partial : undefined} title={partial ? `${x.days - x.finalDays} day(s) without a final reading left out` : undefined}>
+                      {x.value === null ? '—' : x.value.toFixed(def.weekly === 'sum' ? 0 : def.decimals)}
+                      <span className={styles.range}>{x.finalDays}/{x.days} days final</span>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     )
   }
+  const dates = [...new Set(rows.map((r) => r.local_date))].sort().reverse()
+  return (
+    <div className={styles.tableWrap}>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Day</th>
+            {zoneIds.map((id) => <th key={id}>{colLabel(id)}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {dates.map((d) => (
+            <tr key={d}>
+              <td>{DAY.format(new Date(`${d}T12:00:00Z`))}</td>
+              {zoneIds.map((id) => {
+                const r = byZone.get(id)!.find((x) => x.local_date === d)
+                if (!r) return <td key={id} className={styles.muted}>—</td>
+                const c = totalCell(r, def.decimals)
+                return (
+                  <td key={id} className={c.final ? undefined : styles.partial} title={c.title}>
+                    {c.text}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SummaryCell({ row, decimals }: { row: SummaryRow | undefined; decimals: number }) {
+  if (!row || row.mean === null) return <td className={styles.muted}>—</td>
   const short = row.hours < row.expectedHours
   return (
     <td>

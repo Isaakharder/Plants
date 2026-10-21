@@ -24,7 +24,7 @@ import {
   type LocalDateTime,
 } from './zonedTime.ts'
 
-export const PARSER_VERSION = 'synopta-block-summary/2'
+export const PARSER_VERSION = 'synopta-block-summary/3'
 
 /** A filename or System time this far from a whole hour is not trusted to name the hour. */
 export const MAX_OFF_HOUR_MINUTES = 10
@@ -35,32 +35,34 @@ export const MAX_OFF_HOUR_MINUTES = 10
  */
 export const SYSTEM_TIME_TOLERANCE_MINUTES = 15
 
-export type Metric =
-  | 'air_temperature'
-  | 'relative_humidity'
-  | 'co2'
-  | 'radiation_sum'
-  | 'ec'
-  | 'ph'
-  | 'irrigation_cumulative'
-  | 'drain_percentage'
-  | 'group_activation_time'
-  | 'unknown'
+// Since parser /3 only six measurements are read (user decision, 2026-10-21):
+// temperature, RH, CO₂ and cumulative irrigation per zone; radiation sum and
+// cumulative drain % greenhouse-wide, from the first value column (B, which
+// the header names "Zone 1"). Other rows (EC, pH, group activation time, …)
+// stay in the stored original file but are not readings.
+export type Metric = 'air_temperature' | 'relative_humidity' | 'co2' | 'radiation_sum' | 'irrigation_cumulative' | 'drain_percentage'
 
-type MetricDef = { metric: Metric; unitRaw: string | null; unit: string | null; min?: number; max?: number }
+type MetricDef = { metric: Metric; unitRaw: string | null; unit: string | null; min?: number; max?: number; greenhouse?: boolean }
 
 // Keyed by the row name without its [unit], lower case.
 const METRICS: Record<string, MetricDef> = {
   'air temperature': { metric: 'air_temperature', unitRaw: '°C', unit: '°C', min: -20, max: 50 },
   rh: { metric: 'relative_humidity', unitRaw: '%', unit: '%', min: 0, max: 100 },
   'co2 concentration': { metric: 'co2', unitRaw: 'ppm', unit: 'ppm', min: 100, max: 5000 },
-  'radiation sum': { metric: 'radiation_sum', unitRaw: 'J/cm²', unit: 'J/cm²', min: 0, max: 5000 },
-  'average ec': { metric: 'ec', unitRaw: 'mS/cm', unit: 'mS/cm', min: 0, max: 20 },
-  'average ph': { metric: 'ph', unitRaw: null, unit: 'pH', min: 2, max: 12 },
+  // A running total since the morning restart (~08:00), greenhouse-wide.
+  'radiation sum': { metric: 'radiation_sum', unitRaw: 'J/cm²', unit: 'J/cm²', min: 0, max: 5000, greenhouse: true },
+  // Running totals since midnight, per zone.
   'cumulative irrigation (dripper)': { metric: 'irrigation_cumulative', unitRaw: 'ml/dripp', unit: 'ml/dripper', min: 0, max: 100_000 },
-  'cumulative drain water percentage': { metric: 'drain_percentage', unitRaw: '%', unit: '%', min: 0, max: 100 },
-  'group activation time': { metric: 'group_activation_time', unitRaw: 'hh:mm', unit: 'hh:mm' },
+  // A running daily percentage, greenhouse-wide.
+  'cumulative drain water percentage': { metric: 'drain_percentage', unitRaw: '%', unit: '%', min: 0, max: 100, greenhouse: true },
 }
+
+/** Rows the export always has that are deliberately not read. */
+const NOT_READ = new Set(['average ec', 'average ph', 'group activation time'])
+
+/** The greenhouse-wide column: the first value column (B), headed "Zone 1". */
+export const GREENHOUSE_COLUMN = 1
+export const GREENHOUSE_ZONE_LABEL = 'Zone 1'
 
 // Rows describing the export itself; their value sits in the first value column.
 const SYSTEM_ROWS: Record<string, 'weatherSystem' | 'systemTime' | 'systemDate' | 'weekNumber' | 'sunrise' | 'sunset'> = {
@@ -101,6 +103,8 @@ export type ParsedFile = {
     sunriseRaw: string | null
     sunsetRaw: string | null
     weatherSystemRaw: string | null
+    /** Rows not read: known ones (EC, pH, group activation time) and unrecognised ones. */
+    notReadRows: string[]
     unknownRows: string[]
   }
   time: {
@@ -255,6 +259,7 @@ export function parseBlockSummary(bytes: Uint8Array, filename: string, options: 
     sunriseRaw: null,
     sunsetRaw: null,
     weatherSystemRaw: null,
+    notReadRows: [],
     unknownRows: [],
   }
   const time: ParsedFile['time'] = {
@@ -289,6 +294,12 @@ export function parseBlockSummary(bytes: Uint8Array, filename: string, options: 
       seen.add(c)
       zones.push({ label: c, column })
     })
+    if (rows[headerIdx][GREENHOUSE_COLUMN] !== GREENHOUSE_ZONE_LABEL) {
+      quarantine(
+        'unexpected_layout',
+        `Column B is "${rows[headerIdx][GREENHOUSE_COLUMN] ?? ''}", not "${GREENHOUSE_ZONE_LABEL}": the greenhouse-wide radiation and drain can't be located safely.`,
+      )
+    }
   }
 
   // System rows (anywhere) and metric rows (after the header).
@@ -317,35 +328,36 @@ export function parseBlockSummary(bytes: Uint8Array, filename: string, options: 
     seenRows.add(label)
     const def = METRICS[name]
     if (!def) {
-      meta.unknownRows.push(label)
-      warn('unrecognised_row', `Unrecognised row "${label}" kept as is (metric "unknown").`)
-    } else if ((def.unitRaw ?? null) !== (unitRaw ?? null)) {
+      meta.notReadRows.push(label)
+      if (!NOT_READ.has(name)) {
+        meta.unknownRows.push(label)
+        warn('unrecognised_row', `Unrecognised row "${label}" (not read).`)
+      }
+      return
+    }
+    if ((def.unitRaw ?? null) !== (unitRaw ?? null)) {
       warn('unexpected_unit', `"${label}": expected unit ${def.unitRaw ?? 'none'}, found ${unitRaw ?? 'none'}.`)
     }
-    const unitMatches = def ? (def.unitRaw ?? null) === (unitRaw ?? null) : false
+    const unitMatches = (def.unitRaw ?? null) === (unitRaw ?? null)
     for (const z of zones) {
+      // Greenhouse-wide values come from column B only (Zone 15 repeats radiation and has a different drain figure).
+      if (def.greenhouse && z.column !== GREENHOUSE_COLUMN) continue
       const raw = r[z.column] ?? ''
       if (raw === '') continue // blank: not reported for this zone
       const numeric = NUMBER.test(raw)
       const value = numeric ? Number(raw) : null
       const flags: string[] = []
-      if (!def) flags.push('unrecognised_row')
-      else {
-        if (!unitMatches) flags.push('unexpected_unit')
-        if (def.metric !== 'group_activation_time' && !numeric) flags.push('not_numeric')
-        if (def.metric === 'group_activation_time' && raw.includes('--:--')) flags.push('no_value')
-        if (value !== null) {
-          if (def.metric === 'ph' && value === 0) flags.push('ph_zero_sentinel')
-          else if (def.metric === 'ec' && value === 0) flags.push('ec_zero_suspect')
-          else if (def.metric === 'irrigation_cumulative' && value === 0) flags.push('irrigation_zero')
-          else if ((def.min !== undefined && value < def.min) || (def.max !== undefined && value > def.max)) flags.push('out_of_range')
-        }
+      if (!unitMatches) flags.push('unexpected_unit')
+      if (!numeric) flags.push('not_numeric')
+      if (value !== null) {
+        if (def.metric === 'irrigation_cumulative' && value === 0) flags.push('irrigation_zero')
+        else if ((def.min !== undefined && value < def.min) || (def.max !== undefined && value > def.max)) flags.push('out_of_range')
       }
       readings.push({
         zone: z.label,
         row_label: label,
-        metric: def?.metric ?? 'unknown',
-        unit: def && unitMatches ? def.unit : null,
+        metric: def.metric,
+        unit: unitMatches ? def.unit : null,
         unit_raw: unitRaw,
         raw_text: raw,
         value,

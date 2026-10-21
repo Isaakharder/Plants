@@ -187,7 +187,8 @@ begin
      or not (select 'ph_zero_sentinel' = any(flags) from public.climate_readings where file_id = f1.id and metric = 'ph') then
     raise exception 'FAIL: pH reading';
   end if;
-  if (select count(*) from public.climate_readings_active) <> 4 then raise exception 'FAIL: active view counts % readings', (select count(*) from public.climate_readings_active); end if;
+  -- The active view holds the six measurements only (20261031): Zones 1–3 temperature; the stored pH reading is kept but not used.
+  if (select count(*) from public.climate_readings_active) <> 3 then raise exception 'FAIL: active view counts % readings', (select count(*) from public.climate_readings_active); end if;
   if (select count(*) from public.climate_readings) <> 8 then raise exception 'FAIL: conflict file''s readings not kept'; end if;
   -- Zones: discovered by label, including Zone 23 from the quarantined header; seen hours only from the active file.
   if (select string_agg(source_label || ':' || zone_number, ',' order by zone_number) from public.climate_zones) <> 'Zone 1:1,Zone 2:2,Zone 3:3,Zone 23:23' then
@@ -255,7 +256,7 @@ end $$;
 select set_config('request.jwt.claims', '{"sub":"aaaaaaaa-0000-4000-8000-0000000c1002","role":"authenticated"}', true);
 do $$
 begin
-  if (select count(*) from public.climate_readings_active) <> 4 then raise exception 'FAIL: member can''t read readings'; end if;
+  if (select count(*) from public.climate_readings_active) <> 3 then raise exception 'FAIL: member can''t read readings'; end if;
   if exists (select 1 from public.climate_agent_keys) then raise exception 'FAIL: a member sees agent keys'; end if;
 end $$;
 reset role;
