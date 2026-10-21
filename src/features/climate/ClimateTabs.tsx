@@ -20,6 +20,9 @@ export function ClimateTabs({ reviewCount = 0 }: { reviewCount?: number }) {
       <NavLink to="/climate/reports" className={cls}>
         Reports
       </NavLink>
+      <NavLink to="/climate/maturation" className={cls}>
+        Maturation
+      </NavLink>
     </nav>
   )
 }

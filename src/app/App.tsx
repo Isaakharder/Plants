@@ -10,6 +10,7 @@ import { ProductionTotalsTab } from '../features/forecast/ProductionTotalsTab'
 import { WeeklyPlantDataTab } from '../features/projections/WeeklyPlantDataTab'
 import { ClimateImports } from '../features/climate/ClimateImports'
 import { ClimateReports } from '../features/climate/ClimateReports'
+import { ClimateMaturation } from '../features/climate/ClimateMaturation'
 import { ClimateMonitor } from '../features/climate/ClimateMonitor'
 import { ClimatePage } from '../pages/ClimatePage'
 import { queryClient } from '../lib/queryClient'
@@ -47,6 +48,7 @@ export function App() {
                   <Route index element={<Navigate to="monitor" replace />} />
                   <Route path="monitor" element={<ClimateMonitor />} />
                   <Route path="reports" element={<ClimateReports />} />
+                  <Route path="maturation" element={<ClimateMaturation />} />
                   <Route path="imports" element={<ClimateImports />} />
                 </Route>
                 <Route path="plants" element={<PlantsPage />} />
