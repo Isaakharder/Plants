@@ -277,6 +277,20 @@ export type WeeklyHarvestableRow = {
   harvested_same_week: number
 }
 
+/** Climate report thresholds: one row per change, the latest in effect. */
+export type ClimateReportThresholdsRow = {
+  id: number
+  organization_id: string
+  high_temp: number
+  high_rh: number
+  low_day_rh: number
+  low_temp: number | null
+  low_day_co2: number | null
+  note: string | null
+  recorded_at: string
+  recorded_by: string
+}
+
 export type SamplingWeekEvent = 'completed' | 'reopened'
 
 /** A crop's weekly sampling marked complete or reopened; the latest event per week is its state. */
@@ -935,6 +949,12 @@ export type Database = {
         Update: never
         Relationships: []
       }
+      climate_report_thresholds: {
+        Row: ClimateReportThresholdsRow
+        Insert: Pick<ClimateReportThresholdsRow, 'organization_id' | 'high_temp' | 'high_rh' | 'low_day_rh'> & Partial<Pick<ClimateReportThresholdsRow, 'low_temp' | 'low_day_co2' | 'note'>>
+        Update: never
+        Relationships: []
+      }
       sampling_week_events: {
         Row: SamplingWeekEventRow
         Insert: Pick<SamplingWeekEventRow, 'id' | 'organization_id' | 'crop_id' | 'year' | 'week_number' | 'event' | 'observed_at'> & {
@@ -1046,6 +1066,10 @@ export type Database = {
       crop_climate_daily: {
         Args: { p_crop_id: string; p_from: string; p_to: string; p_as_of?: string }
         Returns: import('../features/climate/varietyClimate').VarietyDay[]
+      }
+      climate_report_thresholds_in_effect: {
+        Args: { p_organization_id: string }
+        Returns: { high_temp: number; high_rh: number; low_day_rh: number; low_temp: number | null; low_day_co2: number | null; source: 'saved' | 'default'; recorded_at: string | null; recorded_by: string | null; note: string | null }[]
       }
       climate_missing_hours: { Args: { p_source_id: string; p_from: string; p_to: string }; Returns: [string, string, number][] }
       climate_import_status: { Args: { p_source_id: string }; Returns: ClimateImportStatus }

@@ -81,7 +81,7 @@ export type ReportStats = {
     readings: number; highReadings: number; highDayReadings: number; daysReachingHigh: number; highRuns: { date: string; from: number; to: number; count: number }[]
     lowReadings: number | null; difference: number | null
   }
-  rh: { dayMean: number | null; nightMean: number | null; highDay: number; highNight: number; lowDay: number; longestHigh: { count: number; date: string; from: number } | null; nightsWithHigh: number; nights: number }
+  rh: { dayMean: number | null; nightMean: number | null; highDay: number; highNight: number; lowDay: number; daysWithLowDay: number; days: number; longestHigh: { count: number; date: string; from: number } | null; nightsWithHigh: number; nights: number }
   co2: { dayMean: number | null; dayMin: number | null; dayMax: number | null; lowDay: number | null; dayReadings: number }
   radiation: { days: { date: string; value: number | null; status: VarietyDay['status'] }[]; finalDays: number; total: number | null; mean: number | null; highest: { date: string; value: number } | null; lowest: { date: string; value: number } | null }
   irrigation: { days: { date: string; value: number | null; status: VarietyDay['status'] }[]; finalDays: number; total: number | null; mean: number | null; per100J: number | null; per100JDays: number }
@@ -188,6 +188,8 @@ export function computeReport(
       highDay: rh.filter((o) => o.period === 'day' && o.value > t.highRh).length,
       highNight: rh.filter((o) => o.period === 'night' && o.value > t.highRh).length,
       lowDay: rh.filter((o) => o.period === 'day' && o.value < t.lowDayRh).length,
+      daysWithLowDay: new Set(rh.filter((o) => o.period === 'day' && o.value < t.lowDayRh).map((o) => o.date)).size,
+      days: new Set(rh.map((o) => o.date)).size,
       longestHigh: run.longest && { count: run.longest.count, date: run.longest.date, from: run.longest.from },
       nightsWithHigh,
       nights: nightDates.size,
@@ -239,7 +241,7 @@ export function reportObservations(s: ReportStats, t: Thresholds): Record<'tempe
     if (T.highReadings > 0) {
       const runs = T.highRuns
         .slice(0, 4)
-        .map((r) => `${week ? `${dayLabel(r.date)} ` : ''}${r.from === r.to ? hh(r.from) : `${hh(r.from)}–${hh(r.to)}`} (${n(r.count, 'reading')})`)
+        .map((r) => `${week ? `${dayLabel(r.date)} ` : ''}${r.from === r.to ? hh(r.from) : `${hh(r.from)}–${hh(r.to)}`}${week || T.highRuns.length > 1 ? ` (${n(r.count, 'reading')})` : ''}`)
         .join('; ')
       temperature.push({
         tone: 'notable',
@@ -256,7 +258,6 @@ export function reportObservations(s: ReportStats, t: Thresholds): Record<'tempe
     ].filter(Boolean)
     if (parts.length) temperature.push({ tone: 'info', text: `${parts.join(', ')}.` })
     if (T.max && T.min) temperature.push({ tone: 'info', text: `Range ${f1(T.min.value)} °C (${week ? dayLabel(T.min.date) + ' ' : ''}${hh(T.min.hour)}) to ${f1(T.max.value)} °C (${week ? dayLabel(T.max.date) + ' ' : ''}${hh(T.max.hour)}).` })
-    if (T.highReadings === 0) temperature.push({ tone: 'info', text: `No hourly reading reached ${t.highTemp} °C.` })
   }
 
   const rh: Observation[] = []
@@ -271,7 +272,13 @@ export function reportObservations(s: ReportStats, t: Thresholds): Record<'tempe
       })
     }
     if (R.highDay > 0) rh.push({ tone: 'notable', text: `${cap(n(R.highDay, 'daytime hourly reading'))} above ${t.highRh}% RH.` })
-    if (R.lowDay > 0) rh.push({ tone: 'notable', text: `${cap(n(R.lowDay, 'daytime hourly reading'))} below ${t.lowDayRh}% RH.` })
+    if (R.lowDay > 0)
+      rh.push({
+        tone: 'notable',
+        text: week && R.daysWithLowDay > 1
+          ? `Daytime RH fell below ${t.lowDayRh}% on ${R.daysWithLowDay} of ${R.days} days (${n(R.lowDay, 'hourly reading')}).`
+          : `${cap(n(R.lowDay, 'daytime hourly reading'))} below ${t.lowDayRh}% RH.`,
+      })
     if (R.longestHigh && R.longestHigh.count > 1)
       rh.push({ tone: R.longestHigh.count >= 4 ? 'notable' : 'info', text: `Longest run above ${t.highRh}%: ${R.longestHigh.count} consecutive hourly readings from ${week ? dayLabel(R.longestHigh.date) + ' ' : ''}${hh(R.longestHigh.from)}.` })
     rh.push({ tone: 'info', text: `RH averaged ${R.dayMean !== null ? `${f0(R.dayMean)}% by day` : '— by day'} and ${R.nightMean !== null ? `${f0(R.nightMean)}% at night` : '— at night'}.` })
@@ -282,7 +289,6 @@ export function reportObservations(s: ReportStats, t: Thresholds): Record<'tempe
   else {
     if (C.lowDay) co2.push({ tone: 'notable', text: `${cap(n(C.lowDay, 'daytime hourly reading'))} below ${t.lowDayCo2} ppm.` })
     co2.push({ tone: 'info', text: `Daytime CO₂ averaged ${f0(C.dayMean!)} ppm (range ${f0(C.dayMin!)}–${f0(C.dayMax!)} ppm).` })
-    if (C.lowDay === null) co2.push({ tone: 'info', text: 'No low-CO₂ threshold is set, so low readings aren’t counted. Night-time CO₂ isn’t assessed.' })
   }
 
   const radiation: Observation[] = []

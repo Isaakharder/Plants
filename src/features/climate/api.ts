@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import { normalizeDay, normalizeHour, type VarietyDay, type VarietyHour } from './varietyClimate'
-import { parseClock, type Daylight } from './reports'
+import { parseClock, type Daylight, type Thresholds } from './reports'
 import type { ImportOutcome } from './importMessages'
 import type {
   ClimateAgentKeyRow,
@@ -15,9 +15,11 @@ import type {
   ClimateImportFileRow,
   ClimateImportStatus,
   ClimateReadingRow,
+  ClimateReportThresholdsRow,
   ClimateSourceRow,
   ClimateZoneRow,
   CropClimateZoneRow,
+  Database,
 } from '../../lib/database.types'
 
 export const climateKeys = {
@@ -96,6 +98,57 @@ export function useCropClimateDaily(cropId: string | undefined, fromDate: string
     queryKey: climateKeys.series('cropDaily', cropId, fromDate, toDate),
     enabled: Boolean(cropId),
     queryFn: async () => (check(await supabase.rpc('crop_climate_daily', { p_crop_id: cropId!, p_from: fromDate, p_to: toDate })) as VarietyDay[]).map(normalizeDay),
+  })
+}
+
+export type ReportThresholdsInEffect = { thresholds: Thresholds; source: 'saved' | 'default'; recordedAt: string | null; recordedBy: string | null; note: string | null }
+
+const num = (v: unknown) => (v === null || v === undefined ? null : Number(v))
+
+/** The organization's report thresholds in effect (the latest owner change, or the defaults). */
+export function useReportThresholds(organizationId: string) {
+  return useQuery({
+    queryKey: ['climate', 'reportThresholds', organizationId],
+    queryFn: async (): Promise<ReportThresholdsInEffect> => {
+      const r = (check(await supabase.rpc('climate_report_thresholds_in_effect', { p_organization_id: organizationId })) as Database['public']['Functions']['climate_report_thresholds_in_effect']['Returns'])[0]
+      return {
+        thresholds: { highTemp: Number(r.high_temp), highRh: Number(r.high_rh), lowDayRh: Number(r.low_day_rh), lowTemp: num(r.low_temp), lowDayCo2: num(r.low_day_co2) },
+        source: r.source,
+        recordedAt: r.recorded_at,
+        recordedBy: r.recorded_by,
+        note: r.note,
+      }
+    },
+  })
+}
+
+/** The latest threshold changes (audit history), newest first. */
+export function useReportThresholdHistory(organizationId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['climate', 'reportThresholds', organizationId, 'history'],
+    enabled,
+    queryFn: async () =>
+      check(await supabase.from('climate_report_thresholds').select('*').eq('organization_id', organizationId).order('recorded_at', { ascending: false }).order('id', { ascending: false }).limit(10)) as ClimateReportThresholdsRow[],
+  })
+}
+
+/** Owners: save a change (a new row; earlier ones stay as history). */
+export function useSaveReportThresholds(organizationId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ t, note }: { t: Thresholds; note: string }) =>
+      check(
+        await supabase.from('climate_report_thresholds').insert({
+          organization_id: organizationId,
+          high_temp: t.highTemp,
+          high_rh: t.highRh,
+          low_day_rh: t.lowDayRh,
+          low_temp: t.lowTemp,
+          low_day_co2: t.lowDayCo2,
+          note: note.trim() || null,
+        }),
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['climate', 'reportThresholds', organizationId] }),
   })
 }
 

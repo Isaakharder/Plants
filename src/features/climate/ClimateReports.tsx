@@ -10,12 +10,12 @@ import { localToUtcCandidates } from '../../../supabase/functions/_shared/climat
 import { useCrops } from '../crops/api'
 import { sortCrops } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
-import { useClimateSource, useCropClimateDaily, useCropClimateHourly, useDaylight, useZoneUse } from './api'
+import { useClimateSource, useCropClimateDaily, useCropClimateHourly, useDaylight, useReportThresholdHistory, useReportThresholds, useSaveReportThresholds, useZoneUse, type ReportThresholdsInEffect } from './api'
 import { ClimateTabs } from './ClimateTabs'
 import { localDate } from './model'
 import { useNow } from './useNow'
 import { pickVariety } from './varietyClimate'
-import { DEFAULT_THRESHOLDS, addDays, computeReport, dayLabel, reportObservations, type Observation, type ReportStats, type Thresholds } from './reports'
+import { addDays, computeReport, dayLabel, reportObservations, type Observation, type ReportStats, type Thresholds } from './reports'
 import styles from './Climate.module.css'
 
 const SECTIONS: { key: keyof ReturnType<typeof reportObservations>; title: string }[] = [
@@ -52,14 +52,6 @@ const midnight = (date: string, timeZone: string) => {
   return new Date(localToUtcCandidates({ year: y, month: m, day: d, hour: 0, minute: 0, second: 0 }, timeZone)[0]).toISOString()
 }
 
-function read<T>(key: string, fallback: T): T {
-  try {
-    const v = localStorage.getItem(key)
-    return v === null ? fallback : { ...fallback, ...JSON.parse(v) }
-  } catch {
-    return fallback
-  }
-}
 function write(key: string, value: unknown) {
   try {
     localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value))
@@ -92,12 +84,9 @@ function Reports({ sourceId, timeZone }: { sourceId: string; timeZone: string })
     setParams((p) => { const next = new URLSearchParams(p); next.set('crop', id); return next }, { replace: true })
   }
 
-  const thresholdKey = `plants.climate.reportThresholds:${organization.id}`
-  const [thresholds, setThresholds] = useState<Thresholds>(() => read(thresholdKey, DEFAULT_THRESHOLDS))
-  const saveThresholds = (t: Thresholds) => {
-    setThresholds(t)
-    write(thresholdKey, t)
-  }
+  // The organization's shared thresholds (owners change them in the panel).
+  const shared = useReportThresholds(organization.id)
+  const thresholds = shared.data?.thresholds
 
   // Completed greenhouse-local days: yesterday, and the seven days before today.
   const today = localDate(Math.floor(useNow() / 1000), timeZone)
@@ -117,10 +106,10 @@ function Reports({ sourceId, timeZone }: { sourceId: string; timeZone: string })
         <EmptyState title="No variety has climate zones yet" description="Assign each variety its zones in Settings › Climate." action={<Link to="/settings#climate">Settings › Climate</Link>} />
       </Frame>
     )
-  const error = hourly.error ?? daily.error ?? daylight.error
-  const ready = hourly.data && daily.data && daylight.data
-  const yStats = ready ? computeReport([yesterday], hourly.data!, daily.data!, daylight.data!, thresholds, timeZone) : null
-  const wStats = ready ? computeReport(week, hourly.data!, daily.data!, daylight.data!, thresholds, timeZone) : null
+  const error = hourly.error ?? daily.error ?? daylight.error ?? shared.error
+  const ready = hourly.data && daily.data && daylight.data && thresholds
+  const yStats = ready ? computeReport([yesterday], hourly.data!, daily.data!, daylight.data!, thresholds!, timeZone) : null
+  const wStats = ready ? computeReport(week, hourly.data!, daily.data!, daylight.data!, thresholds!, timeZone) : null
 
   return (
     <Frame>
@@ -132,7 +121,7 @@ function Reports({ sourceId, timeZone }: { sourceId: string; timeZone: string })
             </option>
           ))}
         </select>
-        <ThresholdPanel value={thresholds} onChange={saveThresholds} />
+        {shared.data && <ThresholdPanel inEffect={shared.data} organizationId={organization.id} owner={organization.role === 'owner'} />}
       </div>
       <p className={`${styles.small} ${styles.muted}`}>
         Counts are hourly readings (on-the-hour values), not measured time above a threshold. Day and night follow the climate computer’s sunrise and sunset.
@@ -144,8 +133,8 @@ function Reports({ sourceId, timeZone }: { sourceId: string; timeZone: string })
         <LoadingState />
       ) : (
         <div className={styles.reportGrid}>
-          <ReportCard title="Yesterday" subtitle={dayLabel(yesterday)} stats={yStats!} thresholds={thresholds} />
-          <ReportCard title="Last 7 Days" subtitle={`${dayLabel(week[0])} – ${dayLabel(yesterday)}`} stats={wStats!} thresholds={thresholds} />
+          <ReportCard title="Yesterday" subtitle={dayLabel(yesterday)} stats={yStats!} thresholds={thresholds!} />
+          <ReportCard title="Last 7 Days" subtitle={`${dayLabel(week[0])} – ${dayLabel(yesterday)}`} stats={wStats!} thresholds={thresholds!} />
         </div>
       )}
     </Frame>
@@ -208,43 +197,87 @@ function ReportCard({ title, subtitle, stats, thresholds }: { title: string; sub
   )
 }
 
-function ThresholdPanel({ value, onChange }: { value: Thresholds; onChange: (t: Thresholds) => void }) {
+const WHEN = new Intl.DateTimeFormat('en-CA', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
+/** The thresholds in effect for everyone; owners can change them (each change is kept). */
+function ThresholdPanel({ inEffect, organizationId, owner }: { inEffect: ReportThresholdsInEffect; organizationId: string; owner: boolean }) {
+  const t = inEffect.thresholds
+  const [draft, setDraft] = useState<Record<keyof Thresholds, string> | null>(null)
+  const [note, setNote] = useState('')
+  const save = useSaveReportThresholds(organizationId)
+  const history = useReportThresholdHistory(organizationId, owner && draft !== null)
+  const fmt = (v: number | null, unit: string) => (v === null ? 'not set' : `${v} ${unit}`)
+  const summary = [
+    `High temperature ${fmt(t.highTemp, '°C')}`,
+    `high RH ${fmt(t.highRh, '%')}`,
+    `low daytime RH ${fmt(t.lowDayRh, '%')}`,
+    `low temperature ${fmt(t.lowTemp, '°C')}`,
+    `low daytime CO₂ ${fmt(t.lowDayCo2, 'ppm')}`,
+  ].join(' · ')
+  const start = () => {
+    setDraft({ highTemp: String(t.highTemp), highRh: String(t.highRh), lowDayRh: String(t.lowDayRh), lowTemp: t.lowTemp === null ? '' : String(t.lowTemp), lowDayCo2: t.lowDayCo2 === null ? '' : String(t.lowDayCo2) })
+    setNote('')
+  }
+  const parsed: Thresholds | null = draft && (() => {
+    const req = (k: keyof Thresholds) => (draft[k].trim() === '' ? NaN : Number(draft[k]))
+    const opt = (k: keyof Thresholds) => (draft[k].trim() === '' ? null : Number(draft[k]))
+    const v = { highTemp: req('highTemp'), highRh: req('highRh'), lowDayRh: req('lowDayRh'), lowTemp: opt('lowTemp'), lowDayCo2: opt('lowDayCo2') }
+    const ok = [v.highTemp, v.highRh, v.lowDayRh].every(Number.isFinite) && (v.lowTemp === null || Number.isFinite(v.lowTemp)) && (v.lowDayCo2 === null || Number.isInteger(v.lowDayCo2))
+    return ok ? v : null
+  })()
   const field = (key: keyof Thresholds, label: string, unit: string, optional = false) => (
     <label className={styles.thresholdField}>
       <span>{label}</span>
-      <input
-        className="input"
-        type="number"
-        inputMode="decimal"
-        value={value[key] ?? ''}
-        placeholder={optional ? 'not set' : undefined}
-        onChange={(e) => {
-          const v = e.target.value.trim()
-          const num = v === '' ? null : Number(v)
-          if (num !== null && !Number.isFinite(num)) return
-          if (num === null && !optional) return
-          onChange({ ...value, [key]: num })
-        }}
-      />
+      <input className="input" type="number" inputMode="decimal" value={draft![key]} placeholder={optional ? 'not set' : undefined} onChange={(e) => setDraft({ ...draft!, [key]: e.target.value })} />
       <span className={styles.muted}>{unit}</span>
     </label>
   )
   return (
     <details className={styles.thresholds}>
       <summary className={styles.small}>Thresholds</summary>
-      <div className={styles.thresholdGrid}>
-        {field('highTemp', 'High temperature', '°C')}
-        {field('lowTemp', 'Low temperature', '°C', true)}
-        {field('highRh', 'High RH', '%')}
-        {field('lowDayRh', 'Low daytime RH', '%')}
-        {field('lowDayCo2', 'Low daytime CO₂', 'ppm', true)}
-      </div>
       <p className={`${styles.small} ${styles.muted}`}>
-        Saved on this device only. Low temperature and low CO₂ have no default: set them from your crop targets.{' '}
-        <button type="button" className="button" onClick={() => onChange(DEFAULT_THRESHOLDS)}>
-          Reset to defaults
-        </button>
+        {summary}.{' '}
+        {inEffect.source === 'default'
+          ? 'Defaults (no owner has changed them).'
+          : `Set ${WHEN.format(new Date(inEffect.recordedAt!))}${inEffect.note ? `: “${inEffect.note}”` : ''}.`}{' '}
+        Shared by everyone in the organization. Night-time CO₂ isn’t assessed; unset thresholds aren’t counted.
       </p>
+      {owner && draft === null && (
+        <button type="button" className="button" onClick={start}>
+          Change thresholds
+        </button>
+      )}
+      {!owner && <p className={`${styles.small} ${styles.muted}`}>Only an owner can change them.</p>}
+      {owner && draft !== null && (
+        <div>
+          <div className={styles.thresholdGrid}>
+            {field('highTemp', 'High temperature', '°C')}
+            {field('lowTemp', 'Low temperature', '°C', true)}
+            {field('highRh', 'High RH', '%')}
+            {field('lowDayRh', 'Low daytime RH', '%')}
+            {field('lowDayCo2', 'Low daytime CO₂', 'ppm', true)}
+          </div>
+          <input className="input" value={note} maxLength={500} placeholder="Reason for the change (optional, kept in the history)" onChange={(e) => setNote(e.target.value)} />
+          {save.error && <p className={`${styles.small} ${styles.partial}`}>Not saved: {save.error.message}</p>}
+          <div className={styles.controls}>
+            <button type="button" className="button button-primary" disabled={!parsed || save.isPending} onClick={() => parsed && save.mutate({ t: parsed, note }, { onSuccess: () => setDraft(null) })}>
+              {save.isPending ? 'Saving…' : 'Save for everyone'}
+            </button>
+            <button type="button" className="button" onClick={() => setDraft(null)} disabled={save.isPending}>
+              Cancel
+            </button>
+          </div>
+          {(history.data ?? []).length > 0 && (
+            <ul className={`${styles.small} ${styles.muted}`}>
+              {history.data!.map((h) => (
+                <li key={h.id}>
+                  {WHEN.format(new Date(h.recorded_at))}: {h.high_temp} °C · RH {h.high_rh}/{h.low_day_rh}% · low {h.low_temp ?? '—'} °C · CO₂ {h.low_day_co2 ?? '—'} ppm{h.note ? ` — “${h.note}”` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </details>
   )
 }

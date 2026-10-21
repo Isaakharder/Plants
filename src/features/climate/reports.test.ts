@@ -51,13 +51,15 @@ describe('Yesterday', () => {
 
   it('counts hourly readings at or above thresholds and says when', () => {
     expect(s.temperature).toMatchObject({ highReadings: 2, highDayReadings: 2, daysReachingHigh: 1, highRuns: [{ date: D, from: 13, to: 14, count: 2 }] })
-    expect(o.temperature[0]).toEqual({ tone: 'notable', text: 'Two hourly readings at or above 28 °C: 13:00–14:00 (two readings). The exact time above 28 °C isn’t measured; readings are on the hour.' })
+    expect(o.temperature[0]).toEqual({ tone: 'notable', text: 'Two hourly readings at or above 28 °C: 13:00–14:00. The exact time above 28 °C isn’t measured; readings are on the hour.' })
   })
 
   it('reports overnight high RH without claiming disease, and low daytime RH', () => {
     expect(s.rh).toMatchObject({ highNight: 4, highDay: 0, lowDay: 1, longestHigh: { count: 4, date: D, from: 0 } })
     expect(o.rh[0].text).toBe('RH exceeded 88% during 4 nighttime hourly readings. Overnight high humidity can favour condensation (a Botrytis risk factor); it doesn’t mean disease is present.')
     expect(o.rh.map((x) => x.text)).toContain('One daytime hourly reading below 70% RH.')
+    // Routine confirmations are left out: only exceptions and the averages.
+    expect(o.co2.map((x) => x.text)).toEqual(['Daytime CO₂ averaged 600 ppm (range 600–600 ppm).'])
   })
 
   it('uses the 23:00 finals for radiation and irrigation and relates them descriptively', () => {
@@ -86,6 +88,7 @@ describe('Last 7 Days', () => {
   it('reports recurring patterns: days reaching the high temperature, nights with high RH', () => {
     expect(o.temperature[0].text).toMatch(/^Three days of 7 reached 28 °C, with three hourly readings at or above it/)
     expect(o.rh[0].text).toMatch(/^RH exceeded 88% on 7 of 7 nights/)
+    expect(o.rh.map((x) => x.text)).toContain('Daytime RH fell below 70% on 7 of 7 days (7 hourly readings).')
   })
 
   it('adds up final radiation days only, never snapshots, and names the extremes', () => {
