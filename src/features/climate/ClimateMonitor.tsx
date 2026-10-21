@@ -16,7 +16,7 @@ import { useNow } from './useNow'
 import { todayIso } from '../../lib/dates'
 import { ClimateTabs } from './ClimateTabs'
 import { LINE_COLORS, localDate, missingWarning, sortZones, zoneName, type Assignment, type QualityWarning } from './model'
-import { VARIETY_METRICS, dayCell, weeklyClimate, type VarietyDay, type VarietyHour, type VarietyMetric } from './varietyClimate'
+import { VARIETY_METRICS, dayCell, pickVariety, weeklyClimate, type VarietyDay, type VarietyHour, type VarietyMetric } from './varietyClimate'
 import styles from './Climate.module.css'
 
 const RANGES = { '24h': 1, '7d': 7, '30d': 30 } as const
@@ -70,7 +70,13 @@ function Monitor({ sourceId, timeZone }: { sourceId: string; timeZone: string })
     const withZones = new Set((zoneUse.data ?? []).map((u) => u.crop_id))
     return sortCrops(crops.data ?? []).filter((c) => withZones.has(c.id))
   }, [crops.data, zoneUse.data])
-  const cropId = varieties.some((c) => c.id === params.get('crop')) ? params.get('crop')! : varieties[0]?.id
+  // Remembered per organization on this device (a convenience: the link still wins).
+  const memoryKey = `plants.climate.variety:${organization.id}`
+  const cropId = pickVariety(varieties, params.get('crop'), readRemembered(memoryKey))
+  const chooseVariety = (id: string) => {
+    writeRemembered(memoryKey, id)
+    set({ crop: id })
+  }
   const set = (patch: Record<string, string | null>) =>
     setParams(
       (p) => {
@@ -122,7 +128,7 @@ function Monitor({ sourceId, timeZone }: { sourceId: string; timeZone: string })
       </div>
 
       <div className={styles.controls}>
-        <select className={`input ${styles.compactSelect}`} value={cropId ?? ''} onChange={(e) => set({ crop: e.target.value })} aria-label="Variety">
+        <select className={`input ${styles.compactSelect}`} value={cropId ?? ''} onChange={(e) => chooseVariety(e.target.value)} aria-label="Variety">
           {varieties.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -211,29 +217,36 @@ function LatestNote({ status, end, nowH }: { status: { latest_hour: string | nul
   )
 }
 
+function readRemembered(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeRemembered(key: string, id: string) {
+  try {
+    localStorage.setItem(key, id)
+  } catch {
+    // Private browsing or storage blocked: the choice just isn't remembered.
+  }
+}
+
+/** One line: which zones the variety's readings combine, and how. */
 function VarietyZones({ assignments, label }: { assignments: Assignment[]; label: (id: string) => string }) {
   const today = todayIso()
   const current = assignments.filter((a) => a.valid_from <= today && (a.valid_until === null || a.valid_until > today))
   const weighted = current.length > 0 && current.every((a) => a.area_share !== null)
+  const names = current
+    .map((a) => label(a.zone_id) + (a.area_share !== null ? ` (${Math.round(Number(a.area_share) * 1000) / 10}%)` : ''))
+    .sort((x, y) => x.localeCompare(y, undefined, { numeric: true }))
   return (
-    <div className={styles.chips} aria-label="This variety’s zones">
-      {current.length === 0 ? (
-        <span className={styles.muted}>No zones today.</span>
-      ) : (
-        current.map((a) => (
-          <span key={a.zone_id} className={`${styles.chip} ${styles.chipStatic}`}>
-            {label(a.zone_id)}
-            {a.area_share !== null && <span className={styles.muted}>{Math.round(Number(a.area_share) * 1000) / 10}%</span>}
-          </span>
-        ))
-      )}
-      <span className={`${styles.small} ${styles.muted}`}>
-        {weighted
-          ? 'Combined by area share.'
-          : 'Combined as a plain mean: no zone areas are recorded. Add area shares in Settings › Climate to weight zones by area.'}{' '}
-        Assignments apply by date.
-      </span>
-    </div>
+    <p className={`${styles.small} ${styles.muted}`} aria-label="This variety’s zones">
+      {current.length === 0
+        ? 'No zones assigned today.'
+        : `Combined from ${names.join(', ')} · ${weighted ? 'weighted by area share' : 'equal weights (no zone areas recorded; area shares can be added in Settings › Climate)'}.`}
+    </p>
   )
 }
 
@@ -253,7 +266,8 @@ function Summary(props: { cropId: string | undefined; timeZone: string; end: num
   const dates = [...new Set(rows.map((r) => r.local_date))].sort().reverse()
   const byKey = new Map(rows.map((r) => [`${r.local_date}|${r.metric}`, r]))
   const weeks = useMemo(() => new Map(VARIETY_METRICS.map((m) => [m.key, weeklyClimate(rows, m.key)])), [rows])
-  const weekKeys = [...new Set([...weeks.values()].flatMap((w) => w.map((x) => x.key)))].sort().reverse()
+  // Weeks with at least one value (weeks before any climate data aren't listed).
+  const weekKeys = [...new Set([...weeks.values()].flatMap((w) => w.filter((x) => x.value !== null).map((x) => x.key)))].sort().reverse()
 
   return (
     <div className={styles.card}>
@@ -270,8 +284,8 @@ function Summary(props: { cropId: string | undefined; timeZone: string; end: num
       </div>
       <p className={`${styles.small} ${styles.muted}`}>
         {summary === 'daily'
-          ? 'Temperature, humidity and CO₂: mean of the day’s hours. Radiation and irrigation: the 23:00 reading (never a sum of the day’s readings); “so far” and “incomplete” mark days without it.'
-          : 'Temperature, humidity and CO₂: mean of the week’s hours. Radiation and irrigation: total of the week’s final days (n/7 shown).'}{' '}
+          ? 'Temperature, RH and CO₂: mean of the day’s hours. Radiation and irrigation: the 23:00 reading (never a sum of the day’s readings); “so far” and “incomplete” mark days without it.'
+          : 'Temperature, RH and CO₂: mean of the week’s hours. Radiation and irrigation: total of the week’s final days (n/7 shown).'}{' '}
         These are the values projection climate inputs use.
       </p>
       {daily.error ? (

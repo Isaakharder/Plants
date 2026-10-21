@@ -31,3 +31,15 @@ describe('weekly climate for a variety', () => {
     expect(weeklyClimate(days, 'irrigation_cumulative')[0]).toMatchObject({ value: 5600, finalDays: 7, complete: true })
   })
 })
+
+describe('the variety shown', () => {
+  const v = [{ id: 'c', name: 'Cadalora' }, { id: 'm', name: 'Mathieu' }, { id: 's', name: 'Silverstone' }]
+  it('follows the link, then the remembered choice, then Mathieu', async () => {
+    const { pickVariety } = await import('./varietyClimate')
+    expect(pickVariety(v, 's', 'c')).toBe('s')
+    expect(pickVariety(v, null, 'c')).toBe('c')
+    expect(pickVariety(v, 'gone', 'also-gone')).toBe('m')
+    expect(pickVariety([{ id: 'c', name: 'Cadalora' }], null, null)).toBe('c')
+    expect(pickVariety([], null, null)).toBeUndefined()
+  })
+})

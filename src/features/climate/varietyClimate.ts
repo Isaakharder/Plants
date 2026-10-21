@@ -8,13 +8,22 @@
 
 export type VarietyMetric = 'air_temperature' | 'relative_humidity' | 'co2' | 'radiation_sum' | 'irrigation_cumulative'
 
+/** The five measurements, in the order the Climate page shows them. */
 export const VARIETY_METRICS: { key: VarietyMetric; label: string; unit: string; decimals: number; kind: 'hourly' | 'running' }[] = [
   { key: 'air_temperature', label: 'Temperature', unit: '°C', decimals: 1, kind: 'hourly' },
-  { key: 'relative_humidity', label: 'Humidity', unit: '%', decimals: 0, kind: 'hourly' },
+  { key: 'relative_humidity', label: 'RH', unit: '%', decimals: 0, kind: 'hourly' },
   { key: 'co2', label: 'CO₂', unit: 'ppm', decimals: 0, kind: 'hourly' },
-  { key: 'radiation_sum', label: 'Radiation sum', unit: 'J/cm²', decimals: 1, kind: 'running' },
   { key: 'irrigation_cumulative', label: 'Irrigation', unit: 'ml/dripper', decimals: 0, kind: 'running' },
+  { key: 'radiation_sum', label: 'Radiation', unit: 'J/cm²', decimals: 1, kind: 'running' },
 ]
+
+/** The variety shown: the one in the link, else the one last chosen on this device, else Mathieu, else the first. */
+export function pickVariety(varieties: readonly { id: string; name: string }[], fromLink: string | null, remembered: string | null): string | undefined {
+  const has = (id: string | null) => id !== null && varieties.some((v) => v.id === id)
+  if (has(fromLink)) return fromLink!
+  if (has(remembered)) return remembered!
+  return (varieties.find((v) => v.name.trim().toLowerCase() === 'mathieu') ?? varieties[0])?.id
+}
 
 /** One combined hourly value (crop_climate_hourly). value null: not enough zones had a usable reading. */
 export type VarietyHour = {
