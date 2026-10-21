@@ -1028,7 +1028,7 @@ export type Database = {
         Args: { p_source_id: string; p_from: string; p_to: string; p_zone_ids?: string[] | null }
         Returns: {
           local_date: string
-          metric: 'radiation_sum' | 'drain_percentage' | 'irrigation_cumulative'
+          metric: 'radiation_sum' | 'irrigation_cumulative'
           zone_id: string
           final_hour: number
           final_value: number | null

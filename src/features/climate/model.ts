@@ -12,7 +12,7 @@ export const LINE_COLORS = ['#2f6b3f', '#c4362c', '#1f6fb2', '#e07a1f', '#7a4bb5
 
 /**
  * The hourly measurements, per zone (daily mean of valid hours). The other
- * three of the six measurements are running totals: see dailyTotals.ts.
+ * two of the five measurements are running totals: see dailyTotals.ts.
  */
 export type ChartMetric = 'air_temperature' | 'relative_humidity' | 'co2'
 
@@ -23,13 +23,13 @@ export const CHART_METRICS: { key: ChartMetric; label: string; unit: string; dec
 ]
 
 /**
- * Whether a stored reading is one of the six measurements Plants uses (as
- * climate_is_measurement() in the database): radiation and drain only from
- * column B ("Zone 1"). Older files also hold EC, pH, group activation time and
- * Zone 15's radiation and drain: kept as received, never used.
+ * Whether a stored reading is one of the five measurements Plants uses (as
+ * climate_is_measurement() in the database): radiation only from column B
+ * ("Zone 1"). Older files also hold EC, pH, drain, group activation time and
+ * Zone 15's radiation: kept as received, never used.
  */
 export function isUsedMeasurement(metric: string, zoneLabel: string): boolean {
-  if (metric === 'radiation_sum' || metric === 'drain_percentage') return zoneLabel === 'Zone 1'
+  if (metric === 'radiation_sum') return zoneLabel === 'Zone 1'
   return metric === 'air_temperature' || metric === 'relative_humidity' || metric === 'co2' || metric === 'irrigation_cumulative'
 }
 

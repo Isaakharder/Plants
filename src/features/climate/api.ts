@@ -108,7 +108,7 @@ export function useDaily(sourceId: string | undefined, zoneIds: string[], metric
   })
 }
 
-/** Daily values of the running totals (radiation and drain greenhouse-wide; irrigation for these zones). */
+/** Daily values of the running totals (radiation greenhouse-wide; irrigation for these zones). */
 export function useDailyTotals(sourceId: string | undefined, fromDate: string, toDate: string, irrigationZoneIds: string[], enabled = true) {
   return useQuery({
     queryKey: climateKeys.series('dailyTotals', sourceId, irrigationZoneIds, fromDate, toDate),

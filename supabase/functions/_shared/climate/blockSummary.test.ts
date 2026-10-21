@@ -33,19 +33,18 @@ describe('Block Summary parser: a 17 Oct 10:00 export (synthetic values, real st
     expect(p.meta.headerLabel).toBe('Block heating')
   })
 
-  it('reads only the six measurements, with exact labels, units and text', () => {
+  it('reads only the five measurements, with exact labels, units and text', () => {
     const count = (metric: string) => p.readings.filter((r) => r.metric === metric).length
     expect(count('air_temperature')).toBe(22)
     expect(count('relative_humidity')).toBe(22)
     expect(count('co2')).toBe(22)
     expect(count('irrigation_cumulative')).toBe(22)
-    // Greenhouse-wide, from column B only (Zone 15 repeats radiation and has its own drain figure).
+    // Greenhouse-wide, from column B only (Zone 15 repeats it).
     expect(p.readings.filter((r) => r.metric === 'radiation_sum').map((r) => [r.zone, r.raw_text])).toEqual([['Zone 1', '96.5']])
-    expect(p.readings.filter((r) => r.metric === 'drain_percentage').map((r) => r.zone)).toEqual(['Zone 1'])
-    expect(p.readings).toHaveLength(22 * 4 + 1 + 1)
-    expect(new Set(p.readings.map((r) => r.metric))).toEqual(new Set(['air_temperature', 'relative_humidity', 'co2', 'irrigation_cumulative', 'radiation_sum', 'drain_percentage']))
-    // EC, pH and group activation time stay in the stored file, not as readings, and aren't warnings.
-    expect(p.meta.notReadRows).toEqual(['Average EC [mS/cm]', 'Average pH', 'Group activation time [hh:mm]'])
+    expect(p.readings).toHaveLength(22 * 4 + 1)
+    expect(new Set(p.readings.map((r) => r.metric))).toEqual(new Set(['air_temperature', 'relative_humidity', 'co2', 'irrigation_cumulative', 'radiation_sum']))
+    // EC, pH, drain (GrowLink measures it) and group activation time stay in the stored file, not as readings, and aren't warnings.
+    expect(p.meta.notReadRows).toEqual(['Average EC [mS/cm]', 'Average pH', 'Cumulative drain water percentage [%]', 'Group activation time [hh:mm]'])
     expect(p.meta.unknownRows).toEqual([])
     expect(p.warnings).toEqual([])
     const t1 = p.readings.find((r) => r.zone === 'Zone 1' && r.metric === 'air_temperature')!
@@ -263,18 +262,18 @@ const OCT21 = 'Block Summary_20261021_130002.csv'
 describe.skipIf(!REAL || !readdirSync(REAL).includes(OCT21))('Block Summary parser: the real 21 Oct 13:00 export (local only)', () => {
   const p = REAL ? parseBlockSummary(new Uint8Array(readFileSync(join(REAL, OCT21))), OCT21) : (null as never)
   const one = (metric: string, zone: string) => p.readings.find((r) => r.metric === metric && r.zone === zone)
-  it('reads the six measurements from the documented cells', () => {
+  it('reads the five measurements from the documented cells, and not drain (B10)', () => {
     expect(p.encoding).toBe('windows-1252')
     expect(p.status).toBe('parsed')
     expect(p.time).toMatchObject({ hourLocal: '2026-10-21 13:00:00', systemLocal: '2026-10-21 13:00:00', clockOffsetMinutes: 0 })
     expect(one('radiation_sum', 'Zone 1')).toMatchObject({ row_label: 'Radiation sum [J/cm²]', raw_text: '736.3', unit: 'J/cm²' })
-    expect(one('drain_percentage', 'Zone 1')).toMatchObject({ row_label: 'Cumulative drain water percentage [%]', raw_text: '38.9' })
-    expect(p.readings.filter((r) => r.metric === 'radiation_sum' || r.metric === 'drain_percentage')).toHaveLength(2)
+    expect(p.readings.filter((r) => r.metric === 'radiation_sum')).toHaveLength(1)
+    expect(p.readings.some((r) => r.row_label.startsWith('Cumulative drain'))).toBe(false)
     expect(p.readings.filter((r) => r.metric === 'irrigation_cumulative').map((r) => r.raw_text).slice(0, 3)).toEqual(['758', '813', '758'])
     expect(one('irrigation_cumulative', 'Zone 22')!.raw_text).toBe('713')
     expect(one('air_temperature', 'Zone 22')).toMatchObject({ row_label: 'Air temperature [°C]', raw_text: '27.0' })
     expect(one('co2', 'Zone 21')!.raw_text).toBe('799')
-    expect(p.readings.some((r) => /EC|pH|activation/.test(r.row_label))).toBe(false)
-    expect(p.readings).toHaveLength(22 * 4 + 2)
+    expect(p.readings.some((r) => /EC|pH|drain|activation/.test(r.row_label))).toBe(false)
+    expect(p.readings).toHaveLength(22 * 4 + 1)
   })
 })

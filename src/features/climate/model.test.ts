@@ -135,13 +135,12 @@ describe('chart axis', () => {
   })
 })
 
-describe('the six measurements', () => {
-  it('uses radiation and drain from column B (Zone 1) only, and no EC or pH', () => {
+describe('the five measurements', () => {
+  it('uses radiation from column B (Zone 1) only, and no drain, EC or pH', () => {
     const { isUsedMeasurement } = model
     expect(['air_temperature', 'relative_humidity', 'co2', 'irrigation_cumulative'].every((m) => isUsedMeasurement(m, 'Zone 7'))).toBe(true)
     expect(isUsedMeasurement('radiation_sum', 'Zone 1')).toBe(true)
     expect(isUsedMeasurement('radiation_sum', 'Zone 15')).toBe(false)
-    expect(isUsedMeasurement('drain_percentage', 'Zone 15')).toBe(false)
-    expect(['ec', 'ph', 'group_activation_time', 'unknown'].some((m) => isUsedMeasurement(m, 'Zone 1'))).toBe(false)
+    expect(['drain_percentage', 'ec', 'ph', 'group_activation_time', 'unknown'].some((m) => isUsedMeasurement(m, 'Zone 1'))).toBe(false)
   })
 })

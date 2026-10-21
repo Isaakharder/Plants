@@ -1,9 +1,8 @@
-// Daily values of the running totals (climate_daily_totals): radiation sum and
-// drain % for the whole greenhouse, cumulative irrigation per zone. A day's
-// value is its final file's reading (radiation and irrigation 23:00, drain
-// 22:00); running totals are never summed or averaged over the day.
+// Daily values of the running totals (climate_daily_totals): radiation sum for
+// the whole greenhouse, cumulative irrigation per zone. A day's value is its
+// 23:00 file's reading; running totals are never summed or averaged over the day.
 
-export type TotalMetric = 'radiation_sum' | 'drain_percentage' | 'irrigation_cumulative'
+export type TotalMetric = 'radiation_sum' | 'irrigation_cumulative'
 
 export type DailyTotalRow = {
   local_date: string
@@ -18,10 +17,9 @@ export type DailyTotalRow = {
   problems: string[]
 }
 
-export const TOTAL_METRICS: { key: TotalMetric; label: string; unit: string; decimals: number; greenhouse: boolean; weekly: 'sum' | 'mean' }[] = [
-  { key: 'radiation_sum', label: 'Radiation sum', unit: 'J/cm²', decimals: 1, greenhouse: true, weekly: 'sum' },
-  { key: 'irrigation_cumulative', label: 'Irrigation', unit: 'ml/dripper', decimals: 0, greenhouse: false, weekly: 'sum' },
-  { key: 'drain_percentage', label: 'Drain', unit: '%', decimals: 1, greenhouse: true, weekly: 'mean' },
+export const TOTAL_METRICS: { key: TotalMetric; label: string; unit: string; decimals: number; greenhouse: boolean }[] = [
+  { key: 'radiation_sum', label: 'Radiation sum', unit: 'J/cm²', decimals: 1, greenhouse: true },
+  { key: 'irrigation_cumulative', label: 'Irrigation', unit: 'ml/dripper', decimals: 0, greenhouse: false },
 ]
 
 const hh = (h: number) => `${String(h).padStart(2, '0')}:00`
@@ -58,8 +56,8 @@ function isoWeekOf(date: string): { year: number; week: number } {
 
 export type WeeklyTotal = { key: string; label: string; value: number | null; finalDays: number; days: number }
 
-/** Per ISO week: the sum (radiation, irrigation) or mean (drain %) of its final days only. */
-export function weeklyTotals(rows: readonly DailyTotalRow[], kind: 'sum' | 'mean'): WeeklyTotal[] {
+/** Per ISO week: the sum of its final days only (a week's radiation or irrigation). */
+export function weeklyTotals(rows: readonly DailyTotalRow[]): WeeklyTotal[] {
   const weeks = new Map<string, WeeklyTotal & { sum: number }>()
   for (const r of rows) {
     const w = isoWeekOf(r.local_date)
@@ -74,5 +72,5 @@ export function weeklyTotals(rows: readonly DailyTotalRow[], kind: 'sum' | 'mean
   }
   return [...weeks.values()]
     .sort((a, b) => b.key.localeCompare(a.key))
-    .map(({ sum, ...w }) => ({ ...w, value: w.finalDays === 0 ? null : kind === 'sum' ? sum : sum / w.finalDays }))
+    .map(({ sum, ...w }) => ({ ...w, value: w.finalDays === 0 ? null : sum }))
 }

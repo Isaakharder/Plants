@@ -35,12 +35,12 @@ export const MAX_OFF_HOUR_MINUTES = 10
  */
 export const SYSTEM_TIME_TOLERANCE_MINUTES = 15
 
-// Since parser /3 only six measurements are read (user decision, 2026-10-21):
-// temperature, RH, CO₂ and cumulative irrigation per zone; radiation sum and
-// cumulative drain % greenhouse-wide, from the first value column (B, which
-// the header names "Zone 1"). Other rows (EC, pH, group activation time, …)
-// stay in the stored original file but are not readings.
-export type Metric = 'air_temperature' | 'relative_humidity' | 'co2' | 'radiation_sum' | 'irrigation_cumulative' | 'drain_percentage'
+// Since parser /3 only five measurements are read (user decisions, 2026-10-21):
+// temperature, RH, CO₂ and cumulative irrigation per zone; radiation sum
+// greenhouse-wide, from the first value column (B, which the header names
+// "Zone 1"). Other rows (EC, pH, cumulative drain — GrowLink measures drain —,
+// group activation time, …) stay in the stored original file but are not readings.
+export type Metric = 'air_temperature' | 'relative_humidity' | 'co2' | 'radiation_sum' | 'irrigation_cumulative'
 
 type MetricDef = { metric: Metric; unitRaw: string | null; unit: string | null; min?: number; max?: number; greenhouse?: boolean }
 
@@ -53,14 +53,12 @@ const METRICS: Record<string, MetricDef> = {
   'radiation sum': { metric: 'radiation_sum', unitRaw: 'J/cm²', unit: 'J/cm²', min: 0, max: 5000, greenhouse: true },
   // Running totals since midnight, per zone.
   'cumulative irrigation (dripper)': { metric: 'irrigation_cumulative', unitRaw: 'ml/dripp', unit: 'ml/dripper', min: 0, max: 100_000 },
-  // A running daily percentage, greenhouse-wide.
-  'cumulative drain water percentage': { metric: 'drain_percentage', unitRaw: '%', unit: '%', min: 0, max: 100, greenhouse: true },
 }
 
 /** Rows the export always has that are deliberately not read. */
-const NOT_READ = new Set(['average ec', 'average ph', 'group activation time'])
+const NOT_READ = new Set(['average ec', 'average ph', 'cumulative drain water percentage', 'group activation time'])
 
-/** The greenhouse-wide column: the first value column (B), headed "Zone 1". */
+/** The greenhouse-wide column (radiation): the first value column (B), headed "Zone 1". */
 export const GREENHOUSE_COLUMN = 1
 export const GREENHOUSE_ZONE_LABEL = 'Zone 1'
 
@@ -297,7 +295,7 @@ export function parseBlockSummary(bytes: Uint8Array, filename: string, options: 
     if (rows[headerIdx][GREENHOUSE_COLUMN] !== GREENHOUSE_ZONE_LABEL) {
       quarantine(
         'unexpected_layout',
-        `Column B is "${rows[headerIdx][GREENHOUSE_COLUMN] ?? ''}", not "${GREENHOUSE_ZONE_LABEL}": the greenhouse-wide radiation and drain can't be located safely.`,
+        `Column B is "${rows[headerIdx][GREENHOUSE_COLUMN] ?? ''}", not "${GREENHOUSE_ZONE_LABEL}": the greenhouse-wide radiation can't be located safely.`,
       )
     }
   }
@@ -340,7 +338,7 @@ export function parseBlockSummary(bytes: Uint8Array, filename: string, options: 
     }
     const unitMatches = (def.unitRaw ?? null) === (unitRaw ?? null)
     for (const z of zones) {
-      // Greenhouse-wide values come from column B only (Zone 15 repeats radiation and has a different drain figure).
+      // Greenhouse-wide radiation comes from column B only (Zone 15 repeats it).
       if (def.greenhouse && z.column !== GREENHOUSE_COLUMN) continue
       const raw = r[z.column] ?? ''
       if (raw === '') continue // blank: not reported for this zone

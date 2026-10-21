@@ -1,11 +1,11 @@
--- 20261031000000_climate_six_measurements: only the six measurements are
--- used; daily values of running totals come from the final hour's file
--- (radiation 23:00, drain 22:00, irrigation 23:00), never from sums or means;
--- restarts after midnight are handled; only files in effect count; older
--- files' readings stay stored; duplicates are still recognised.
+-- 20261031000000_climate_five_measurements: only the five measurements are
+-- used (no EC, pH or drain); daily values of running totals come from the
+-- 23:00 file (radiation, irrigation), never from sums or means; radiation's
+-- 08:00 restart is handled; only files in effect count; older files' readings
+-- (drain included) stay stored; duplicates are still recognised.
 --
 -- Runs inside a transaction that is always rolled back.
--- Prints {"result": "climate_six_measurements tests passed"} on success.
+-- Prints {"result": "climate_five_measurements tests passed"} on success.
 
 begin;
 
@@ -18,7 +18,7 @@ insert into public.climate_sources (id, organization_id, name) values
   ('aaaaaaaa-0000-4000-8000-0000000c4501', 'aaaaaaaa-0000-4000-8000-0000000c40a0', 'Synopta');
 
 -- One hourly export at a Toronto wall-clock time, shaped like a parser /2
--- result (it still carries EC, pH, and Zone 15's radiation and drain).
+-- result (it still carries EC, pH, drain, and Zone 15's radiation).
 create function pg_temp.parsed(p_local timestamp, rad text, drain1 text, drain15 text, irr1 text, irr2 text, temp1 text) returns jsonb language sql as $$
   select jsonb_build_object(
     'parserVersion', 'synopta-block-summary/2', 'status', 'parsed', 'problems', '[]'::jsonb, 'warnings', '[]'::jsonb,
@@ -49,9 +49,9 @@ grant all on t to authenticated, service_role;
 
 -- 10 Oct 23:00 (yesterday's totals), all of 11 Oct, and 12 Oct 00:00–10:00 (no 22:00/23:00).
 --   radiation: 500 held 00–07, restarts 08:00, rises to 342.9 by 18:00, held to 23:00 (and overnight)
---   drain Zone 1: yesterday's 35.8 still at 00:00, restarts 01:00, 48.0 at 22:00, 48.1 at 23:00
---   drain Zone 15: a different figure (ignored)
+--   drain (stored by the old parser, never used): Zone 1 and Zone 15 figures
 --   irrigation: 0 from 00:00, rising from 09:00; Zone 1 ends at 871, Zone 2 at 900
+--   temperature differs every hour (as real files do), so no two hours have the same readings
 set local role service_role;
 do $$
 declare
@@ -69,23 +69,24 @@ begin
   for h in 0..10 loop
     rad := case when h < 8 then '342.9' else ((h - 7) * 5)::text || '.0' end;
     d1 := case when h = 0 then '48.1' else (h * 3)::text || '.0' end;
-    perform pg_temp.ingest('2026-10-12_' || h, pg_temp.parsed(('2026-10-12'::timestamp + make_interval(hours => h)), rad, d1, '1.0', case when h < 9 then '0' else '50' end, '0', '19.0'));
+    perform pg_temp.ingest('2026-10-12_' || h, pg_temp.parsed(('2026-10-12'::timestamp + make_interval(hours => h)), rad, d1, '1.0', case when h < 9 then '0' else '50' end, '0', (19 + h / 10.0)::numeric(4,1)::text));
   end loop;
 end $$;
 reset role;
 
 -- ---------------------------------------------------------------------------
--- Only the six measurements are in effect; the other stored readings remain.
+-- Only the five measurements are in effect; the other stored readings (drain included) remain.
 -- ---------------------------------------------------------------------------
 do $$
 begin
-  if exists (select 1 from public.climate_readings_active where metric in ('ec', 'ph')) then raise exception 'FAIL: EC/pH in effect'; end if;
+  if exists (select 1 from public.climate_readings_active where metric in ('ec', 'ph', 'drain_percentage')) then raise exception 'FAIL: EC/pH/drain in effect'; end if;
   if exists (select 1 from public.climate_readings_active a join public.climate_zones z on z.id = a.zone_id
-              where a.metric in ('radiation_sum', 'drain_percentage') and z.source_label <> 'Zone 1') then
-    raise exception 'FAIL: Zone 15 radiation/drain in effect';
+              where a.metric = 'radiation_sum' and z.source_label <> 'Zone 1') then
+    raise exception 'FAIL: Zone 15 radiation in effect';
   end if;
-  -- 36 files × (2 temperature + 1 radiation + 1 drain + 2 irrigation) in effect; all 10 readings per file still stored.
-  if (select count(*) from public.climate_readings_active) <> 36 * 6 or (select count(*) from public.climate_readings) <> 36 * 10 then
+  if (select count(*) from public.climate_readings where metric = 'drain_percentage') <> 36 * 2 then raise exception 'FAIL: stored drain readings lost'; end if;
+  -- 36 files × (2 temperature + 1 radiation + 2 irrigation) in effect; all 10 readings per file still stored.
+  if (select count(*) from public.climate_readings_active) <> 36 * 5 or (select count(*) from public.climate_readings) <> 36 * 10 then
     raise exception 'FAIL: % in effect, % stored', (select count(*) from public.climate_readings_active), (select count(*) from public.climate_readings);
   end if;
 end $$;
@@ -107,9 +108,8 @@ begin
   if r.zone_id <> z1 or r.final_hour <> 23 or r.final_value <> 342.9 or r.status <> 'final' or r.restart_hour <> 8 or r.problems <> '{}' then
     raise exception 'FAIL: radiation 11 Oct %', r;
   end if;
-  -- 11 Oct drain: the 22:00 reading (48.0), not 23:00 (48.1), not a mean; 00:00 still held 10 Oct's figure, restart at 01:00.
-  select * into r from public.climate_daily_totals(src, '2026-10-11', '2026-10-13') where local_date = '2026-10-11' and metric = 'drain_percentage';
-  if r.final_value <> 48.0 or r.final_hour <> 22 or r.status <> 'final' or r.restart_hour <> 1 then raise exception 'FAIL: drain 11 Oct %', r; end if;
+  -- No drain at all (GrowLink measures drain).
+  if exists (select 1 from public.climate_daily_totals(src, '2026-10-10', '2026-10-13') where metric = 'drain_percentage') then raise exception 'FAIL: drain in daily totals'; end if;
   -- 11 Oct irrigation per zone: each zone's 23:00 reading.
   if (select string_agg(final_value::text || ':' || status, ',' order by zone_id = z1 desc)
         from public.climate_daily_totals(src, '2026-10-11', '2026-10-11') where metric = 'irrigation_cumulative') <> '871:final,900:final' then
@@ -122,8 +122,9 @@ begin
   if r.final_value is not null or r.status <> 'incomplete' or r.running_value <> 15.0 or r.running_hour <> 10 or r.restart_hour <> 8 then
     raise exception 'FAIL: radiation 12 Oct %', r;
   end if;
-  select * into r from public.climate_daily_totals(src, '2026-10-11', '2026-10-13') where local_date = '2026-10-12' and metric = 'drain_percentage';
-  if r.status <> 'incomplete' or r.running_value <> 30.0 or r.restart_hour <> 1 then raise exception 'FAIL: drain 12 Oct %', r; end if;
+  -- 12 Oct irrigation (no 23:00 file): incomplete, running 50 since the 00:00 restart.
+  select * into r from public.climate_daily_totals(src, '2026-10-12', '2026-10-12') where metric = 'irrigation_cumulative' and zone_id = z1;
+  if r.status <> 'incomplete' or r.running_value <> 50 or r.running_hour <> 10 or r.restart_hour <> 0 then raise exception 'FAIL: irrigation 12 Oct %', r; end if;
   -- 13 Oct: no file at all.
   if (select status from public.climate_daily_totals(src, '2026-10-11', '2026-10-13') where local_date = '2026-10-13' and metric = 'radiation_sum') <> 'no_data' then
     raise exception 'FAIL: 13 Oct';
@@ -144,7 +145,7 @@ begin
 
   -- climate_daily: means of the hourly measurements only; running totals, EC and pH get nothing.
   if public.climate_daily(src, array[z1, z2], array['radiation_sum', 'drain_percentage', 'irrigation_cumulative', 'ec', 'ph'], '2026-10-11', '2026-10-11') <> '[]'::jsonb then
-    raise exception 'FAIL: climate_daily summarised a running total or EC/pH';
+    raise exception 'FAIL: climate_daily summarised a running total, drain or EC/pH';
   end if;
   if (select e->'days'->0->>1 from jsonb_array_elements(public.climate_daily(src, array[z2], array['air_temperature'], '2026-10-11', '2026-10-11')) e) <> '24' then
     raise exception 'FAIL: daily temperature';
@@ -181,5 +182,5 @@ begin
 end $$;
 reset role;
 
-select '{"result": "climate_six_measurements tests passed"}';
+select '{"result": "climate_five_measurements tests passed"}';
 rollback;

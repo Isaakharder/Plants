@@ -1,23 +1,20 @@
--- Climate: six measurements, and daily values from running totals
+-- Climate: five measurements, and daily values from running totals
 --
--- Requested 2026-10-21. Plants now uses only six measurements from the
--- Ridder Synopta Block Summary export:
+-- Requested 2026-10-21 (drain dropped the same day: GrowLink measures drain
+-- more accurately). Plants now uses only five measurements from the Ridder
+-- Synopta Block Summary export:
 --   air temperature, RH, CO₂             per zone, hourly; daily mean of valid hours
---   cumulative irrigation (ml/dripper)   per zone, running total since midnight;
---                                        the day's value is the 23:00 reading
+--   cumulative irrigation (ml/dripper)   per zone (row 9), running total since
+--                                        midnight; the day's value is the 23:00 reading
 --   radiation sum (J/cm²)                greenhouse-wide (cell B6, column B "Zone 1");
 --                                        the day's value is the 23:00 reading
---   cumulative drain (%)                 greenhouse-wide (cell B10, column B);
---                                        the day's value is the 22:00 reading
--- Running totals are never summed or averaged; without the final file a day
+-- Running totals are never summed or averaged; without the 23:00 file a day
 -- is "running" (today) or "incomplete" (past).
 --
 -- Conventions confirmed in production (read-only, 2026-10-21, 272 files):
 --   * every file has the same header, Zone 1 … Zone 22 in columns B … W;
 --   * radiation does NOT restart at midnight: 00:00–07:00 hold the previous
 --     day's total and it restarts at 08:00 (all 12 days); Zone 15 repeats it;
---   * drain restarts at 00:00 or 01:00 (the 00:00 file can still hold the
---     previous day); Zone 15 has a different drain figure (not used);
 --   * irrigation restarts at 00:00 in every zone and its 23:00 reading is the
 --     day's maximum on all 242 zone-days that have one;
 --   * files are named for the whole hour; System time is within a minute.
@@ -25,17 +22,17 @@
 -- first fall of the counter on that date); earlier readings of the date
 -- belong to the previous day.
 --
--- Original records are untouched: readings of other rows (EC, pH, group
--- activation time) and Zone 15's radiation and drain stay in climate_readings
--- and in the stored files; they are left out of climate_readings_active, which
--- every calculation reads. Nothing is stored for daily values: they are read
--- from the active files, so history is corrected as soon as this is deployed.
--- Duplicate protection keeps working for older files: identical bytes as
--- before, and a second fingerprint (version 2, the six measurements only) is
--- added for every stored file, by insert.
+-- Original records are untouched: readings of other rows (EC, pH, cumulative
+-- drain, group activation time) and Zone 15's radiation stay in
+-- climate_readings and in the stored files; they are left out of
+-- climate_readings_active, which every calculation reads. Nothing is stored
+-- for daily values: they are read from the active files, so history is
+-- corrected as soon as this is deployed. Duplicate protection keeps working
+-- for older files: identical bytes as before, and a second fingerprint
+-- (version 2, the five measurements only) is added for every stored file, by insert.
 
 -- ---------------------------------------------------------------------------
--- The six measurements
+-- The five measurements
 -- ---------------------------------------------------------------------------
 
 create or replace function public.climate_is_measurement(p_metric text, p_zone_label text)
@@ -45,10 +42,10 @@ immutable
 set search_path = ''
 as $$
   select p_metric in ('air_temperature', 'relative_humidity', 'co2', 'irrigation_cumulative')
-      or (p_metric in ('radiation_sum', 'drain_percentage') and p_zone_label = 'Zone 1')
+      or (p_metric = 'radiation_sum' and p_zone_label = 'Zone 1')
 $$;
 
--- Same columns as before; only the six measurements of each hour's file in effect.
+-- Same columns as before; only the five measurements of each hour's file in effect.
 create or replace view public.climate_readings_active
 with (security_invoker = true) as
   select r.*
@@ -70,7 +67,7 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
--- Fingerprint version 2: the six measurements only
+-- Fingerprint version 2: the five measurements only
 -- ---------------------------------------------------------------------------
 
 create or replace function public.climate_measurements_fingerprint(p_readings jsonb)
@@ -92,7 +89,7 @@ alter table public.climate_file_contents alter column fingerprint_version drop d
 drop index public.climate_file_contents_source_content_idx;
 create index climate_file_contents_source_content_idx on public.climate_file_contents (source_id, fingerprint_version, content_sha256);
 comment on column public.climate_file_contents.fingerprint_version is
-  '1: every reading of the file (20261030); 2: the six measurements only (20261031), used for duplicates from then on.';
+  '1: every reading of the file (20261030); 2: the five measurements only (20261031), used for duplicates from then on.';
 
 -- Version 2 for every stored file with readings (inserts only).
 insert into public.climate_file_contents (file_id, fingerprint_version, organization_id, source_id, hour_utc, content_sha256, readings)
@@ -382,9 +379,9 @@ $$;
 -- ---------------------------------------------------------------------------
 
 -- Per local date in [p_from, p_to]:
---   radiation_sum, drain_percentage   greenhouse-wide (zone_id = column B's zone)
---   irrigation_cumulative             per zone in p_zone_ids (null: every zone)
--- final_value: the reading of the final hour (23:00; drain 22:00) when that file
+--   radiation_sum            greenhouse-wide (zone_id = column B's zone)
+--   irrigation_cumulative    per zone in p_zone_ids (null: every zone)
+-- final_value: the reading of the final hour (23:00) when that file
 -- is in effect. status: final | running (today, final hour not passed) |
 -- incomplete | no_data. running_value / running_hour: the latest reading after
 -- the day's restart. restart_hour: when the counter restarted that day.
@@ -412,7 +409,6 @@ as $$
   ),
   series(metric, zone_id, final_hour) as (
     select 'radiation_sum', (select gw from src), 23
-    union all select 'drain_percentage', (select gw from src), 22
     union all select 'irrigation_cumulative', z.id, 23
       from public.climate_zones z
      where z.source_id = p_source_id and (p_zone_ids is null or z.id = any (p_zone_ids))

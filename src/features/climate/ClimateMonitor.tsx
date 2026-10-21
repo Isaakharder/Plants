@@ -127,7 +127,7 @@ function Monitor({ sourceId, timeZone }: { sourceId: string; timeZone: string })
   const seriesError = mode === 'zones' ? zoneSeries.error : cropSeries.error
   const seriesPending = mode === 'zones' ? zoneSeries.isPending && zoneIds.length > 0 : cropSeries.isPending && Boolean(cropId)
   const assignments: Assignment[] = useMemo(() => (cropZones.data ?? []).filter((a) => a.superseded_at === null), [cropZones.data])
-  // Radiation and drain: column B ("Zone 1"), shared by every zone and planting. Irrigation: the zones shown.
+  // Radiation: column B ("Zone 1"), shared by every zone and planting. Irrigation: the zones shown.
   const greenhouseZoneId = zones.find((z) => z.source_label === 'Zone 1')?.id
   const irrigationZoneIds =
     mode === 'zones' ? zoneIds : [...new Set(assignments.filter((a) => a.valid_from <= todayIso() && (a.valid_until === null || a.valid_until > todayIso())).map((a) => a.zone_id))]
@@ -323,7 +323,7 @@ type SummaryMetric = ChartMetric | TotalMetric
 type Column = { id: string; label: string; color: string; rows: SummaryRow[] }
 
 // ---------------------------------------------------------------------------
-// Running totals: radiation and drain (greenhouse), irrigation (per zone)
+// Running totals: radiation (greenhouse), irrigation (per zone)
 // ---------------------------------------------------------------------------
 
 /** The exported running totals hour by hour; a day's value is its final reading (see the summary below). */
@@ -339,18 +339,18 @@ function RunningTotals(props: {
   const { sourceId, greenhouseZoneId, irrigationZoneIds, label, start, end, gaps } = props
   const fromIso = new Date(start * 1000).toISOString()
   const toIso = new Date(end * 1000).toISOString()
-  const greenhouse = useSeries(sourceId, greenhouseZoneId ? [greenhouseZoneId] : [], ['radiation_sum', 'drain_percentage'], fromIso, toIso)
+  const greenhouse = useSeries(sourceId, greenhouseZoneId ? [greenhouseZoneId] : [], ['radiation_sum'], fromIso, toIso)
   const irrigation = useSeries(sourceId, irrigationZoneIds, ['irrigation_cumulative'], fromIso, toIso)
   const NOTES: Record<TotalMetric, string> = {
     radiation_sum: 'Whole greenhouse (cell B6). Restarts about 08:00 (until then it still shows the previous day’s total); the day’s value is the 23:00 reading.',
     irrigation_cumulative: 'Per zone (row 9), since midnight; the day’s value is the 23:00 reading.',
-    drain_percentage: 'Whole greenhouse (cell B10), since midnight; the day’s value is the 22:00 reading.',
   }
   return (
     <>
       {TOTAL_METRICS.map((m) => {
         const q = m.greenhouse ? greenhouse : irrigation
-        const series = (q.data ?? []).filter((s) => s.metric === m.key)
+        // In the order the zones were chosen (irrigation), so colours and legend match the other charts.
+        const series = (q.data ?? []).filter((s) => s.metric === m.key).sort((a, b) => irrigationZoneIds.indexOf(a.zone_id) - irrigationZoneIds.indexOf(b.zone_id))
         const lines = series.map((s, i) => ({
           id: s.zone_id,
           label: m.greenhouse ? 'Greenhouse (all zones)' : label(s.zone_id),
@@ -461,7 +461,7 @@ function Summaries(props: {
       </div>
       <p className={`${styles.small} ${styles.muted}`}>
         {totalDef
-          ? `${totalDef.label} per day (${totalDef.unit}): the ${totalDef.key === 'drain_percentage' ? '22:00' : '23:00'} reading${totalDef.greenhouse ? ', the same for every zone and planting' : ', per zone'}. Running totals are never added up or averaged; a day without that reading shows its running value, marked “so far” (today) or “incomplete”.${summary === 'weekly' ? (totalDef.weekly === 'sum' ? ' Weeks add up their final days.' : ' Weeks average their final days.') : ''}`
+          ? `${totalDef.label} per day (${totalDef.unit}): the 23:00 reading${totalDef.greenhouse ? ', the same for every zone and planting' : ', per zone'}. Running totals are never added up or averaged; a day without that reading shows its running value, marked “so far” (today) or “incomplete”.${summary === 'weekly' ? ' Weeks add up their final days.' : ''}`
           : `Mean (min–max) of usable hourly values in ${hourlyDef!.unit}; flagged readings are left out. Hours with data are shown when fewer than expected.`}
       </p>
       {q.error ? (
@@ -515,7 +515,7 @@ function TotalsTable(props: { rows: DailyTotalRow[]; def: (typeof TOTAL_METRICS)
   const colLabel = (id: string) => (def.greenhouse ? 'Greenhouse (all zones)' : label(id))
   const byZone = new Map(zoneIds.map((id) => [id, rows.filter((r) => r.zone_id === id)]))
   if (weekly) {
-    const perZone = new Map(zoneIds.map((id) => [id, weeklyTotals(byZone.get(id)!, def.weekly)]))
+    const perZone = new Map(zoneIds.map((id) => [id, weeklyTotals(byZone.get(id)!)]))
     const weeks = perZone.get(zoneIds[0])!
     return (
       <div className={styles.tableWrap}>
@@ -535,7 +535,7 @@ function TotalsTable(props: { rows: DailyTotalRow[]; def: (typeof TOTAL_METRICS)
                   const partial = x.finalDays < x.days
                   return (
                     <td key={id} className={partial ? styles.partial : undefined} title={partial ? `${x.days - x.finalDays} day(s) without a final reading left out` : undefined}>
-                      {x.value === null ? '—' : x.value.toFixed(def.weekly === 'sum' ? 0 : def.decimals)}
+                      {x.value === null ? '—' : x.value.toFixed(0)}
                       <span className={styles.range}>{x.finalDays}/{x.days} days final</span>
                     </td>
                   )
@@ -566,7 +566,7 @@ function TotalsTable(props: { rows: DailyTotalRow[]; def: (typeof TOTAL_METRICS)
                 if (!r) return <td key={id} className={styles.muted}>—</td>
                 const c = totalCell(r, def.decimals)
                 return (
-                  <td key={id} className={c.final ? undefined : styles.partial} title={c.title}>
+                  <td key={id} className={c.final ? undefined : r.status === 'no_data' ? styles.muted : styles.partial} title={c.title}>
                     {c.text}
                   </td>
                 )
