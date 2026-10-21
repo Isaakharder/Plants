@@ -6,6 +6,7 @@
 import { useState } from 'react'
 import { Dialog } from '../../components/Dialog'
 import { uploadClimateFiles, useInvalidateClimate, type ManualResult } from './api'
+import { importMessage, importSummary } from './importMessages'
 import { StateBadge } from './StateBadge'
 import styles from './Climate.module.css'
 
@@ -30,7 +31,6 @@ export function ManualImportDialog({ open, sourceId, onClose }: { open: boolean;
 
   const tooBig = files.filter((f) => f.size > MAX_BYTES)
   const sendable = files.filter((f) => f.size <= MAX_BYTES)
-  const counts = results.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {})
 
   const start = async () => {
     setBusy(true)
@@ -54,8 +54,9 @@ export function ManualImportDialog({ open, sourceId, onClose }: { open: boolean;
     <Dialog open={open} title="Import climate CSV files" onClose={close} className={styles.wideDialog}>
       <div className={styles.form}>
         <p className={`${styles.small} ${styles.muted}`}>
-          Ridder Synopta “Block Summary” exports. Files already stored are recognised and skipped (duplicates); a different file for an hour that
-          already has one is kept for review. Your files aren’t changed.
+          Ridder Synopta “Block Summary” exports. A file already imported is recognised and skipped, even renamed or re-saved, and so are
+          its readings. A different file for an hour that already has one, or a copy of another hour’s readings, is kept for an owner to
+          review and not used. Your files aren’t changed.
         </p>
         <label
           className={`${styles.drop} ${over ? styles.over : ''}`}
@@ -80,29 +81,27 @@ export function ManualImportDialog({ open, sourceId, onClose }: { open: boolean;
           <>
             <p className={styles.small}>
               {results.length} of {sendable.length} processed:{' '}
-              {Object.entries(counts)
-                .map(([k, n]) => `${n} ${k === 'error' ? 'not stored' : k}`)
-                .join(' · ')}
+              {importSummary(results)}
             </p>
             <div className={styles.tableWrap} style={{ maxHeight: 320, overflowY: 'auto' }}>
               <table className={styles.table}>
                 <thead>
                   <tr>
-                    <th>File</th>
+                    <th className={styles.left}>File</th>
                     <th className={styles.left}>Result</th>
-                    <th>Hour</th>
-                    <th className={`${styles.left} ${styles.hideNarrow}`}>Notes</th>
                   </tr>
                 </thead>
                 <tbody>
                   {results.map((r, i) => (
                     <tr key={`${r.filename}${i}`}>
-                      <td>{r.filename}</td>
+                      <td className={`${styles.left} ${styles.wrap}`}>
+                        {r.filename}
+                        {/* What happened, in words: always shown, also on phones. */}
+                        <div className={`${styles.small} ${styles.muted}`}>{importMessage(r)}</div>
+                      </td>
                       <td className={styles.left}>
                         <StateBadge state={r.status} />
                       </td>
-                      <td>{r.hour_local?.slice(0, 16) ?? '—'}</td>
-                      <td className={`${styles.left} ${styles.hideNarrow} ${styles.small}`}>{r.message ?? [...(r.problems ?? []), ...(r.warnings ?? [])].join(', ')}</td>
                     </tr>
                   ))}
                 </tbody>

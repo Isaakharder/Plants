@@ -6,8 +6,8 @@ const STATE_LABEL: Record<string, string> = {
   superseded: 'Not used',
   none: 'Quarantined',
   created: 'Created',
-  duplicate: 'Duplicate',
-  quarantined: 'Quarantined',
+  duplicate: 'Already imported',
+  quarantined: 'Held for review',
   error: 'Not stored',
 }
 

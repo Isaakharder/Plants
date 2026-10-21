@@ -153,17 +153,34 @@ describe('Block Summary parser: dates, clocks and daylight saving', () => {
     expect(late.status).toBe('parsed')
   })
 
-  it('a System time that disagrees with the filename is a warning; the filename decides', () => {
+  it('a System time more than 15 minutes from the filename is quarantined (a renamed copy of another hour?)', () => {
     const p = parseBlockSummary(withSystem('10/17/2026', '21:00'), OCT17)
+    expect(p.status).toBe('quarantined')
+    expect(p.time.hourUtc).toBeNull()
+    expect(p.problems.map((x) => x.code)).toEqual(['system_time_mismatch'])
+    expect(p.problems[0].message).toContain('renamed copy')
+    // Another day at the same clock time is a mismatch too.
+    expect(parseBlockSummary(withSystem('10/16/2026', '10:00'), OCT17).problems.map((x) => x.code)).toEqual(['system_time_mismatch'])
+  })
+
+  it('a System time within 15 minutes of the filename is accepted', () => {
+    const p = parseBlockSummary(withSystem('10/17/2026', '10:14'), OCT17)
     expect(p.status).toBe('parsed')
     expect(p.time.hourUtc).toBe('2026-10-17T14:00:00.000Z')
-    expect(p.warnings.map((w) => w.code)).toEqual(['system_time_mismatch'])
+    expect(parseBlockSummary(withSystem('10/17/2026', '10:16'), OCT17).status).toBe('quarantined')
+  })
+
+  it('a reviewer who assigns the hour settles a System time mismatch', () => {
+    const p = parseBlockSummary(withSystem('10/17/2026', '21:00'), OCT17, { hourOverrideUtc: '2026-10-18T01:00:00.000Z' })
+    expect(p.status).toBe('parsed')
+    expect(p.time).toMatchObject({ method: 'review', hourUtc: '2026-10-18T01:00:00.000Z' })
   })
 
   it('a filename time far from the hour is quarantined, not guessed', () => {
     const p = parseBlockSummary(fixture(OCT17), 'Block Summary_20261017_102500.csv')
     expect(p.status).toBe('quarantined')
-    expect(p.problems.map((x) => x.code)).toEqual(['filename_time_off_hour'])
+    // 10:25 is also 25 minutes from the file's own System time (10:00).
+    expect(p.problems.map((x) => x.code)).toEqual(['filename_time_off_hour', 'system_time_mismatch'])
   })
 
   it('without a timestamp in the filename, uses the System date/time when unambiguous', () => {

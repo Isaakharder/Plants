@@ -37,8 +37,21 @@ export type IngestArgs = {
   parsed: ParsedFile
 }
 
+/** The stored file an upload was matched with (duplicates, conflicts, readings repeated at another hour). */
+export type MatchedFile = {
+  file_id: string
+  filename: string
+  received_at: string
+  hour_local: string | null
+  file_status: string
+  channel: string
+}
+
 export type IngestResult = {
   status: 'created' | 'duplicate' | 'conflict' | 'quarantined'
+  /** Why it is a duplicate, a conflict or held: same_bytes, same_readings, different_readings_same_hour, same_readings_as_other_hour. */
+  reason?: string
+  matched?: MatchedFile
   import_id: string
   hour_utc: string | null
   hour_local: string | null
@@ -125,12 +138,15 @@ function json(status: number, body: unknown, extra: Record<string, string> = {})
 
 const fileResult = (r: IngestResult, parsed: ParsedFile) => ({
   status: r.status,
+  reason: r.reason ?? null,
+  matched: r.matched ?? null,
   import_id: r.import_id,
   hour_utc: r.hour_utc,
   hour_local: r.hour_local,
   readings: r.readings ?? null,
   file_status: r.file_status,
-  problems: parsed.problems.map((p) => p.code),
+  // The database can add a problem (same_readings_as_other_hour) the parser didn't see.
+  problems: [...parsed.problems.map((p) => p.code), ...(r.reason === 'same_readings_as_other_hour' ? [r.reason] : [])],
   warnings: parsed.warnings.map((p) => p.code),
 })
 

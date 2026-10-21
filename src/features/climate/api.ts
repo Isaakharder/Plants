@@ -4,6 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
+import type { ImportOutcome } from './importMessages'
 import type {
   ClimateAgentKeyRow,
   ClimateDailySeries,
@@ -204,15 +205,7 @@ async function functionError(error: unknown): Promise<Error> {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-export type ManualResult = {
-  filename: string
-  status: 'created' | 'duplicate' | 'conflict' | 'quarantined' | 'error'
-  hour_local?: string | null
-  readings?: number | null
-  problems?: string[]
-  warnings?: string[]
-  message?: string
-}
+export type ManualResult = ImportOutcome & { filename: string }
 
 /** Uploads files to the Edge Function in batches; every file is stored or reported on its own. */
 export async function uploadClimateFiles(sourceId: string, files: File[], onBatch: (results: ManualResult[]) => void): Promise<void> {

@@ -127,9 +127,11 @@ begin
          encode(raw1, 'base64'), encode(sha256(raw1), 'hex'), '2.0.0', p);
   if r->>'status' <> 'duplicate' or r->>'import_id' <> (select v from t where k = 'file1') then raise exception 'FAIL: duplicate %', r; end if;
 
-  -- Different bytes for the same hour: kept as a conflict for review, the first stays in effect.
+  -- A different file (different readings) for the same hour: kept as a conflict for review, the first stays in effect.
+  -- (Different bytes with the same readings are a duplicate: climate_content_duplicates_test.sql.)
   r := public.climate_ingest_file(src, 'agent', kid, null, 'Block Summary_20261017_100009 (2).csv',
-         encode(raw2, 'base64'), encode(sha256(raw2), 'hex'), '2.0.0', p);
+         encode(raw2, 'base64'), encode(sha256(raw2), 'hex'), '2.0.0',
+         jsonb_set(jsonb_set(p, '{readings,1,raw_text}', '"22.0"'), '{readings,1,value}', '22.0'));
   if r->>'status' <> 'conflict' or r->>'file_status' <> 'conflict' then raise exception 'FAIL: conflict %', r; end if;
   insert into t values ('file2', r->>'import_id');
 

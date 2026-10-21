@@ -10,6 +10,7 @@ import { PAGE, useClimateSource, useImportAttempts, useImportFiles, useImportSta
 import { ClimateTabs } from './ClimateTabs'
 import { FileDialog } from './FileDialog'
 import { ManualImportDialog } from './ManualImportDialog'
+import { importMessage, type MatchedFile } from './importMessages'
 import { StateBadge } from './StateBadge'
 import { useNow } from './useNow'
 import { formatLocalHour, missingWarning } from './model'
@@ -169,7 +170,14 @@ export function ClimateImports() {
                 {attempts.data.map((a) => (
                   <tr key={a.id} className={a.file_id ? styles.rowButton : undefined} onClick={() => a.file_id && setOpenFile(a.file_id)}>
                     <td>{new Date(a.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
-                    <td className={`${styles.left} ${styles.wrap}`}>{a.filename}</td>
+                    <td className={`${styles.left} ${styles.wrap}`}>
+                      {a.filename}
+                      {a.outcome !== 'created' && (
+                        <div className={`${styles.small} ${styles.muted}`}>
+                          {importMessage({ status: a.outcome, reason: a.detail.reason as string | undefined, matched: a.detail.matched as MatchedFile | undefined })}
+                        </div>
+                      )}
+                    </td>
                     <td className={styles.left}>
                       <StateBadge state={a.outcome} />
                     </td>

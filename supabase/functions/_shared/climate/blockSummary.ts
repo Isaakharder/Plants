@@ -24,11 +24,15 @@ import {
   type LocalDateTime,
 } from './zonedTime.ts'
 
-export const PARSER_VERSION = 'synopta-block-summary/1'
+export const PARSER_VERSION = 'synopta-block-summary/2'
 
 /** A filename or System time this far from a whole hour is not trusted to name the hour. */
 export const MAX_OFF_HOUR_MINUTES = 10
-/** The System date/time agrees with the filename when within this many minutes. */
+/**
+ * The System date/time agrees with the filename when within this many minutes;
+ * further apart, the file is quarantined (since parser /2: a renamed copy of
+ * another hour must not be stored under the filename's hour).
+ */
 export const SYSTEM_TIME_TOLERANCE_MINUTES = 15
 
 export type Metric =
@@ -131,6 +135,7 @@ export const TIME_PROBLEMS = new Set([
   'no_timestamp',
   'nonexistent_local_time',
   'repeated_hour_ambiguous',
+  'system_time_mismatch',
 ])
 
 // ---------------------------------------------------------------------------
@@ -381,8 +386,11 @@ export function parseBlockSummary(bytes: Uint8Array, filename: string, options: 
         time.systemLocal = formatLocal(agreeing[0].t)
         if (hourLocal) time.clockOffsetMinutes = wallMinutes(agreeing[0].t) - wallMinutes(hourLocal)
       }
-    } else if (meta.systemDateRaw) {
-      warn('system_time_mismatch', `System date/time (${meta.systemDateRaw} ${meta.systemTimeRaw ?? ''}) doesn't match the filename time ${time.filenameLocal}.`)
+    } else if (dates.length > 0) {
+      quarantine(
+        'system_time_mismatch',
+        `The file's own System date/time (${meta.systemDateRaw} ${meta.systemTimeRaw ?? ''}) is more than ${SYSTEM_TIME_TOLERANCE_MINUTES} minutes from the time in its name (${time.filenameLocal}). It may be a renamed copy of another hour.`,
+      )
     }
     if (!clock) warn('no_system_time', 'The file has no System time.')
   } else if (systemTimes.length > 0 && clock) {

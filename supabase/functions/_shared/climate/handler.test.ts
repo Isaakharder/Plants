@@ -67,6 +67,22 @@ describe('climate endpoint: agent', () => {
     expect(ingested[0].parsed.encoding).toBe('windows-1252')
   })
 
+  it('says which stored file an upload matched, and why (re-saved copy: same readings)', async () => {
+    const matched = { file_id: 'f0', filename: 'Block Summary_20261017_100009.csv', received_at: '2026-10-17T14:01:00Z', hour_local: '2026-10-17 10:00:00', file_status: 'active', channel: 'manual' }
+    const { d } = deps({ ingest: async () => ({ status: 'duplicate', reason: 'same_readings', matched, import_id: 'f0', hour_utc: '2026-10-17T14:00:00Z', hour_local: '2026-10-17 10:00:00', file_status: 'active' }) })
+    const res = await handle(agentPost({ filename: FILE, raw_csv_base64: toBase64(bytes) }), d)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ status: 'duplicate', reason: 'same_readings', matched })
+  })
+
+  it('a copy of another hour is held (2xx: stored, the agent moves on) and reports why', async () => {
+    const matched = { file_id: 'f0', filename: 'Block Summary_20261017_080003.csv', received_at: '2026-10-17T12:01:00Z', hour_local: '2026-10-17 08:00:00', file_status: 'active', channel: 'manual' }
+    const { d } = deps({ ingest: async () => ({ status: 'quarantined', reason: 'same_readings_as_other_hour', matched, import_id: 'f9', hour_utc: null, hour_local: null, file_status: 'none' }) })
+    const res = await handle(agentPost({ filename: FILE, raw_csv_base64: toBase64(bytes) }), d)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ status: 'quarantined', reason: 'same_readings_as_other_hour', problems: ['same_readings_as_other_hour'], matched })
+  })
+
   it('a retry of the same file is a duplicate (200), so the agent can move it to Uploaded', async () => {
     const { d } = deps()
     const body = { filename: FILE, raw_csv_base64: toBase64(bytes) }
