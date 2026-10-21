@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import { normalizeDay, normalizeHour, type VarietyDay, type VarietyHour } from './varietyClimate'
+import { parseClock, type Daylight } from './reports'
 import type { ImportOutcome } from './importMessages'
 import type {
   ClimateAgentKeyRow,
@@ -95,6 +96,27 @@ export function useCropClimateDaily(cropId: string | undefined, fromDate: string
     queryKey: climateKeys.series('cropDaily', cropId, fromDate, toDate),
     enabled: Boolean(cropId),
     queryFn: async () => (check(await supabase.rpc('crop_climate_daily', { p_crop_id: cropId!, p_from: fromDate, p_to: toDate })) as VarietyDay[]).map(normalizeDay),
+  })
+}
+
+/** Sunrise and sunset per local date, from the climate computer's own rows in each file in effect. */
+export function useDaylight(sourceId: string | undefined, fromIso: string, toIso: string) {
+  return useQuery({
+    queryKey: climateKeys.series('daylight', sourceId, fromIso, toIso),
+    enabled: Boolean(sourceId),
+    queryFn: async () => {
+      const rows = check(
+        await supabase.from('climate_import_files').select('hour_local, metadata').eq('source_id', sourceId!).eq('hour_state', 'active').gte('hour_utc', fromIso).lt('hour_utc', toIso),
+      ) as { hour_local: string | null; metadata: Record<string, unknown> }[]
+      const out: Daylight = new Map()
+      for (const r of rows) {
+        const date = r.hour_local?.slice(0, 10)
+        const sunrise = parseClock(r.metadata?.sunriseRaw)
+        const sunset = parseClock(r.metadata?.sunsetRaw)
+        if (date && sunrise !== null && sunset !== null && sunrise < sunset && !out.has(date)) out.set(date, { sunrise, sunset })
+      }
+      return out
+    },
   })
 }
 

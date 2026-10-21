@@ -540,3 +540,82 @@ select.compactSelect {
     display: none;
   }
 }
+
+/* ── Reports ───────────────────────────────────────────────────────────── */
+
+.reportGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 900px) {
+  .reportGrid {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.reportCard {
+  background: var(--white, #fff);
+  border: 1px solid var(--gray-200, #e5e7eb);
+  border-radius: 10px;
+  padding: 16px;
+  min-width: 0;
+}
+
+.reportHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reportSection {
+  margin-top: 12px;
+}
+
+.reportSection h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gray-600, #4b5563);
+}
+
+.reportSection ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.reportSection li + li {
+  margin-top: 3px;
+}
+
+.notable {
+  font-weight: 600;
+  color: #92400e;
+}
+
+.thresholds summary {
+  cursor: pointer;
+}
+
+.thresholdGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.thresholdField {
+  display: grid;
+  grid-template-columns: 1fr 84px auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
