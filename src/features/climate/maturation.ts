@@ -39,6 +39,7 @@ const ON_PLANT_BEFORE = new Set(['Flower', 'SetFruit', 'MatureGreen'])
 
 export type Exclusion =
   | 'harvest_before_breaker'
+  | 'same_visit'
   | 'invalid_sequence'
   | 'no_visit_before_breaker'
   | 'flagged_unreliable'
@@ -141,6 +142,8 @@ export function studyFruits(
     const nodeFlags = flagsByNode.get(nodeId) ?? []
     let excluded: Exclusion | null = null
     if (h.observed_at <= b.observed_at) excluded = 'harvest_before_breaker'
+    // Breaker and Harvested at the same visit: a correction, not a transition that can be timed.
+    else if (bDate === hDate) excluded = 'same_visit'
     else if (seq.some((o) => o.observed_at > b.observed_at && o.observed_at < h.observed_at && (ON_PLANT_BEFORE.has(o.status) || o.status === 'Aborted' || o.status === 'Pruned')) || seq.some((o) => o.observed_at > h.observed_at && o.status !== 'Harvested'))
       excluded = 'invalid_sequence'
     else if (nodeFlags.some((f) => f.review_decision === 'recording_error')) excluded = 'reviewed_recording_error'
@@ -195,7 +198,8 @@ export function studyResult(fruits: readonly Fruit[], includeLegacy: boolean): S
   const excluded: Partial<Record<Exclusion, number>> = {}
   for (const f of set) if (f.excluded) excluded[f.excluded] = (excluded[f.excluded] ?? 0) + 1
   const usable = set.filter((f) => !f.excluded && f.central)
-  const withT = usable.filter((f) => f.central!.degreeDays !== null)
+  // A window of no whole day carries no climate information.
+  const withT = usable.filter((f) => f.central!.degreeDays !== null && f.central!.days > 0)
   const withR = usable.filter((f) => f.central!.radiation !== null && f.central!.days > 0)
   return {
     fruits: set.length,

@@ -21,7 +21,7 @@ function climate(opts: { dropHours?: Record<string, number>; dropDays?: string[]
   return { hourly, radiationFinal }
 }
 const stems = new Map([['s1', new Set(['2026-10-07', '2026-10-14', '2026-10-21'])]])
-const nodes = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => ({ id, measurement_stem_id: 's1', is_active: id !== 'f' }))
+const nodes = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((id) => ({ id, measurement_stem_id: 's1', is_active: id !== 'f' }))
 const fruitObs = (node: string, legacy = false) => [obs(node, 'SetFruit', '2026-10-07', legacy), obs(node, 'BreakerFruit', '2026-10-14', legacy), obs(node, 'Harvested', '2026-10-21', legacy)]
 
 describe('a fruit as an interval', () => {
@@ -64,6 +64,7 @@ describe('which fruit are used', () => {
     ...fruitObs('e'), // flagged but reviewed as legitimate
     ...fruitObs('f'), // node deactivated
     obs('g', 'BreakerFruit', '2026-10-14'), obs('g', 'Harvested', '2026-10-21'), // first seen already at Breaker (stem visited on 7 Oct, fruit not recorded)
+    obs('h', 'SetFruit', '2026-10-07'), obs('h', 'BreakerFruit', '2026-10-14'), { ...obs('h', 'Harvested', '2026-10-14'), observed_at: '2026-10-14T16:30:00Z' }, // corrected at the same visit
   ]
   const flags = [
     { node: 'd', rule_id: 'stage_regression', review_decision: null },
@@ -72,14 +73,14 @@ describe('which fruit are used', () => {
   const fruits = studyFruits(all, nodes, stems, flags, climate(), TZ)
   it('excludes invalid sequences, unreliable identity and unbounded onsets, with the reason', () => {
     expect(Object.fromEntries(fruits.map((f) => [f.node, f.excluded]))).toEqual({
-      a: null, b: null, c: 'invalid_sequence', d: 'flagged_unreliable', e: null, f: 'node_deactivated', g: 'no_visit_before_breaker',
+      a: null, b: null, c: 'invalid_sequence', d: 'flagged_unreliable', e: null, f: 'node_deactivated', g: 'no_visit_before_breaker', h: 'same_visit',
     })
     expect(fruits.find((f) => f.node === 'b')!.legacy).toBe(true)
   })
   it('summarises with and without legacy observations', () => {
     const withLegacy = studyResult(fruits, true), without = studyResult(fruits, false)
-    expect(withLegacy).toMatchObject({ fruits: 7, usable: 3, withTemperature: 3, withRadiation: 3, excluded: { invalid_sequence: 1, flagged_unreliable: 1, node_deactivated: 1, no_visit_before_breaker: 1 } })
-    expect(without).toMatchObject({ fruits: 6, usable: 2 })
+    expect(withLegacy).toMatchObject({ fruits: 8, usable: 3, withTemperature: 3, withRadiation: 3, excluded: { invalid_sequence: 1, flagged_unreliable: 1, node_deactivated: 1, no_visit_before_breaker: 1 } })
+    expect(without).toMatchObject({ fruits: 7, usable: 2 })
     expect(withLegacy.degreeDays).toMatchObject({ n: 3, median: 140, min: 140, max: 140, cv: 0 })
     expect(withLegacy.degreeDaysShortest.median).toBe(0)
     expect(withLegacy.degreeDaysLongest.median).toBe(280)

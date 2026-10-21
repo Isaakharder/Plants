@@ -18,6 +18,7 @@ import styles from './Climate.module.css'
 const EXCLUSION_TEXT: Record<Exclusion, string> = {
   invalid_sequence: 'status went backwards or changed after harvest',
   harvest_before_breaker: 'Harvested recorded before Breaker',
+  same_visit: 'Breaker and Harvested recorded at the same visit',
   flagged_unreliable: 'flagged as a possible recording error (not reviewed as legitimate)',
   reviewed_recording_error: 'reviewed as a recording error',
   node_deactivated: 'node removed in the collector',
