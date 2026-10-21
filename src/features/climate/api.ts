@@ -4,18 +4,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
-import type { DailyTotalRow } from './dailyTotals'
+import { normalizeDay, normalizeHour, type VarietyDay, type VarietyHour } from './varietyClimate'
 import type { ImportOutcome } from './importMessages'
 import type {
   ClimateAgentKeyRow,
-  ClimateDailySeries,
   ClimateFileReviewRow,
   ClimateFileState,
   ClimateImportAttemptRow,
   ClimateImportFileRow,
   ClimateImportStatus,
   ClimateReadingRow,
-  ClimateSeries,
   ClimateSourceRow,
   ClimateZoneRow,
   CropClimateZoneRow,
@@ -82,43 +80,21 @@ export function useImportStatus(sourceId: string | undefined) {
   })
 }
 
-export function useSeries(sourceId: string | undefined, zoneIds: string[], metrics: string[], from: string, to: string) {
+/** A variety's combined hourly values (crop_climate_hourly): one per measurement and hour. */
+export function useCropClimateHourly(cropId: string | undefined, from: string, to: string) {
   return useQuery({
-    queryKey: climateKeys.series('zones', sourceId, zoneIds, metrics, from, to),
-    enabled: Boolean(sourceId) && zoneIds.length > 0,
-    queryFn: async () =>
-      check(await supabase.rpc('climate_series', { p_source_id: sourceId!, p_zone_ids: zoneIds, p_metrics: metrics, p_from: from, p_to: to })) as ClimateSeries[],
-  })
-}
-
-export function useCropSeries(cropId: string | undefined, metrics: string[], from: string, to: string) {
-  return useQuery({
-    queryKey: climateKeys.series('crop', cropId, metrics, from, to),
+    queryKey: climateKeys.series('cropHourly', cropId, from, to),
     enabled: Boolean(cropId),
-    queryFn: async () => check(await supabase.rpc('crop_climate_series', { p_crop_id: cropId!, p_metrics: metrics, p_from: from, p_to: to })) as ClimateSeries[],
+    queryFn: async () => (check(await supabase.rpc('crop_climate_hourly', { p_crop_id: cropId!, p_from: from, p_to: to })) as VarietyHour[]).map(normalizeHour),
   })
 }
 
-export function useDaily(sourceId: string | undefined, zoneIds: string[], metrics: string[], fromDate: string, toDate: string, enabled = true) {
+/** A variety's combined daily values (crop_climate_daily): one per measurement and local date. */
+export function useCropClimateDaily(cropId: string | undefined, fromDate: string, toDate: string) {
   return useQuery({
-    queryKey: climateKeys.series('daily', sourceId, zoneIds, metrics, fromDate, toDate),
-    enabled: enabled && Boolean(sourceId) && zoneIds.length > 0,
-    queryFn: async () =>
-      check(await supabase.rpc('climate_daily', { p_source_id: sourceId!, p_zone_ids: zoneIds, p_metrics: metrics, p_from: fromDate, p_to: toDate })) as ClimateDailySeries[],
-  })
-}
-
-/** Daily values of the running totals (radiation greenhouse-wide; irrigation for these zones). */
-export function useDailyTotals(sourceId: string | undefined, fromDate: string, toDate: string, irrigationZoneIds: string[], enabled = true) {
-  return useQuery({
-    queryKey: climateKeys.series('dailyTotals', sourceId, irrigationZoneIds, fromDate, toDate),
-    enabled: enabled && Boolean(sourceId),
-    queryFn: async () =>
-      (check(await supabase.rpc('climate_daily_totals', { p_source_id: sourceId!, p_from: fromDate, p_to: toDate, p_zone_ids: irrigationZoneIds })) as DailyTotalRow[]).map((r) => ({
-        ...r,
-        final_value: r.final_value === null ? null : Number(r.final_value),
-        running_value: r.running_value === null ? null : Number(r.running_value),
-      })),
+    queryKey: climateKeys.series('cropDaily', cropId, fromDate, toDate),
+    enabled: Boolean(cropId),
+    queryFn: async () => (check(await supabase.rpc('crop_climate_daily', { p_crop_id: cropId!, p_from: fromDate, p_to: toDate })) as VarietyDay[]).map(normalizeDay),
   })
 }
 

@@ -1039,6 +1039,14 @@ export type Database = {
           problems: string[]
         }[]
       }
+      crop_climate_hourly: {
+        Args: { p_crop_id: string; p_from: string; p_to: string; p_as_of?: string }
+        Returns: import('../features/climate/varietyClimate').VarietyHour[]
+      }
+      crop_climate_daily: {
+        Args: { p_crop_id: string; p_from: string; p_to: string; p_as_of?: string }
+        Returns: import('../features/climate/varietyClimate').VarietyDay[]
+      }
       climate_missing_hours: { Args: { p_source_id: string; p_from: string; p_to: string }; Returns: [string, string, number][] }
       climate_import_status: { Args: { p_source_id: string }; Returns: ClimateImportStatus }
       set_crop_climate_zones: { Args: { p_crop_id: string; p_from: string; p_zones: { zone_id: string; area_share?: number | null }[]; p_reason?: string | null }; Returns: string }
