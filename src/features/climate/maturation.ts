@@ -26,9 +26,11 @@ export type StudyObservation = { id: string; plant_node_id: string; status: stri
 export type StudyNode = { id: string; measurement_stem_id: string; is_active: boolean }
 /** Node-level data-quality flags (crop_quality_flags) with their review decision. */
 export type StudyFlag = { node: string; rule_id: string; review_decision: string | null }
-/** Greenhouse-local date → hourly values (temperature, RH, CO₂) and the daily radiation final. */
+/** One day's mean of the hourly values present, and how many hours that is (crop_climate_daily). */
+export type DayMean = { mean: number; hours: number }
+/** Greenhouse-local date → daily means (temperature, RH, CO₂) and the daily radiation final. */
 export type StudyClimate = {
-  hourly: Map<string, { temp: number[]; rh: number[]; co2: number[] }>
+  daily: Map<string, { temp?: DayMean; rh?: DayMean; co2?: DayMean }>
   radiationFinal: Map<string, number>
 }
 
@@ -81,29 +83,33 @@ export function localDateOf(iso: string, timeZone: string): string {
 
 const dayNumber = (d: string) => Date.parse(`${d}T00:00:00Z`) / 86_400_000
 const dateOfNumber = (n: number) => new Date(n * 86_400_000).toISOString().slice(0, 10)
-const mean = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
 
 export function windowClimate(start: string, end: string, climate: StudyClimate, timeZone: string): WindowClimate {
   const days: string[] = []
   for (let d = start; d < end; d = addDays(d, 1)) days.push(d)
   if (days.length === 0) return { start, end, days: 0, tempCoverage: null, degreeDays: 0, radiation: 0, meanTemp: null, meanRh: null, meanCo2: null }
   const expected = days.reduce((s, d) => s + hoursInDay(d, timeZone), 0)
-  const temps = days.map((d) => climate.hourly.get(d)?.temp ?? [])
-  const recorded = temps.reduce((s, t) => s + t.length, 0)
+  const temps = days.map((d) => climate.daily.get(d)?.temp)
+  const recorded = temps.reduce((s, t) => s + (t?.hours ?? 0), 0)
   const coverage = recorded / expected
-  const tempOk = coverage >= MIN_TEMP_COVERAGE && temps.every((t) => t.length > 0)
+  const tempOk = coverage >= MIN_TEMP_COVERAGE && temps.every((t) => t && t.hours > 0)
   const finals = days.map((d) => climate.radiationFinal.get(d))
-  const all = (k: 'temp' | 'rh' | 'co2') => days.flatMap((d) => climate.hourly.get(d)?.[k] ?? [])
+  // The mean of all the window's hourly readings (hour-weighted daily means).
+  const hourly = (k: 'temp' | 'rh' | 'co2') => {
+    const ds = days.map((d) => climate.daily.get(d)?.[k]).filter((x): x is DayMean => !!x && x.hours > 0)
+    const h = ds.reduce((s, x) => s + x.hours, 0)
+    return h ? ds.reduce((s, x) => s + x.mean * x.hours, 0) / h : null
+  }
   return {
     start,
     end,
     days: days.length,
     tempCoverage: coverage,
-    degreeDays: tempOk ? temps.reduce((s, t) => s + mean(t)!, 0) : null,
+    degreeDays: tempOk ? temps.reduce((s, t) => s + t!.mean, 0) : null,
     radiation: finals.every((f) => f !== undefined) ? finals.reduce((s, f) => s + f!, 0) : null,
-    meanTemp: tempOk ? mean(all('temp')) : null,
-    meanRh: tempOk ? mean(all('rh')) : null,
-    meanCo2: tempOk ? mean(all('co2')) : null,
+    meanTemp: tempOk ? hourly('temp') : null,
+    meanRh: tempOk ? hourly('rh') : null,
+    meanCo2: tempOk ? hourly('co2') : null,
   }
 }
 

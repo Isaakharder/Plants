@@ -10,15 +10,15 @@ const obs = (node: string, status: string, date: string, legacy = false): StudyO
 })
 /** 20 °C every hour, RH 80, CO₂ 500, radiation 1000 J/cm² a day, 1–25 Oct, with optional gaps. */
 function climate(opts: { dropHours?: Record<string, number>; dropDays?: string[]; noRadiation?: string[] } = {}): StudyClimate {
-  const hourly = new Map<string, { temp: number[]; rh: number[]; co2: number[] }>()
+  const daily: StudyClimate['daily'] = new Map()
   const radiationFinal = new Map<string, number>()
   for (let d = '2026-10-01'; d <= '2026-10-25'; d = addDays(d, 1)) {
     if (opts.dropDays?.includes(d)) continue
-    const k = 24 - (opts.dropHours?.[d] ?? 0)
-    hourly.set(d, { temp: Array(k).fill(20), rh: Array(k).fill(80), co2: Array(k).fill(500) })
+    const hours = 24 - (opts.dropHours?.[d] ?? 0)
+    daily.set(d, { temp: { mean: 20, hours }, rh: { mean: 80, hours }, co2: { mean: 500, hours } })
     if (!opts.noRadiation?.includes(d)) radiationFinal.set(d, 1000)
   }
-  return { hourly, radiationFinal }
+  return { daily, radiationFinal }
 }
 const stems = new Map([['s1', new Set(['2026-10-07', '2026-10-14', '2026-10-21'])]])
 const nodes = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((id) => ({ id, measurement_stem_id: 's1', is_active: id !== 'f' }))

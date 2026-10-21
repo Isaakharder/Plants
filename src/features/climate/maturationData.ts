@@ -52,29 +52,27 @@ export async function loadMaturation(cropId: string, timeZone: string): Promise<
     .filter((f) => f.scope === 'node' && f.plant_node_id)
     .map((f) => ({ node: f.plant_node_id!, rule_id: f.rule_id, review_decision: f.review_decision }))
 
-  // The variety's climate over the whole study period (one request each).
+  // The variety's daily climate over the whole study period (one request: crop_climate_daily).
   const dates = observations.map((o) => localDateOf(o.observed_at, timeZone)).sort()
-  const climate: StudyClimate = { hourly: new Map(), radiationFinal: new Map() }
+  const climate: StudyClimate = { daily: new Map(), radiationFinal: new Map() }
   let climateFrom: string | null = null
   let climateTo: string | null = null
   if (dates.length) {
-    const from = addDays(dates[0], -1)
-    const to = addDays(dates[dates.length - 1], 1)
-    const hours = check(
-      await supabase.rpc('crop_climate_hourly', { p_crop_id: cropId, p_from: `${from}T00:00:00Z`, p_to: `${to}T12:00:00Z` }).select('local_date, metric, value'),
-    ) as unknown as { local_date: string; metric: string; value: number | null }[]
-    for (const h of hours) {
-      if (h.value === null) continue
-      const k = h.metric === 'air_temperature' ? 'temp' : h.metric === 'relative_humidity' ? 'rh' : h.metric === 'co2' ? 'co2' : null
-      if (!k) continue
-      const day = climate.hourly.get(h.local_date) ?? climate.hourly.set(h.local_date, { temp: [], rh: [], co2: [] }).get(h.local_date)!
-      day[k].push(Number(h.value))
+    const rows = check(
+      await supabase.rpc('crop_climate_daily', { p_crop_id: cropId, p_from: addDays(dates[0], -1), p_to: addDays(dates[dates.length - 1], 1) }).select('local_date, metric, value, status, hours'),
+    ) as unknown as { local_date: string; metric: string; value: number | null; status: string; hours: number }[]
+    for (const d of rows) {
+      if (d.value === null) continue
+      if (d.metric === 'radiation_sum') {
+        if (d.status === 'final') climate.radiationFinal.set(d.local_date, Number(d.value))
+        continue
+      }
+      const k = d.metric === 'air_temperature' ? 'temp' : d.metric === 'relative_humidity' ? 'rh' : d.metric === 'co2' ? 'co2' : null
+      if (!k || !(d.hours > 0)) continue
+      const day = climate.daily.get(d.local_date) ?? climate.daily.set(d.local_date, {}).get(d.local_date)!
+      day[k] = { mean: Number(d.value), hours: d.hours }
     }
-    const days = check(await supabase.rpc('crop_climate_daily', { p_crop_id: cropId, p_from: from, p_to: to }).select('local_date, metric, value, status')) as unknown as {
-      local_date: string; metric: string; value: number | null; status: string
-    }[]
-    for (const d of days) if (d.metric === 'radiation_sum' && d.status === 'final' && d.value !== null) climate.radiationFinal.set(d.local_date, Number(d.value))
-    const covered = [...climate.hourly.keys()].sort()
+    const covered = [...climate.daily.keys()].sort()
     climateFrom = covered[0] ?? null
     climateTo = covered[covered.length - 1] ?? null
   }
