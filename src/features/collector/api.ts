@@ -51,6 +51,13 @@ export const collectorKeys = {
 /** Offline, with nothing for this screen saved on the device. */
 export class NotOnDeviceError extends Error {}
 
+/**
+ * The Breaker was recorded (queued) but its photos couldn't be kept on this
+ * phone, e.g. Safari Private Browsing, which can't store images offline, or a
+ * full device. The observation stays; the photos must be taken again.
+ */
+export class PhotosNotKeptError extends Error {}
+
 const failedForNetwork = (err: unknown) => !navigator.onLine || (err as { status?: number }).status === 0
 
 function check<T>(res: { data: T | null; error: { message: string } | null; status: number }): T {
@@ -676,7 +683,12 @@ export function useCollectorActions() {
       async recordBreakerWithPhotos(node: PlantNode, photos: PreparedPhoto[], timing?: { captureSeconds: number }, inspectionEventId: string | null = null): Promise<LatestNodeStatus> {
         if (photos.map((p) => p.side).sort().join(',') !== 'back,front') throw new Error('Camera mode needs a front and a back photo.')
         const observation = await recordStatus(node, 'BreakerFruit', inspectionEventId)
-        for (const p of photos) await submitPhoto(node, observation.id, p, { captureSeconds: timing?.captureSeconds ?? null })
+        try {
+          for (const p of photos) await submitPhoto(node, observation.id, p, { captureSeconds: timing?.captureSeconds ?? null })
+        } catch (err) {
+          console.warn('[collector] photos not kept on this phone', err)
+          throw new PhotosNotKeptError('Breaker saved, but its photos couldn’t be kept on this phone.')
+        }
         return observation
       },
 

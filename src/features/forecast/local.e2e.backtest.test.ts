@@ -96,7 +96,8 @@ describe.skipIf(!local)('Harvest Forecast against the local stack', () => {
     expect(status[idx(39)]).toBe('settled')
     expect(status[idx(41)]).toBe('unreliable') // 5 of 56 stems
     expect(run.weeks.find((w) => w.targetIndex === idx(41))!.reason).toMatch(/incomplete visit \(5 of 56 stems\)/)
-    expect(['in_progress', 'pending']).toContain(status[idx(42)])
+    // W42 was the current week when this was written; once it has ended it is scored like any past week.
+    expect(api.currentWeek().index > idx(42) ? ['settled', 'unreliable'] : ['in_progress', 'pending']).toContain(status[idx(42)])
     // Late forecasts are never counted.
     expect(accuracy.horizons.every((h) => h.fruit.n === 0 || accuracy.officialRuns > 0)).toBe(true)
     console.log('W38 (late) scored:', run.weeks.map((w) => `+${w.horizon} ${w.status}${w.observedFruit !== null ? ` fc ${w.sampleFruit.toFixed(0)} obs ${w.observedFruit}` : ''}`).join(' | '))

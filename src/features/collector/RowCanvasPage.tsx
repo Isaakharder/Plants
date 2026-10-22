@@ -15,8 +15,8 @@ import { COLORS } from '../plantArt/colors';
 import { statusTone } from '../plantArt/frames';
 import { StatusIcon } from '../plantArt/StatusArt';
 import { useOrganization } from '../organization/OrganizationProvider';
-import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRecentHarvests, useRowCanvas } from './api';
-import { InspectionPanel } from './InspectionPanel';
+import { NotOnDeviceError, PhotosNotKeptError, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRecentHarvests, useRowCanvas } from './api';
+import { InspectionPanel, StemReview } from './InspectionPanel';
 import { dayLabel, nodeName, rangesLabel, stemInspection, type StemInspection } from '../harvests/model';
 import { pickerOptions } from './statusOptions';
 import { checkedStemIds, nextUncheckedIndex } from './samplingProgress';
@@ -305,6 +305,8 @@ export function RowCanvasPage() {
   const checkedCount = stems.filter(s => doneIds.has(s.id)).length;
   const activeChecked = activeStem ? doneIds.has(activeStem.id) : false;
   const [checking, setChecking] = useState(false);
+  // Inspection: the answers are shown for review before the stem is completed.
+  const [reviewing, setReviewing] = useState(false);
 
   /**
    * Confirms every node of the stem was looked at this week, then moves on to
@@ -401,6 +403,13 @@ export function RowCanvasPage() {
       setStatusPickerCtx(null);
       return true;
     } catch (err: unknown) {
+      if (err instanceof PhotosNotKeptError) {
+        // The Breaker is recorded; only the photos are missing. Close the step so it isn't recorded twice.
+        setMessage(`${err.message} Tap the Breaker and choose “Add photos” to take them again (not possible in a private browser tab).`);
+        closeBreakerStep();
+        setStatusPickerCtx(null);
+        return false;
+      }
       setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
       return false;
     } finally {
@@ -778,6 +787,7 @@ export function RowCanvasPage() {
                 onHarvested={node => void handleQuickAnswer(node, 'Harvested')}
                 onOther={node => { setStatusPickerCtx({ stem: activeStem!, node }); setPickerStep(node.id, 'grid'); }}
                 onAllStillThere={nodes => void handleAllStillThere(nodes)}
+                onChange={node => setStatusPickerCtx({ stem: activeStem!, node })}
               />
             )}
 
@@ -981,7 +991,7 @@ export function RowCanvasPage() {
               type="button"
               className="btn btn-primary stem-check-button"
               disabled={checking || activeInspection.toConfirm.length > 0}
-              onClick={() => void handleStemChecked(true)}
+              onClick={() => setReviewing(true)}
             >
               ✓ All fruit checked
               <span className="stem-check-remaining">
@@ -1011,6 +1021,19 @@ export function RowCanvasPage() {
             </button>
           )}
         </div>
+      )}
+
+      {/* ── Inspection: review the stem's answers before completing it ── */}
+      {reviewing && activeStem && activeInspection && !statusPickerCtx && (
+        <StemReview
+          stemName={activeStem.stem_name}
+          answered={activeInspection.answered}
+          nodes={allNodes}
+          saving={checking}
+          onChange={node => setStatusPickerCtx({ stem: activeStem, node })}
+          onBack={() => setReviewing(false)}
+          onConfirm={() => { setReviewing(false); void handleStemChecked(true); }}
+        />
       )}
 
       {/* ── Add Stem modal ── */}
