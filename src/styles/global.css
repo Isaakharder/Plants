@@ -148,6 +148,31 @@ code {
   color: var(--primary);
 }
 
+/* "Forgot password?" under the password field: small grey text, not a button. */
+.forgot-password-link {
+  align-self: flex-end;
+  margin-top: calc(var(--space-3) * -1);
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.forgot-password-link:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.forgot-password-link:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
 .button-block {
   width: 100%;
 }

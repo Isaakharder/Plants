@@ -1,10 +1,28 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { isAuthRetryableFetchError, type Session } from '@supabase/supabase-js'
 import { authStorageKey, supabase } from '../../lib/supabase'
+import { recoveryLinkFromUrl, type RecoveryLink } from './passwordReset'
 
 type AuthState = { session: Session | null; loading: boolean }
 
 const AuthContext = createContext<AuthState>({ session: null, loading: true })
+const RecoveryContext = createContext<{ recovery: RecoveryLink | null; endRecovery: () => void }>({ recovery: null, endRecovery: () => {} })
+
+// A password-reset link, read before supabase-js consumes the URL hash. Kept
+// for the tab (sessionStorage) so a reload still shows the new-password form.
+const RECOVERY_KEY = 'plants-password-recovery'
+function initialRecovery(): RecoveryLink | null {
+  if (typeof window === 'undefined') return null // imported by tests outside a browser
+  const fromUrl = recoveryLinkFromUrl(window.location)
+  if (fromUrl?.kind === 'recovery') keepRecovery(true)
+  if (fromUrl) return fromUrl
+  try {
+    return sessionStorage.getItem(RECOVERY_KEY) ? { kind: 'recovery' } : null
+  } catch {
+    return null
+  }
+}
+const recoveryAtLoad = initialRecovery()
 
 /**
  * The session saved on this device, even if its access token has expired.
@@ -25,6 +43,7 @@ function savedSession(): Session | null {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ session: null, loading: true })
+  const [recovery, setRecovery] = useState(recoveryAtLoad)
 
   useEffect(() => {
     // Offline with an expired token, supabase-js retries the refresh for up to
@@ -46,14 +65,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // The initial state comes from getSession() above, which can tell an
       // offline refresh failure apart from being signed out.
       if (event === 'INITIAL_SESSION') return
+      // Supabase redirected a reset link somewhere else than /reset-password.
+      if (event === 'PASSWORD_RECOVERY') {
+        keepRecovery(true)
+        setRecovery({ kind: 'recovery' })
+      }
+      if (event === 'SIGNED_OUT') {
+        keepRecovery(false)
+        setRecovery(null)
+      }
       setState({ session, loading: false })
     })
     return () => data.subscription.unsubscribe()
   }, [])
 
-  return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>
+  const recoveryValue = useMemo(() => ({ recovery, endRecovery: () => { keepRecovery(false); setRecovery(null) } }), [recovery])
+  return (
+    <AuthContext.Provider value={state}>
+      <RecoveryContext.Provider value={recoveryValue}>{children}</RecoveryContext.Provider>
+    </AuthContext.Provider>
+  )
+}
+
+function keepRecovery(keep: boolean) {
+  try {
+    if (keep) sessionStorage.setItem(RECOVERY_KEY, '1')
+    else sessionStorage.removeItem(RECOVERY_KEY)
+  } catch {
+    /* storage unavailable: nothing kept */
+  }
 }
 
 export const useAuth = () => useContext(AuthContext)
+
+/** Set while the user is choosing a new password from a reset link (or the link failed). */
+export const usePasswordRecovery = () => useContext(RecoveryContext)
 
 export const signOut = () => supabase.auth.signOut()
