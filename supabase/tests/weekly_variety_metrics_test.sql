@@ -74,7 +74,7 @@ select set_config('request.jwt.claims', '{"sub":"eeeeeeee-0000-4000-8000-0000000
 do $$
 declare got text;
 begin
-  select string_agg(format('%s:%s stems/%s rows set %s load %s brk %s', m.yw, m.stems, m.rows_, m.set_fruit, m.fruit_load, m.breakers), ' | ' order by m.yw)
+  select string_agg(format('%s:%s of %s stems/%s rows set %s load %s brk %s', m.yw, m.stems, m.expected_stems, m.rows_, m.set_fruit, m.fruit_load, m.breakers), ' | ' order by m.yw)
     into got
     from public.weekly_variety_metrics('eeeeeeee-0000-4000-8000-00000000e0a0') m;
   -- W40: S1 + S2 visited (1 row): set n1 + shoot = 2; load n1, shoot, n3 = 3; breaker n3.
@@ -82,7 +82,8 @@ begin
   --      the shoot still Set Fruit (carried within the visited stem), n2 a flower; n3 harvested; S3 empty.
   -- W42: no visit, no row.  W43: only S2 visited: n5 Breaker; removed n4 ignored; n3 stays harvested.
   -- Crop Empty has no visits, so no rows.
-  if got <> '202640:2 stems/1 rows set 2 load 3 brk 1 | 202641:3 stems/2 rows set 1 load 2 brk 0 | 202643:1 stems/1 rows set 0 load 1 brk 1' then
+  -- Expected stems: S1, S2 sampled from W40, S3 from W41; so W43 is partial (1 of 3).
+  if got <> '202640:2 of 2 stems/1 rows set 2 load 3 brk 1 | 202641:3 of 3 stems/2 rows set 1 load 2 brk 0 | 202643:1 of 3 stems/1 rows set 0 load 1 brk 1' then
     raise exception 'FAIL: metrics %', got;
   end if;
 end $$;

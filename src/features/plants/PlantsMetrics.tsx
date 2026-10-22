@@ -1,6 +1,7 @@
-// Plants › Metrics: weekly fruit metrics per variety, averaged per observed
-// stem (weekly_variety_metrics(): one database call for the organization).
-// Read-only.
+// Plants › Metrics: weekly fruit metrics per variety per m²: the counts on the
+// sampled stems observed that week (weekly_variety_metrics(): one database
+// call for the organization) ÷ those stems × the variety's stems/m² (picking
+// stems ÷ area, from Settings). Read-only.
 
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
@@ -9,7 +10,7 @@ import { useCrops } from '../crops/api'
 import { sortCrops } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
 import { useWeeklyMetrics } from './api'
-import { METRICS, average, cellDetail, weekLabel, weekRange, type WeekMetrics } from './metrics'
+import { METRICS, cellDetail, formatPerM2, isPartial, MIN_COVERAGE, perM2, stemsPerM2, weekLabel, weekRange, type WeekMetrics } from './metrics'
 import twinStyles from './PlantsTwin.module.css'
 import styles from './PlantsMetrics.module.css'
 
@@ -68,6 +69,9 @@ export function PlantsMetrics() {
                     <th className={styles.variety} rowSpan={METRICS.length} scope="rowgroup">
                       <span className={styles.swatch} style={{ background: cropColorVar(crop.color) }} aria-hidden="true" />
                       {crop.name}
+                      <span className={styles.density}>
+                        {stemsPerM2(crop) === null ? 'area or picking stems not set' : `${stemsPerM2(crop)!.toFixed(2)} stems/m²`}
+                      </span>
                     </th>
                   )}
                   <th className={styles.metric} scope="row">
@@ -75,12 +79,14 @@ export function PlantsMetrics() {
                   </th>
                   {weeks.map((w) => {
                     const m: WeekMetrics | undefined = byCropWeek.get(`${crop.id}:${w.yw}`)
-                    const value = average(m, metric.key)
-                    const detail = cellDetail(m, metric.key, crop.name, weekLabel(w, multiYear))
+                    const density = stemsPerM2(crop)
+                    const value = formatPerM2(perM2(m, metric.key, density))
+                    const partial = value !== '—' && isPartial(m)
+                    const detail = cellDetail(m, metric.key, crop.name, weekLabel(w, multiYear), density)
                     return (
                       <td
                         key={w.yw}
-                        className={`${styles.value} ${value === '—' ? styles.empty : ''}`}
+                        className={`${styles.value} ${value === '—' ? styles.empty : ''} ${partial ? styles.partial : ''}`}
                         tabIndex={0}
                         aria-label={`${value}. ${detail}`}
                         onMouseEnter={(e) => show(e.currentTarget, detail)}
@@ -89,6 +95,7 @@ export function PlantsMetrics() {
                         onBlur={() => setTip(null)}
                       >
                         {value}
+                        {partial && <span aria-hidden="true">*</span>}
                       </td>
                     )
                   })}
@@ -104,8 +111,10 @@ export function PlantsMetrics() {
     <section className={styles.section} aria-label="Plant metrics">
       <div className={styles.head}>
         <p className={styles.note}>
-          Per variety and week: fruit counted on the stems observed that week (all rows, side shoots included) ÷ those stems. A node counts in its latest
-          recorded state; stems not observed in a week are left out, and duplicate records count once. Hover a value for the counts.
+          Per m², per variety and week: fruit counted on the sampled stems observed that week (all rows, side shoots included) ÷ those stems × the variety’s
+          stems/m² (picking stems ÷ area). A node counts in its latest recorded state; stems not observed are left out, never counted as zero; duplicate
+          records count once. * Partial sampling: fewer than {Math.round(MIN_COVERAGE * 100)}% of the variety’s sampled stems observed. Hover a value for the
+          counts.
         </p>
         <span className={twinStyles.updated}>
           {metrics.isFetching ? 'Updating…' : updated ? `Updated ${updated}` : ''}

@@ -3,10 +3,15 @@
 -- Read-only and additive: one function, no table changes.
 --
 -- weekly_variety_metrics(org): one row per variety and ISO week in which at
--- least one of its sampled stems was visited.
+-- least one of its sampled stems was visited. Counts only; the app converts
+-- them per m² with the variety's own area and picking stems.
 --   stems        active stems with visit evidence that week (crop_stem_weeks:
 --                a status record, a stem check, a growth reading or a node
---                added; the same rule as Projections › Weekly Plant Data)
+--                added; the same rule as Projections › Weekly Plant Data):
+--                the sampled stems every count below is divided by
+--   expected_stems  the variety's sampled stems by then: active stems whose
+--                first visit is in or before that week (sampling_weeks'
+--                rule). stems < expected_stems = partial sampling
 --   rows_        distinct rows those stems belong to
 --   set_fruit    fruit in Set Fruit on those stems
 --   fruit_load   fruit on the plant: Set Fruit + Mature Green + Breaker
@@ -27,6 +32,7 @@ returns table (
   crop_id     uuid,
   yw          integer,   -- ISO year * 100 + ISO week
   stems       integer,
+  expected_stems integer,
   rows_       integer,
   set_fruit   integer,
   fruit_load  integer,
@@ -74,6 +80,10 @@ as $$
       join node_keys k on k.id = st.plant_node_id
      order by st.stem_id, st.yw, k.node_key, st.status_yw desc, st.plant_node_id
   ),
+  -- Each sampled stem's first visited week.
+  first_visits as (
+    select v.crop_id, v.stem_id, min(v.yw) as first_yw from visits v group by v.crop_id, v.stem_id
+  ),
   stem_counts as (
     select v.crop_id, v.yw, v.stem_id, s.measurement_row_id,
            count(c.plant_node_id) filter (where c.status = 'SetFruit') as set_fruit,
@@ -84,15 +94,16 @@ as $$
       left join counted c on c.stem_id = v.stem_id and c.yw = v.yw
      group by v.crop_id, v.yw, v.stem_id, s.measurement_row_id
   )
-  select crop_id, yw,
+  select sc.crop_id, sc.yw,
          count(*)::integer,
+         (select count(*) from first_visits f where f.crop_id = sc.crop_id and f.first_yw <= sc.yw)::integer,
          count(distinct measurement_row_id)::integer,
          sum(set_fruit)::integer,
          sum(fruit_load)::integer,
          sum(breakers)::integer
-    from stem_counts
-   group by crop_id, yw
-   order by crop_id, yw
+    from stem_counts sc
+   group by sc.crop_id, sc.yw
+   order by sc.crop_id, sc.yw
 $$;
 
 revoke execute on function public.weekly_variety_metrics(uuid) from public, anon;

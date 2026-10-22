@@ -1276,7 +1276,7 @@ export type Database = {
       }
       weekly_variety_metrics: {
         Args: { p_organization_id: string }
-        Returns: { crop_id: string; yw: number; stems: number; rows_: number; set_fruit: number; fruit_load: number; breakers: number }[]
+        Returns: { crop_id: string; yw: number; stems: number; expected_stems: number; rows_: number; set_fruit: number; fruit_load: number; breakers: number }[]
       }
       post_harvest_workflow_from: {
         Args: { p_crop_id: string }

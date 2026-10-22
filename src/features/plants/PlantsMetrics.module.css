@@ -137,3 +137,16 @@
   pointer-events: none;
   box-shadow: var(--shadow-md);
 }
+
+.density {
+  display: block;
+  margin-left: 18px;
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* Partial sampling: shown, but marked (and explained in the tooltip). */
+.partial {
+  color: #9a6512;
+}

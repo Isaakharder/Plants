@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { average, cellDetail, weekLabel, weekOfIsoIndex, weekRange, type WeekMetrics } from './metrics'
+import { cellDetail, formatPerM2, isPartial, perM2, stemsPerM2, weekLabel, weekOfIsoIndex, weekRange, type WeekMetrics } from './metrics'
 import { isoWeekIndex } from './twin'
 
-const m = (yw: number, over: Partial<WeekMetrics> = {}): WeekMetrics => ({ crop_id: 'c', yw, stems: 40, rows_: 4, set_fruit: 183, fruit_load: 252, breakers: 69, ...over })
+// Phase 3 Levente, W43 (production copy): 56 of 56 sampled stems in 4 rows; 8,268 m², 56,160 picking stems.
+const m = (yw: number, over: Partial<WeekMetrics> = {}): WeekMetrics => ({ crop_id: 'c', yw, stems: 56, expected_stems: 56, rows_: 4, set_fruit: 193, fruit_load: 233, breakers: 40, ...over })
+const levente = { picking_stems: 56160, area_m2: 8268 }
 
 describe('weeks', () => {
   it('round-trips ISO week indexes, across year ends', () => {
@@ -20,16 +22,40 @@ describe('weeks', () => {
   })
 })
 
-describe('values', () => {
-  it('averages per observed stem to 1 decimal; no data is a dash', () => {
-    expect([average(m(202643), 'set_fruit'), average(m(202643), 'fruit_load'), average(m(202643), 'breakers')]).toEqual(['4.6', '6.3', '1.7'])
-    expect(average(undefined, 'breakers')).toBe('—')
-    expect(average(m(202643, { stems: 0 }), 'breakers')).toBe('—')
+describe('per m²', () => {
+  it('uses the variety’s picking stems ÷ area, never a guess', () => {
+    expect(stemsPerM2(levente)).toBeCloseTo(6.7925, 4)
+    expect(stemsPerM2({ picking_stems: 0, area_m2: 8268 })).toBeNull()
+    expect(stemsPerM2({ picking_stems: 56160, area_m2: 0 })).toBeNull()
+    expect(stemsPerM2({ picking_stems: null, area_m2: 8268 })).toBeNull()
   })
 
-  it('explains each cell: the count, stems observed and rows', () => {
-    expect(cellDetail(m(202643), 'breakers', 'Mathieu', 'W43')).toBe('Mathieu · W43 · Avg Breakers: 69 breakers ÷ 40 stems observed · 4 rows')
-    expect(cellDetail(m(202643, { stems: 1, rows_: 1, set_fruit: 2 }), 'set_fruit', 'A', 'W1')).toBe('A · W1 · Avg Fruit Set: 2 fruit set ÷ 1 stem observed · 1 row')
-    expect(cellDetail(undefined, 'set_fruit', 'A', 'W2')).toBe('A · W2: no stems observed this week')
+  it('converts the per-stem average with the observed stems as denominator', () => {
+    const d = stemsPerM2(levente)
+    // 193 / 56 = 3.45 per stem × 6.79 = 23.4 /m²; 233 / 56 × 6.79 = 28.3; 40 / 56 × 6.79 = 4.9.
+    expect(['set_fruit', 'fruit_load', 'breakers'].map((k) => formatPerM2(perM2(m(202643), k as never, d)))).toEqual(['23.4', '28.3', '4.9'])
+    // A partial week divides by the stems actually observed (40), not the variety's 56.
+    expect(perM2(m(202643, { stems: 40, breakers: 69 }), 'breakers', d)).toBeCloseTo((69 / 40) * (56160 / 8268), 10)
+    expect(perM2(undefined, 'breakers', d)).toBeNull()
+    expect(perM2(m(202643, { stems: 0 }), 'breakers', d)).toBeNull()
+    expect(perM2(m(202643), 'breakers', null)).toBeNull()
+    expect(formatPerM2(null)).toBe('—')
+  })
+
+  it('flags partial sampling below 90% of the variety’s sampled stems', () => {
+    expect(isPartial(m(202643))).toBe(false)
+    expect(isPartial(m(202643, { stems: 51 }))).toBe(false) // 91%
+    expect(isPartial(m(202643, { stems: 40 }))).toBe(true)
+    expect(isPartial(undefined)).toBe(false)
+  })
+
+  it('explains each cell: count, sampled stems, rows and the conversion', () => {
+    const d = stemsPerM2(levente)
+    expect(cellDetail(m(202643), 'breakers', 'Phase 3 Levente', 'W43', d)).toBe(
+      'Phase 3 Levente · W43 · Breakers /m²: 40 breakers on 56 of 56 sampled stems (4 rows) = 0.71 per stem × 6.79 stems/m² = 4.9 /m².',
+    )
+    expect(cellDetail(m(202641, { stems: 5, rows_: 3, breakers: 5 }), 'breakers', 'Mathieu', 'W41', d)).toMatch(/Partial sampling: only 5 of 56 sampled stems observed\.$/)
+    expect(cellDetail(m(202643), 'set_fruit', 'X', 'W43', null)).toMatch(/Not shown per m²: the variety's area or picking stems aren't set\.$/)
+    expect(cellDetail(undefined, 'set_fruit', 'A', 'W2', d)).toBe('A · W2: no sampled stems observed this week')
   })
 })
