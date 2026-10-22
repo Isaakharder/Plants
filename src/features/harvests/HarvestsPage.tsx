@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import type { FruitHarvestLinkRow, HarvestEventInEffect, InspectionStemRow } from '../../lib/database.types'
 import { useCrops } from '../crops/api'
 import { cropStatus, sortCrops, type Crop } from '../crops/model'
+import { useAuth } from '../auth/AuthProvider'
 import { useOrganization } from '../organization/OrganizationProvider'
 import {
   useHarvestEvents,
@@ -24,7 +25,7 @@ import {
   useStemInventory,
   useWorkflowFrom,
 } from './api'
-import { checkRanges, dayLabel, greenhouseInstant, greenhouseTime, greenhouseToday, hasHarvestDate, LINK_TEXT, rangesLabel, type RangeDraft, type RowRef } from './model'
+import { checkRanges, dayLabel, earliestEditable, editableUntil, greenhouseToday, hasHarvestDate, LINK_TEXT, rangesLabel, type RangeDraft, type RowRef } from './model'
 import styles from './Harvests.module.css'
 
 const WHEN = new Intl.DateTimeFormat('en-US', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'America/Toronto' })
@@ -164,8 +165,8 @@ function VarietyHarvests({ crop, crops, rows }: { crop: Crop; crops: Crop[]; row
 function HarvestForm({ crop, crops, rows, editing, onDone }: { crop: Crop; crops: Crop[]; rows: RowRef[]; editing: HarvestEventInEffect | null; onDone: (eventId: string | null) => void }) {
   const organization = useOrganization()
   const save = useRecordHarvest(organization.id)
-  const [date, setDate] = useState(editing?.harvest_date ?? greenhouseToday())
-  const [finished, setFinished] = useState(editing?.finished_at ? greenhouseTime(editing.finished_at) : '')
+  const today = greenhouseToday()
+  const [date, setDate] = useState(editing?.harvest_date ?? today)
   const [colour, setColour] = useState(editing ? String(editing.min_colour_percent) : '')
   const [ranges, setRanges] = useState<RangeDraft[]>(
     editing ? editing.ranges.map((r) => ({ from: String(r.from), to: r.to === r.from ? '' : String(r.to), coverage: r.coverage })) : [{ from: '', to: '', coverage: 'complete' }],
@@ -180,11 +181,13 @@ function HarvestForm({ crop, crops, rows, editing, onDone }: { crop: Crop; crops
   const checked = checkRanges(ranges, crop.id, rows, growing)
   const colourValue = colour.trim() === '' ? NaN : Number(colour)
   const kgValue = kg.trim() === '' ? null : Number(kg)
-  const finishedAt = finished ? greenhouseInstant(date, finished) : null
   const problems = [
-    ...(date > greenhouseToday() ? ['The harvest date is in the future.'] : []),
+    ...(!date ? ['Enter the harvest date.'] : []),
+    ...(date > today ? ['The harvest date is in the future.'] : []),
+    ...(date && date < earliestEditable(today)
+      ? [`Harvests can be entered or changed until 14 days after the harvest date: ${dayLabel(date)} was editable until ${dayLabel(editableUntil(date))}.`]
+      : []),
     ...(date < crop.planting_date || date > crop.pullout_date ? [`${crop.name} grows from ${crop.planting_date} to ${crop.pullout_date}.`] : []),
-    ...(finished && !finishedAt ? ['The finish time isn’t a valid time on that day.'] : []),
     ...(!Number.isFinite(colourValue) || colourValue < 0 || colourValue > 100 ? ['Enter the minimum mature colour for picking (0–100%).'] : []),
     ...(kgValue !== null && (!Number.isFinite(kgValue) || kgValue < 0) ? ['Harvested kg must be a positive number.'] : []),
     ...checked.problems,
@@ -197,7 +200,6 @@ function HarvestForm({ crop, crops, rows, editing, onDone }: { crop: Crop; crops
         id: attempt.current,
         cropId: crop.id,
         harvestDate: date,
-        finishedAt,
         minColourPercent: colourValue,
         ranges: checked.ranges ?? [],
         harvestedKg: kgValue,
@@ -226,16 +228,14 @@ function HarvestForm({ crop, crops, rows, editing, onDone }: { crop: Crop; crops
       {editing && (
         <p className={`${styles.small} ${styles.muted}`}>
           The correction is saved as a new version; what was recorded before stays in the history. Inspections already made stay linked to this harvest.
+          It can be corrected or cancelled until {dayLabel(editing.editable_until)}.
         </p>
       )}
       <div className={styles.formGrid}>
         <label className={styles.field}>
           <span>Harvest date</span>
-          <input className="input" type="date" value={date} max={greenhouseToday()} onChange={(e) => setDate(e.target.value)} />
-        </label>
-        <label className={styles.field}>
-          <span>Finished at (optional)</span>
-          <input className="input" type="time" value={finished} onChange={(e) => setFinished(e.target.value)} />
+          <input className="input" type="date" value={date} min={earliestEditable(today)} max={today} onChange={(e) => setDate(e.target.value)} />
+          <span className={styles.muted}>up to 14 days back</span>
         </label>
         <label className={styles.field}>
           <span>Minimum mature colour</span>
@@ -373,7 +373,7 @@ function HarvestTable({
               <tr key={e.event_id} className={`${e.cancelled ? styles.cancelled : ''} ${e.event_id === selectedId ? styles.selected : ''}`}>
                 <td>
                   {dayLabel(e.harvest_date)}
-                  {e.finished_at && <span className={styles.muted}> · until {greenhouseTime(e.finished_at)}</span>}
+                  {!e.editable && !e.cancelled && <span className={styles.muted} title={`Read-only since ${dayLabel(e.editable_until)}`}> · locked</span>}
                 </td>
                 <td>{rangesLabel(e.ranges)}</td>
                 <td className={styles.num}>≥ {percent(e.min_colour_percent)}</td>
@@ -431,6 +431,8 @@ function HarvestDetail({
   onCorrect: () => void
 }) {
   const organization = useOrganization()
+  const me = useAuth().session!.user.id
+  const who = (id: string | null) => (id === me ? 'you' : 'another member')
   const labels = useNodeLabels(crop.id)
   const inventory = useStemInventory(crop.id)
   const versions = useHarvestVersions(event.event_id)
@@ -447,16 +449,22 @@ function HarvestDetail({
         {dayLabel(event.harvest_date)} · {rangesLabel(event.ranges)}
       </h2>
       <p className={`${styles.small} ${styles.muted}`}>
-        Minimum colour aimed for: ≥ {percent(event.min_colour_percent)} (the pickers’ target, not a measurement of the picked fruit).
-        {event.finished_at && ` Finished ${whenLabel(event.finished_at)}.`} Recorded {whenLabel(event.first_recorded_at)}
-        {event.versions > 1 && `, corrected ${event.versions - 1}×, last ${whenLabel(event.recorded_at)}`}.{event.note && !event.cancelled && ` Note: “${event.note}”`}
+        Minimum colour aimed for: ≥ {percent(event.min_colour_percent)} (the pickers’ target, not a measurement of the picked fruit). Recorded{' '}
+        {whenLabel(event.first_recorded_at)} by {who(event.first_recorded_by)}
+        {event.versions > 1 && `, corrected ${event.versions - 1}×, last ${whenLabel(event.recorded_at)} by ${who(event.recorded_by)}`}.
+        {event.note && !event.cancelled && ` Note: “${event.note}”`}
       </p>
-      {!event.cancelled && (
+      {event.editable ? (
         <div className={styles.actions}>
           <button type="button" className="button" onClick={onCorrect}>
             Correct or cancel…
           </button>
+          <span className={`${styles.small} ${styles.muted}`}>until {dayLabel(event.editable_until)}</span>
         </div>
+      ) : (
+        !event.cancelled && (
+          <p className={`${styles.small} ${styles.muted}`}>Read-only: harvests can be corrected or cancelled until 14 days after the harvest date ({dayLabel(event.editable_until)}).</p>
+        )
       )}
 
       <h3 className={styles.cardTitle}>Post-harvest inspection</h3>
@@ -578,7 +586,7 @@ function HarvestDetail({
           <ul className={`${styles.small} ${styles.muted}`}>
             {versions.data!.map((v) => (
               <li key={v.id}>
-                {whenLabel(v.recorded_at)}: {v.cancelled ? 'cancelled' : `${dayLabel(v.harvest_date)}`} ·{' '}
+                {whenLabel(v.recorded_at)} by {who(v.recorded_by)}: {v.cancelled ? 'cancelled' : `${dayLabel(v.harvest_date)}`} ·{' '}
                 {rangesLabel(v.ranges)} · ≥ {percent(v.min_colour_percent)}
                 {v.harvested_kg != null && ` · ${v.harvested_kg} kg`}
                 {v.note && ` — “${v.note}”`}

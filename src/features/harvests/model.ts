@@ -173,40 +173,30 @@ export const LINK_TEXT: Record<HarvestLinkStatus, string> = {
 /** A harvest date the research can use as exact: confirmed, or inferred from a complete inspection. */
 export const hasHarvestDate = (s: HarvestLinkStatus) => s === 'confirmed' || s === 'inferred'
 
-// ── Greenhouse (Toronto) dates and times ────────────────────────────────────
-// The database checks harvest dates and finish times in America/Toronto,
-// whatever the browser's own time zone is.
+// ── Greenhouse calendar and the correction window ────────────────────────────
+// Harvests are greenhouse calendar dates (America/Toronto); no time of day is
+// recorded. A harvest can be entered, corrected or cancelled through 14 days
+// after its date, inclusive; the database enforces it (harvest_events_guard).
 
 const TZ = 'America/Toronto'
-const PARTS = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-
-function zoneParts(at: Date): { date: string; time: string } {
-  const p = Object.fromEntries(PARTS.formatToParts(at).map((x) => [x.type, x.value]))
-  return { date: `${p.year}-${p.month}-${p.day}`, time: `${p.hour}:${p.minute}` }
-}
+const DATE = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
 
 /** Today's date in the greenhouse ("YYYY-MM-DD"). */
-export const greenhouseToday = (now: Date = new Date()) => zoneParts(now).date
+export const greenhouseToday = (now: Date = new Date()) => DATE.format(now)
 
-/** The greenhouse wall time "HH:MM" of an instant. */
-export const greenhouseTime = (iso: string) => zoneParts(new Date(iso)).time
+export const CORRECTION_DAYS = 14
 
-/** The instant of a greenhouse date and wall time, or null when that time doesn't exist (the spring DST gap) or is malformed. */
-export function greenhouseInstant(date: string, time: string): string | null {
-  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
-  const t = /^(\d{2}):(\d{2})$/.exec(time)
-  if (!d || !t) return null
-  const wall = Date.UTC(+d[1], +d[2] - 1, +d[3], +t[1], +t[2])
-  let at = wall
-  for (let i = 0; i < 3; i++) {
-    const p = zoneParts(new Date(at))
-    const [y, mo, da] = p.date.split('-').map(Number)
-    const [h, mi] = p.time.split(':').map(Number)
-    at -= Date.UTC(y, mo - 1, da, h, mi) - wall
-  }
-  const back = zoneParts(new Date(at))
-  return back.date === date && back.time === time ? new Date(at).toISOString() : null
+/** "YYYY-MM-DD" + n days. */
+export function addDays(date: string, n: number): string {
+  const d = new Date(`${date}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
 }
+
+/** The last date a harvest of `date` can be entered or changed. */
+export const editableUntil = (date: string) => addDays(date, CORRECTION_DAYS)
+/** The earliest harvest date that can still be entered or changed today. */
+export const earliestEditable = (today: string) => addDays(today, -CORRECTION_DAYS)
 
 const DAY = new Intl.DateTimeFormat('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
 /** "Mon, Oct 12" for a calendar date (no time zone shift). */

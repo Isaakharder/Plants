@@ -267,10 +267,12 @@ export type HarvestEventInEffect = {
   event_id: string
   version_id: string
   crop_id: string
+  /** A greenhouse calendar date; no time of day is recorded. */
   harvest_date: string
-  finished_at: string | null
-  starts_at: string
-  ends_at: string
+  /** The last date it can be entered, corrected or cancelled (harvest date + 14). */
+  editable_until: string
+  /** Still inside that window today, and not cancelled. */
+  editable: boolean
   /** The grower's intended minimum mature colour, not the colour of the harvested fruit. */
   min_colour_percent: number
   harvested_kg: number | null
@@ -1066,7 +1068,7 @@ export type Database = {
         Relationships: []
       }
       harvest_events: {
-        Row: { id: string; event_id: string; organization_id: string; crop_id: string; harvest_date: string; finished_at: string | null; min_colour_percent: number; harvested_kg: number | null; note: string | null; cancelled: boolean; replaces_id: string | null; recorded_at: string; recorded_by: string }
+        Row: { id: string; event_id: string; organization_id: string; crop_id: string; harvest_date: string; min_colour_percent: number; harvested_kg: number | null; note: string | null; cancelled: boolean; replaces_id: string | null; recorded_at: string; recorded_by: string }
         Insert: never
         Update: never
         Relationships: []
@@ -1246,7 +1248,6 @@ export type Database = {
         Args: {
           p_crop_id: string
           p_harvest_date: string | null
-          p_finished_at: string | null
           p_min_colour_percent: number | null
           p_ranges: HarvestRange[] | null
           p_harvested_kg?: number | null

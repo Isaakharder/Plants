@@ -44,7 +44,7 @@ describe('checkRanges', () => {
 })
 
 const event = (over: Partial<HarvestEventInEffect>): HarvestEventInEffect => ({
-  event_id: 'e', version_id: 'e', crop_id: 'cad', harvest_date: '2026-10-12', finished_at: null, starts_at: '', ends_at: '', min_colour_percent: 80,
+  event_id: 'e', version_id: 'e', crop_id: 'cad', harvest_date: '2026-10-12', editable_until: '2026-10-26', editable: true, min_colour_percent: 80,
   harvested_kg: null, note: null, cancelled: false, versions: 1, first_recorded_at: '2026-10-12T20:00:00Z', first_recorded_by: 'u', recorded_at: '', recorded_by: 'u',
   ranges: [], sampled_rows: [{ row_id: 'r171', row_name: 'Row 171', row_number: 171, coverage: 'complete' }], ...over,
 })
@@ -94,15 +94,14 @@ describe('stemInspection', () => {
   })
 })
 
-describe('greenhouse dates and times (America/Toronto)', () => {
-  it('converts a greenhouse wall time to the instant and back, across DST', async () => {
-    const { greenhouseInstant, greenhouseTime, greenhouseToday } = await import('./model')
-    expect(greenhouseInstant('2026-10-12', '14:00')).toBe('2026-10-12T18:00:00.000Z') // EDT
-    expect(greenhouseInstant('2026-12-01', '14:00')).toBe('2026-12-01T19:00:00.000Z') // EST
-    expect(greenhouseInstant('2026-03-08', '02:30')).toBeNull() // doesn't exist
-    expect(greenhouseInstant('2026-10-12', '25:00')).toBeNull()
-    expect(greenhouseTime('2026-10-12T18:00:00Z')).toBe('14:00')
+describe('greenhouse calendar and the 14-day window', () => {
+  it('uses the Toronto date and counts 14 days inclusive', async () => {
+    const { greenhouseToday, editableUntil, earliestEditable, addDays } = await import('./model')
     expect(greenhouseToday(new Date('2026-10-22T03:30:00Z'))).toBe('2026-10-21') // still the 21st in Toronto
+    expect(editableUntil('2026-10-12')).toBe('2026-10-26')
+    expect(earliestEditable('2026-10-26')).toBe('2026-10-12')
+    expect(addDays('2026-11-01', 1)).toBe('2026-11-02') // across the DST change
+    expect(addDays('2026-03-01', -1)).toBe('2026-02-28')
   })
 })
 

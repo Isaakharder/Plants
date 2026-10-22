@@ -26,6 +26,7 @@ export function InspectionPanel({
   onStillThere,
   onHarvested,
   onOther,
+  onAllStillThere,
 }: {
   toConfirm: string[];
   answered: Map<string, NodeStatus>;
@@ -35,6 +36,8 @@ export function InspectionPanel({
   onStillThere: (node: PlantNode) => void;
   onHarvested: (node: PlantNode) => void;
   onOther: (node: PlantNode) => void;
+  /** Every fruit still listed is still on the plant (Breakers recorded again without new photos). */
+  onAllStillThere: (nodes: PlantNode[]) => void;
 }) {
   const byId = new Map(nodes.map(n => [n.id, n]));
   const pending = toConfirm.map(id => byId.get(id)).filter((n): n is PlantNode => Boolean(n));
@@ -45,9 +48,16 @@ export function InspectionPanel({
         <p className="inspection-panel-done">Every fruit on this stem is answered. Add any new fruit, then tap “✓ All fruit checked”.</p>
       ) : (
         <>
-          <p className="inspection-panel-head">
-            {pending.length} fruit to confirm: is it still on the plant?
-          </p>
+          <div className="inspection-panel-top">
+            <p className="inspection-panel-head">
+              {pending.length} fruit to confirm: is it still on the plant?
+            </p>
+            {pending.length > 1 && (
+              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => onAllStillThere(pending)}>
+                All {pending.length} still there
+              </button>
+            )}
+          </div>
           <ul className="inspection-list">
             {pending.map(node => (
               <li key={node.id} className="inspection-item">

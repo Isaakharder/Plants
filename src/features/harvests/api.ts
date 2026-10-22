@@ -60,7 +60,7 @@ export function useHarvestVersions(eventId: string | null) {
     enabled: Boolean(eventId),
     queryFn: async () => {
       const versions = check(
-        await supabase.from('harvest_events').select('id, harvest_date, finished_at, min_colour_percent, harvested_kg, note, cancelled, recorded_at').eq('event_id', eventId!).order('recorded_at'),
+        await supabase.from('harvest_events').select('id, harvest_date, min_colour_percent, harvested_kg, note, cancelled, recorded_at, recorded_by').eq('event_id', eventId!).order('recorded_at'),
       )
       const ranges = versions.length
         ? check(await supabase.from('harvest_event_ranges').select('harvest_event_version_id, position, from_row, to_row, coverage').in('harvest_event_version_id', versions.map((v) => v.id)))
@@ -81,7 +81,6 @@ export function useHarvestVersions(eventId: string | null) {
 export type HarvestInput = {
   cropId: string
   harvestDate: string
-  finishedAt: string | null
   minColourPercent: number
   ranges: HarvestRange[]
   harvestedKg: number | null
@@ -99,7 +98,6 @@ export function useRecordHarvest(organizationId: string) {
         await supabase.rpc('record_harvest_event', {
           p_crop_id: input.cropId,
           p_harvest_date: input.cancel ? null : input.harvestDate,
-          p_finished_at: input.cancel ? null : input.finishedAt,
           p_min_colour_percent: input.cancel ? null : input.minColourPercent,
           p_ranges: input.cancel ? null : input.ranges,
           p_harvested_kg: input.cancel ? null : input.harvestedKg,

@@ -9,7 +9,7 @@ import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-quer
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { HarvestEventInEffect, PhotoSide } from '../../lib/database.types'
 import { normalizeEvent } from '../harvests/api'
-import type { InspectionAnswer } from '../harvests/model'
+import { earliestEditable, greenhouseToday, type InspectionAnswer } from '../harvests/model'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../auth/AuthProvider'
 import { useOrganization } from '../organization/OrganizationProvider'
@@ -374,7 +374,7 @@ async function fetchHarvestableThisWeek(cropId: string, nodeIds: Set<string>): P
   }
 }
 
-/** How far back the phone keeps harvests and inspection answers. */
+/** How far back the phone keeps inspection answers (beyond the 14 days a harvest stays open). */
 const INSPECTION_DAYS = 21
 const inspectionSince = () => new Date(Date.now() - INSPECTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
 
@@ -416,7 +416,7 @@ async function readRecentAnswers(cropId: string, nodeIds: Set<string>): Promise<
   return result
 }
 
-/** Harvests of the organization in the last weeks (in effect, with their sampled rows), for the inspection list. */
+/** Harvests of the organization from the last 14 days (in effect, with their sampled rows), for the inspection list. */
 export function useRecentHarvests(organizationId: string, userId: string) {
   const queryClient = useQueryClient()
   return useQuery(
@@ -425,7 +425,7 @@ export function useRecentHarvests(organizationId: string, userId: string) {
       collectorKeys.harvests(organizationId),
       userId,
       async () => {
-        const since = new Date(Date.now() - INSPECTION_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        const since = earliestEditable(greenhouseToday())
         const events = check(await supabase.rpc('harvest_events_in_effect', { p_organization_id: organizationId }))
         return events.filter((e) => e.harvest_date >= since).map(normalizeEvent)
       },

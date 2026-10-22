@@ -488,6 +488,23 @@ export function RowCanvasPage() {
     }
   }
 
+  /** "All still there": each listed fruit is recorded again with its current status, one answer each. */
+  async function handleAllStillThere(nodes: PlantNode[]) {
+    if (!inspectionId || saving) return;
+    setSaving(true);
+    try {
+      for (const node of nodes) {
+        const status = latestByNode.get(node.id);
+        if (status) await actions.recordStatus(node, status, inspectionId);
+      }
+      setMessage(`${nodes.length} fruit still on the plant. Add photos to a Breaker by tapping it.`);
+    } catch (err: unknown) {
+      setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleCancelStatusPicker() {
     if (!statusPickerCtx) return;
     if (statusPickerCtx.isNew) {
@@ -760,6 +777,7 @@ export function RowCanvasPage() {
                 }}
                 onHarvested={node => void handleQuickAnswer(node, 'Harvested')}
                 onOther={node => { setStatusPickerCtx({ stem: activeStem!, node }); setPickerStep(node.id, 'grid'); }}
+                onAllStillThere={nodes => void handleAllStillThere(nodes)}
               />
             )}
 

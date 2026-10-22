@@ -4,9 +4,12 @@
 // possibly corrected by a person) of a fruit whose harvest date is known —
 // inferred from a complete inspection or confirmed by a person — gives one
 // point: colour % at the photo, and the days, °C·days and J/cm² from the photo
-// day to the harvest day (the variety's daily climate, same coverage rules as
-// the Breaker → Harvested study). Fruit without a dated harvest are left out:
-// no harvest date is guessed. Read-only; it does not feed the forecast.
+// day (included) to the harvest day (excluded), in whole greenhouse days with
+// the variety's daily climate (same coverage rules as the Breaker → Harvested
+// study). Harvests are dates without a time and the photo's time of day isn't
+// used, so the true interval is uncertain by up to a day either way. Fruit
+// without a dated harvest are left out: no harvest date or time is guessed.
+// Read-only; it does not feed the forecast.
 
 import { localDateOf, summarize, windowClimate, type StudyClimate, type Summary, type WindowClimate } from './maturation'
 

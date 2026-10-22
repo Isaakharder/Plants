@@ -196,3 +196,7 @@
   margin-top: var(--space-5, 24px);
   font-size: var(--text-sm);
 }
+
+.rangeRow select {
+  width: auto;
+}

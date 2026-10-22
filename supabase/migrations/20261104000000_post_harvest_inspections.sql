@@ -6,9 +6,11 @@
 -- what they read before.
 --
 -- Workflow
---   1. The grower records a harvest: variety, date (optionally the time it
---      finished), the intended minimum mature-colour %, and one or more
---      greenhouse row ranges ("Rows 160–180"), each complete or partial.
+--   1. A member records a harvest: variety, calendar date (no time of day),
+--      the intended minimum mature-colour %, and one or more greenhouse row
+--      ranges ("Rows 160–180"), each complete or partial. It can be entered,
+--      corrected or cancelled through 14 days after the harvest date; then it
+--      is read-only for everyone (enforced by harvest_events_guard).
 --      Plants finds the sampled rows inside the ranges from their numbers
 --      (greenhouse_row_number). The same row can be harvested any number of
 --      times in a week; each harvest is its own event.
@@ -39,6 +41,7 @@
 --
 -- Functions (read-only, SECURITY INVOKER unless noted)
 --   greenhouse_row_number(name)                    "Row 171" → 171
+--   greenhouse_today(), harvest_editable_until(d)  the greenhouse date; d + 14
 --   record_harvest_event(...)                      the only way to write a harvest (SECURITY DEFINER, validates)
 --   harvest_events_in_effect(org, crop, as_of)     latest version of each harvest + its sampled rows
 --   post_harvest_inspection_stems(crop, as_of)     per harvest and sampled stem: inspection progress
@@ -91,9 +94,8 @@ create table public.harvest_events (
   event_id            uuid not null,
   organization_id     uuid not null,
   crop_id             uuid not null,
+  -- A calendar date in the greenhouse; no time of day is recorded.
   harvest_date        date not null,
-  -- When the harvest of these rows finished (optional; the date always counts).
-  finished_at         timestamptz,
   -- The grower's intended minimum mature colour for picking. An instruction,
   -- not a measurement of the harvested fruit.
   min_colour_percent  numeric(4, 1) not null check (min_colour_percent between 0 and 100),
@@ -102,6 +104,7 @@ create table public.harvest_events (
   cancelled           boolean not null default false,
   -- The version this one corrects or cancels (null for the first version).
   replaces_id         uuid,
+  -- Who made this version and when: set by the server (harvest_events_guard).
   recorded_at         timestamptz not null default now(),
   recorded_by         uuid not null,
   constraint harvest_events_crop_fkey
@@ -154,13 +157,108 @@ revoke all on public.harvest_events, public.harvest_event_ranges from anon, auth
 grant select on public.harvest_events, public.harvest_event_ranges to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Greenhouse calendar and the 14-day correction window
+-- ---------------------------------------------------------------------------
+--
+-- Harvests are calendar dates in the greenhouse (America/Toronto); no time of
+-- day is recorded or assumed. A harvest can be entered, corrected or
+-- cancelled through 14 days after its date, inclusive (12 Oct → through
+-- 26 Oct); after that it is read-only for everyone. A correction is checked
+-- against the harvest's current date and the new date, so a locked harvest
+-- can't be moved into the window. harvest_events_guard() enforces this on
+-- every insert, whoever makes it.
+
+create or replace function public.greenhouse_today()
+returns date
+language sql
+stable
+set search_path = ''
+as $$
+  select (now() at time zone 'America/Toronto')::date
+$$;
+
+-- The last greenhouse date a harvest of p_harvest_date can be entered or changed.
+create or replace function public.harvest_editable_until(p_harvest_date date)
+returns date
+language sql
+immutable
+strict
+set search_path = ''
+as $$
+  select p_harvest_date + 14
+$$;
+
+revoke execute on function public.greenhouse_today() from public, anon;
+grant  execute on function public.greenhouse_today() to authenticated, service_role;
+revoke execute on function public.harvest_editable_until(date) from public, anon;
+grant  execute on function public.harvest_editable_until(date) to authenticated, service_role;
+
+-- Every new version: stamped by the server with the member who made it, never
+-- in the future, inside the window for its date and for the date it replaces.
+create or replace function public.harvest_events_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_today date := public.greenhouse_today();
+  v_prev date;
+begin
+  new.recorded_at := now();
+  new.recorded_by := auth.uid();
+  if new.recorded_by is null then
+    raise exception 'Harvests are recorded by a signed-in member' using errcode = '42501';
+  end if;
+  if new.harvest_date > v_today then
+    raise exception 'The harvest date % is in the future', new.harvest_date using errcode = '22023';
+  end if;
+  if public.harvest_editable_until(new.harvest_date) < v_today then
+    raise exception 'A harvest of % can only be entered or changed until % (14 days after the harvest).', new.harvest_date, public.harvest_editable_until(new.harvest_date)
+      using errcode = '42501';
+  end if;
+  if new.replaces_id is not null then
+    select e.harvest_date into v_prev from public.harvest_events e where e.id = new.replaces_id;
+    if public.harvest_editable_until(v_prev) < v_today then
+      raise exception 'The harvest of % is locked: it could be changed until %.', v_prev, public.harvest_editable_until(v_prev)
+        using errcode = '42501';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+-- Ranges belong to a version written in the same transaction (by record_harvest_event()).
+create or replace function public.harvest_event_ranges_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if not exists (select 1 from public.harvest_events e where e.id = new.harvest_event_version_id and e.recorded_at = now()) then
+    raise exception 'Row ranges are written together with their harvest version' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke execute on function public.harvest_events_guard() from public, anon, authenticated;
+revoke execute on function public.harvest_event_ranges_guard() from public, anon, authenticated;
+
+create trigger harvest_events_guard before insert on public.harvest_events
+  for each row execute function public.harvest_events_guard();
+create trigger harvest_event_ranges_guard before insert on public.harvest_event_ranges
+  for each row execute function public.harvest_event_ranges_guard();
+
+-- ---------------------------------------------------------------------------
 -- record_harvest_event(): record, correct or cancel a harvest
 -- ---------------------------------------------------------------------------
 --
--- p_ranges: [{"from": 160, "to": 180, "coverage": "complete"}, …] (1–20,
--- not overlapping). Rejected when:
---   * the date is before planting, after pullout or in the future (Toronto);
---   * finished_at is on another day or in the future;
+-- Any member of the organization. p_ranges: [{"from": 160, "to": 180,
+-- "coverage": "complete"}, …] (1–20, not overlapping). Rejected when:
+--   * the date is outside the correction window (harvest_events_guard), in
+--     the future, before planting or after pullout (greenhouse dates);
 --   * a sampled row of this variety has no row number (ranges can't be
 --     matched to it);
 --   * a range includes a sampled row of another variety growing on that date.
@@ -173,7 +271,6 @@ grant select on public.harvest_events, public.harvest_event_ranges to authentica
 create or replace function public.record_harvest_event(
   p_crop_id             uuid,
   p_harvest_date        date,
-  p_finished_at         timestamptz,
   p_min_colour_percent  numeric,
   p_ranges              jsonb,
   p_harvested_kg        numeric default null,
@@ -194,12 +291,11 @@ declare
   v_existing  public.harvest_events;
   v_id        uuid := coalesce(p_id, gen_random_uuid());
   v_event     uuid;
-  v_today     date := (now() at time zone 'America/Toronto')::date;
+  v_today     date := public.greenhouse_today();
   v_ranges    jsonb;
   v_norm      jsonb;
   v_bad       text;
   v_date      date := p_harvest_date;
-  v_finished  timestamptz := p_finished_at;
   v_colour    numeric := p_min_colour_percent;
   v_kg        numeric := p_harvested_kg;
 begin
@@ -226,6 +322,10 @@ begin
     if v_prev.id is null or v_prev.crop_id <> p_crop_id then
       raise exception 'Harvest not found' using errcode = '22023';
     end if;
+    if public.harvest_editable_until(v_prev.harvest_date) < v_today then
+      raise exception 'The harvest of % is locked: it could be changed until %.', v_prev.harvest_date, public.harvest_editable_until(v_prev.harvest_date)
+        using errcode = '42501';
+    end if;
     if exists (select 1 from public.harvest_events r where r.replaces_id = v_prev.id) then
       raise exception 'This harvest was changed by someone else. Reload it and try again.' using errcode = '40001';
     end if;
@@ -245,7 +345,6 @@ begin
     end if;
     -- Cancelling keeps what was recorded; only the note and the flag are new.
     v_date := v_prev.harvest_date;
-    v_finished := v_prev.finished_at;
     v_colour := v_prev.min_colour_percent;
     v_kg := v_prev.harvested_kg;
     select jsonb_agg(jsonb_build_object('from', r.from_row, 'to', r.to_row, 'coverage', r.coverage) order by r.position)
@@ -255,15 +354,16 @@ begin
     if v_date is null then
       raise exception 'Enter the harvest date' using errcode = '22023';
     end if;
-    if v_date < v_crop.planting_date or (v_crop.pullout_date is not null and v_date > v_crop.pullout_date) then
-      raise exception '% is outside % (planted %, pulled out %)', v_date, v_crop.name, v_crop.planting_date, coalesce(v_crop.pullout_date::text, '—')
-        using errcode = '22023';
-    end if;
     if v_date > v_today then
       raise exception 'The harvest date % is in the future', v_date using errcode = '22023';
     end if;
-    if v_finished is not null and ((v_finished at time zone 'America/Toronto')::date <> v_date or v_finished > now() + interval '10 minutes') then
-      raise exception 'The finish time must be on the harvest date and not in the future' using errcode = '22023';
+    if public.harvest_editable_until(v_date) < v_today then
+      raise exception 'A harvest of % can only be entered or changed until % (14 days after the harvest).', v_date, public.harvest_editable_until(v_date)
+        using errcode = '42501';
+    end if;
+    if v_date < v_crop.planting_date or v_date > v_crop.pullout_date then
+      raise exception '% is outside % (planted %, pulled out %)', v_date, v_crop.name, v_crop.planting_date, v_crop.pullout_date
+        using errcode = '22023';
     end if;
     if v_colour is null or v_colour < 0 or v_colour > 100 then
       raise exception 'Enter the minimum mature colour (0–100%%)' using errcode = '22023';
@@ -320,7 +420,7 @@ begin
       join jsonb_to_recordset(v_norm) as h(p integer, f integer, t integer, c text)
         on public.greenhouse_row_number(r.row_name) between h.f and h.t
      where r.organization_id = v_crop.organization_id and r.crop_id <> p_crop_id and r.is_active
-       and c.planting_date <= v_date and (c.pullout_date is null or c.pullout_date >= v_date)
+       and c.planting_date <= v_date and c.pullout_date >= v_date
      order by public.greenhouse_row_number(r.row_name)
      limit 1;
     if found then
@@ -328,10 +428,11 @@ begin
     end if;
   end if;
 
+  -- recorded_at / recorded_by are set by harvest_events_guard().
   insert into public.harvest_events
-    (id, event_id, organization_id, crop_id, harvest_date, finished_at, min_colour_percent, harvested_kg, note, cancelled, replaces_id, recorded_by)
+    (id, event_id, organization_id, crop_id, harvest_date, min_colour_percent, harvested_kg, note, cancelled, replaces_id, recorded_by)
   values
-    (v_id, v_event, v_crop.organization_id, p_crop_id, v_date, v_finished, v_colour, v_kg, nullif(btrim(coalesce(p_note, '')), ''), p_cancel, p_replaces_id, v_user);
+    (v_id, v_event, v_crop.organization_id, p_crop_id, v_date, v_colour, v_kg, nullif(btrim(coalesce(p_note, '')), ''), p_cancel, p_replaces_id, v_user);
   insert into public.harvest_event_ranges (harvest_event_version_id, organization_id, position, from_row, to_row, coverage)
     select v_id, v_crop.organization_id, h.p, h.f, h.t, h.c from jsonb_to_recordset(v_norm) as h(p integer, f integer, t integer, c text);
 
@@ -349,8 +450,7 @@ $$;
 -- Versions recorded by p_as_of only. Cancelled harvests are returned with
 -- cancelled = true (callers leave them out). sampled_rows: the variety's
 -- active sampled rows whose number lies in a range, with that range's
--- coverage. starts_at / ends_at: when the harvest can have happened (the
--- Toronto day, ending at finished_at when it is known).
+-- coverage. editable: still inside the 14-day window today.
 
 create or replace function public.harvest_events_in_effect(
   p_organization_id uuid,
@@ -362,9 +462,8 @@ returns table (
   version_id          uuid,
   crop_id             uuid,
   harvest_date        date,
-  finished_at         timestamptz,
-  starts_at           timestamptz,
-  ends_at             timestamptz,
+  editable_until      date,
+  editable            boolean,
   min_colour_percent  numeric,
   harvested_kg        numeric,
   note                text,
@@ -398,9 +497,8 @@ as $$
     l.id,
     l.crop_id,
     l.harvest_date,
-    l.finished_at,
-    l.harvest_date::timestamp at time zone 'America/Toronto',
-    coalesce(l.finished_at, (l.harvest_date + 1)::timestamp at time zone 'America/Toronto'),
+    public.harvest_editable_until(l.harvest_date),
+    not l.cancelled and public.harvest_editable_until(l.harvest_date) >= public.greenhouse_today(),
     l.min_colour_percent,
     l.harvested_kg,
     l.note,
@@ -426,8 +524,8 @@ $$;
 
 revoke execute on function public.harvest_events_in_effect(uuid, uuid, timestamptz) from public, anon;
 grant  execute on function public.harvest_events_in_effect(uuid, uuid, timestamptz) to authenticated;
-revoke execute on function public.record_harvest_event(uuid, date, timestamptz, numeric, jsonb, numeric, text, uuid, boolean, uuid) from public, anon;
-grant  execute on function public.record_harvest_event(uuid, date, timestamptz, numeric, jsonb, numeric, text, uuid, boolean, uuid) to authenticated;
+revoke execute on function public.record_harvest_event(uuid, date, numeric, jsonb, numeric, text, uuid, boolean, uuid) from public, anon;
+grant  execute on function public.record_harvest_event(uuid, date, numeric, jsonb, numeric, text, uuid, boolean, uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Inspections: stem_visits + harvest, and the answers
@@ -578,7 +676,8 @@ grant insert (id, organization_id, crop_id, node_observation_id, decision, harve
 -- ---------------------------------------------------------------------------
 --
 -- One row per harvest in effect (not cancelled) and active sampled stem in
--- its rows. For each:
+-- its rows. Only answers and checks made on or after the harvest date (the
+-- greenhouse's calendar) belong to its inspection. For each:
 --   to_confirm   fruit on the plant before the inspection: active nodes whose
 --                latest record outside this inspection (before it was
 --                completed) is SetFruit, MatureGreen or BreakerFruit
@@ -590,10 +689,9 @@ grant insert (id, organization_id, crop_id, node_observation_id, decision, harve
 --   state        not_started | in_progress | complete | retracted
 --                complete = "✓ All fruit checked" (latest check for this
 --                harvest) and nothing unanswered
---   later_harvest  another harvest of the same row that may have happened
---                after this one and before the completed check (by finish
---                time when both have one, else by date; the same date counts):
---                the answers can't be attributed to one harvest
+--   later_harvest  another harvest of the same row dated from this harvest's
+--                date up to the day of the completed check (or today): with
+--                dates only, the answers can't be attributed to one of them
 
 create or replace function public.post_harvest_inspection_stems(p_crop_id uuid, p_as_of timestamptz default now())
 returns table (
@@ -623,7 +721,7 @@ as $$
     select e.* from crop, public.harvest_events_in_effect(crop.organization_id, crop.id, p_as_of) e where not e.cancelled
   ),
   ev_rows as (
-    select e.event_id, e.harvest_date, e.finished_at, (r ->> 'row_id')::uuid as row_id, r ->> 'row_name' as row_name, r ->> 'coverage' as coverage
+    select e.event_id, e.harvest_date, (r ->> 'row_id')::uuid as row_id, r ->> 'row_name' as row_name, r ->> 'coverage' as coverage
       from ev e cross join lateral jsonb_array_elements(e.sampled_rows) r
   ),
   ev_stems as (
@@ -631,19 +729,14 @@ as $$
       from ev_rows er
       join public.measurement_stems s on s.measurement_row_id = er.row_id and s.is_active
   ),
-  -- The latest check of each stem for each harvest.
-  checks as (
-    select distinct on (v.measurement_stem_id, v.harvest_event_id)
-      v.measurement_stem_id, v.harvest_event_id, v.checked, v.all_fruit_checked, v.observed_at
-      from public.stem_visits v
-     where v.crop_id = p_crop_id and v.harvest_event_id is not null and v.recorded_at <= p_as_of
-     order by v.measurement_stem_id, v.harvest_event_id, v.observed_at desc, v.recorded_at desc, v.id desc
-  ),
+  -- Answers of each harvest's inspection, made on or after its date.
   answers as (
     select a.harvest_event_id, o.plant_node_id, o.status, o.observed_at, o.id
       from public.harvest_inspection_answers a
       join public.node_observations o on o.id = a.node_observation_id
+      join ev e on e.event_id = a.harvest_event_id
      where a.crop_id = p_crop_id and a.recorded_at <= p_as_of and o.recorded_at <= p_as_of
+       and (o.observed_at at time zone 'America/Toronto')::date >= e.harvest_date
   ),
   per_stem as (
     select
@@ -667,7 +760,15 @@ as $$
           where n.measurement_stem_id = es.stem_id and n.is_active) x
         where x.before_status in ('SetFruit', 'MatureGreen', 'BreakerFruit')) as present_nodes
     from ev_stems es
-    left join checks c on c.measurement_stem_id = es.stem_id and c.harvest_event_id = es.event_id
+    -- The latest check of the stem for this harvest, made on or after its date.
+    left join lateral (
+      select v.checked, v.all_fruit_checked, v.observed_at
+        from public.stem_visits v
+       where v.measurement_stem_id = es.stem_id and v.harvest_event_id = es.event_id and v.recorded_at <= p_as_of
+         and (v.observed_at at time zone 'America/Toronto')::date >= es.harvest_date
+       order by v.observed_at desc, v.recorded_at desc, v.id desc
+       limit 1
+    ) c on true
   ),
   counted as (
     select p.*,
@@ -690,9 +791,8 @@ as $$
     exists (
       select 1 from ev o, jsonb_array_elements(o.sampled_rows) r
        where o.event_id <> c.event_id and (r ->> 'row_id')::uuid = c.row_id
-         and o.starts_at <= coalesce(case when c.checked and c.all_fruit_checked then c.checked_at end, p_as_of)
-         and case when o.finished_at is not null and c.finished_at is not null then o.finished_at > c.finished_at
-                  else o.harvest_date >= c.harvest_date end
+         and o.harvest_date >= c.harvest_date
+         and o.harvest_date <= (coalesce(case when c.checked and c.all_fruit_checked then c.checked_at end, p_as_of) at time zone 'America/Toronto')::date
     )
   from counted c
   order by c.harvest_date desc, c.event_id, c.row_name, c.sort_order, c.stem_name
@@ -705,10 +805,15 @@ grant  execute on function public.post_harvest_inspection_stems(uuid, timestampt
 -- fruit_harvest_links(): which harvest took each Harvested fruit
 -- ---------------------------------------------------------------------------
 --
--- One row per Harvested record of an active node, from the variety's first
--- harvest in effect on (earlier records have no harvest calendar). Candidate
--- harvests: those of the node's row (any coverage) that can have happened
--- after the fruit was last seen on the plant and before the Harvested record.
+-- Dates only (greenhouse calendar). One row per Harvested record of an
+-- active node, from the variety's first harvest in effect on. Candidate
+-- harvests: those of the node's row (any coverage) dated from the day the
+-- fruit was last seen on the plant up to the day it was recorded Harvested.
+-- When that last sighting is an answer of a harvest's inspection ("still
+-- there" after that harvest), that harvest is not a candidate; any other
+-- harvest on the same day is (the order within a day is unknown). Earlier
+-- answers in the Harvested record's own inspection don't count as sightings:
+-- the latest answer of an inspection replaces them.
 -- link_status, in order:
 --   confirmed / rejected     a person's latest review ('unreviewed' reopens)
 --   not_from_inspection      recorded outside a post-harvest inspection
@@ -717,7 +822,7 @@ grant  execute on function public.post_harvest_inspection_stems(uuid, timestampt
 --   later_harvest            another harvest of the row before the check
 --   no_earlier_record        never seen on the plant: can't be bounded
 --   no_matching_harvest      the inspection's harvest can't have taken it
---                            (e.g. seen on the plant after it finished)
+--                            (e.g. seen still there after it)
 --   several_possible         more than one harvest could have taken it
 --   inferred                 exactly that inspection's harvest
 -- link_event_id / harvest_date: the inferred or confirmed harvest only.
@@ -749,14 +854,15 @@ as $$
   ev as (
     select e.* from crop, public.harvest_events_in_effect(crop.organization_id, crop.id, p_as_of) e where not e.cancelled
   ),
-  first_harvest as (select min(starts_at) as t from ev),
   harvested as (
-    select o.id, o.plant_node_id, o.observed_at, n.measurement_stem_id, s.measurement_row_id
+    select o.id, o.plant_node_id, o.observed_at, (o.observed_at at time zone 'America/Toronto')::date as day,
+           n.measurement_stem_id, s.measurement_row_id,
+           (select a.harvest_event_id from public.harvest_inspection_answers a where a.node_observation_id = o.id and a.recorded_at <= p_as_of) as insp_event
       from public.node_observations o
       join public.plant_nodes n on n.id = o.plant_node_id and n.is_active
       join public.measurement_stems s on s.id = n.measurement_stem_id
      where o.crop_id = p_crop_id and o.status = 'Harvested' and o.recorded_at <= p_as_of
-       and o.observed_at >= (select t from first_harvest)
+       and (o.observed_at at time zone 'America/Toronto')::date >= (select min(harvest_date) from ev)
   ),
   inspections as (select * from public.post_harvest_inspection_stems(p_crop_id, p_as_of)),
   base as (
@@ -764,20 +870,31 @@ as $$
       h.*,
       lo.observed_at as last_on_plant_at,
       lo.status as last_on_plant_status,
-      (select a.harvest_event_id from public.harvest_inspection_answers a where a.node_observation_id = h.id and a.recorded_at <= p_as_of) as inspection_event_id,
+      lo.survived_event,
+      h.insp_event as inspection_event_id,
       coalesce((
-        select array_agg(e.event_id order by e.starts_at, e.first_recorded_at)
+        select array_agg(e.event_id order by e.harvest_date, e.first_recorded_at)
           from ev e
          where exists (select 1 from jsonb_array_elements(e.sampled_rows) r where (r ->> 'row_id')::uuid = h.measurement_row_id)
-           and e.starts_at <= h.observed_at
-           and (lo.observed_at is null or e.ends_at > lo.observed_at)
+           and e.harvest_date <= h.day
+           and (lo.observed_at is null or e.harvest_date >= (lo.observed_at at time zone 'America/Toronto')::date)
+           and e.event_id is distinct from lo.survived_event
       ), '{}'::uuid[]) as candidates,
       rv.decision, rv.harvest_event_id as review_event_id, rv.reviewed_at, rv.reviewed_by, rv.note as review_note
     from harvested h
+    -- The last record of the fruit on the plant, and the harvest it was seen
+    -- still there after (when that record is an inspection answer).
     left join lateral (
-      select o.observed_at, o.status from public.node_observations o
+      select o.observed_at, o.status,
+             (select a.harvest_event_id from public.harvest_inspection_answers a join ev e on e.event_id = a.harvest_event_id
+               where a.node_observation_id = o.id and a.recorded_at <= p_as_of
+                 and (o.observed_at at time zone 'America/Toronto')::date >= e.harvest_date) as survived_event
+        from public.node_observations o
        where o.plant_node_id = h.plant_node_id and o.recorded_at <= p_as_of and o.observed_at < h.observed_at
          and o.status in ('SetFruit', 'MatureGreen', 'BreakerFruit')
+         -- An earlier answer in the same inspection was replaced by this one (a corrected tap).
+         and not exists (select 1 from public.harvest_inspection_answers a2
+                          where a2.node_observation_id = o.id and a2.harvest_event_id = h.insp_event)
        order by o.observed_at desc, o.recorded_at desc, o.id desc limit 1
     ) lo on true
     left join lateral (
@@ -788,7 +905,6 @@ as $$
   ),
   decided as (
     select b.*,
-      i.state as inspection_state, i.coverage, i.later_harvest,
       case
         when b.decision = 'confirmed' then 'confirmed'
         when b.decision = 'rejected' then 'rejected'

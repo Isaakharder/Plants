@@ -228,9 +228,10 @@ function ColourToHarvest({ progression }: { progression: MaturationData['progres
       <h3 className={styles.chartTitle}>Colour → harvest (post-harvest inspections)</h3>
       <p className={`${styles.small} ${styles.muted}`}>
         Each point is a Breaker photo pair’s colour % (a person’s estimate wins over an automatic one) of a fruit whose harvest date is known: inferred from a
-        complete post-harvest inspection, or confirmed by a person. Time to harvest runs from the photo day to the harvest day; °C·days and radiation follow the
-        same coverage rules as above. Fruit without a dated harvest are left out; no date is guessed. The harvest’s minimum colour is the pickers’ target, not a
-        measurement.
+        complete post-harvest inspection, or confirmed by a person. Harvests are recorded by date only, so everything is counted in whole greenhouse days:
+        from the photo’s day (included) to the harvest day (not included), using the daily climate (°C·days and radiation with the same coverage rules as
+        above). Because neither the time of the photo nor of the picking is known, the true time to harvest can differ by up to a day either way. Fruit without
+        a dated harvest are left out; no date or time is guessed. The harvest’s minimum colour is the pickers’ target, not a measurement.
       </p>
       <ul className={styles.small}>
         <li>
