@@ -367,3 +367,30 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* Plants › sub-tabs (Plants | Metrics), as on the Climate page. */
+.subtabs {
+  display: flex;
+  gap: var(--space-6);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.subtab {
+  padding: var(--space-2) 0;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.subtab:hover {
+  color: var(--text);
+}
+
+.subtabActive {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}

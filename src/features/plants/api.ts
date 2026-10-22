@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import { fetchRowCanvas } from '../collector/api'
 import { fetchAll } from '../collector/fetchAll'
 import type { MeasurementRow } from '../collector/types'
+import type { WeekMetrics } from './metrics'
 import type { Observation } from './review'
 
 // The Plants page reads exactly what the mobile collector reads (fetchRowCanvas:
@@ -45,6 +46,26 @@ export function useCropRows(cropId: string | undefined) {
         return q.order('id').limit(limit)
       }, (r) => r.id)
       return rows.sort((a, b) => a.sort_order - b.sort_order || a.row_name.localeCompare(b.row_name, undefined, { numeric: true }))
+    },
+  })
+}
+
+// ── Metrics ─────────────────────────────────────────────────────────────────
+
+/**
+ * Weekly fruit counts per variety, aggregated in the database (one call for the
+ * organization). Fetched fresh like the rows: on open, on window focus and on Refresh.
+ */
+export function useWeeklyMetrics(organizationId: string) {
+  return useQuery({
+    queryKey: ['plants', 'metrics', organizationId] as const,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    queryFn: async (): Promise<WeekMetrics[]> => {
+      const { data, error } = await supabase.rpc('weekly_variety_metrics', { p_organization_id: organizationId })
+      if (error) throw new Error(error.message)
+      return data
     },
   })
 }

@@ -1,0 +1,139 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.scroller {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table th,
+.table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  background: var(--surface);
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--surface-muted);
+}
+
+/* Variety and metric stay pinned while the weeks scroll. */
+.variety,
+.metric {
+  position: sticky;
+  z-index: 1;
+  text-align: left !important;
+}
+
+.variety {
+  left: 0;
+  width: 168px;
+  min-width: 168px;
+  max-width: 168px;
+  white-space: normal;
+  font-weight: 600;
+  color: var(--text);
+  vertical-align: top;
+}
+
+.metric {
+  left: 168px;
+  width: 132px;
+  min-width: 132px;
+  color: var(--text-muted);
+  border-right: 1px solid var(--border);
+  box-shadow: 6px 0 6px -6px rgba(0, 0, 0, 0.12);
+}
+
+.table thead .variety,
+.table thead .metric {
+  z-index: 3;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border-radius: var(--radius-full);
+  vertical-align: baseline;
+}
+
+/* A subtle divider between varieties. */
+.firstOfVariety > th,
+.firstOfVariety > td {
+  border-top: 2px solid var(--border-strong);
+}
+
+.table tbody tr:first-child > th,
+.table tbody tr:first-child > td {
+  border-top: 0;
+}
+
+.value {
+  min-width: 52px;
+  color: var(--text);
+  cursor: default;
+}
+
+.value:hover,
+.value:focus-visible {
+  background: var(--primary-soft);
+  outline: none;
+}
+
+.empty {
+  color: var(--text-muted);
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  max-width: 300px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--text);
+  color: var(--surface);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  white-space: normal;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+}

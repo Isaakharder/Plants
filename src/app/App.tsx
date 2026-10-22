@@ -16,6 +16,8 @@ import { ClimatePage } from '../pages/ClimatePage'
 import { queryClient } from '../lib/queryClient'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { PlantsPage } from '../pages/PlantsPage'
+import { PlantsTwin } from '../features/plants/PlantsTwin'
+import { PlantsMetrics } from '../features/plants/PlantsMetrics'
 import { ProjectionsPage } from '../pages/ProjectionsPage'
 import { PhotosPage } from '../features/photos/PhotosPage'
 import { HarvestsPage } from '../features/harvests/HarvestsPage'
@@ -54,7 +56,10 @@ export function App() {
                   <Route path="imports" element={<ClimateImports />} />
                 </Route>
                 {POST_HARVEST_ENABLED && <Route path="harvests" element={<HarvestsPage />} />}
-                <Route path="plants" element={<PlantsPage />} />
+                <Route path="plants" element={<PlantsPage />}>
+                  <Route index element={<PlantsTwin />} />
+                  <Route path="metrics" element={<PlantsMetrics />} />
+                </Route>
                 <Route path="photos" element={<PhotosPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="settings/varieties/:cropId" element={<CropDetailPage />} />
