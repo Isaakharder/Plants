@@ -4,14 +4,16 @@
 // stems ÷ area, from Settings). Read-only.
 
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { useGreenhouseWeek } from '../collector/greenhouseWeek'
 import { cropColorVar } from '../collector/display'
 import { useCrops } from '../crops/api'
 import { sortCrops } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
+import { useSamplingWeeks } from '../projections/api'
 import { useWeeklyMetrics } from './api'
-import { METRICS, cellDetail, coverageMark, formatPerM2, MIN_COVERAGE, perM2, stemsPerM2, weekLabel, weekRange, type WeekMetrics } from './metrics'
+import { METRICS, cellDetail, coverageMark, formatPerM2, MIN_COVERAGE, perM2, samplingProgressText, stemsPerM2, weekLabel, weekRange, type WeekMetrics } from './metrics'
 import twinStyles from './PlantsTwin.module.css'
 import styles from './PlantsMetrics.module.css'
 
@@ -21,6 +23,7 @@ export function PlantsMetrics() {
   const organization = useOrganization()
   const crops = useCrops(organization.id)
   const metrics = useWeeklyMetrics(organization.id)
+  const queryClient = useQueryClient()
   const scroller = useRef<HTMLDivElement>(null)
   const [tip, setTip] = useState<Tip | null>(null)
   // The greenhouse's current week (Toronto time) is still being sampled.
@@ -77,6 +80,7 @@ export function PlantsMetrics() {
                       <span className={styles.density}>
                         {stemsPerM2(crop) === null ? 'area or picking stems not set' : `${stemsPerM2(crop)!.toFixed(2)} stems/m²`}
                       </span>
+                      <SamplingProgress cropId={crop.id} year={today.year} week={today.week} />
                     </th>
                   )}
                   <th className={styles.metric} scope="row">
@@ -124,7 +128,15 @@ export function PlantsMetrics() {
         <span className={twinStyles.updated}>
           {metrics.isFetching ? 'Updating…' : updated ? `Updated ${updated}` : ''}
           {' · '}
-          <button type="button" className={twinStyles.linkButton} onClick={() => void metrics.refetch()} disabled={metrics.isFetching}>
+          <button
+            type="button"
+            className={twinStyles.linkButton}
+            onClick={() => {
+              void metrics.refetch()
+              void queryClient.invalidateQueries({ queryKey: ['projections', 'samplingWeeks'] })
+            }}
+            disabled={metrics.isFetching}
+          >
             Refresh
           </button>
         </span>
@@ -141,5 +153,17 @@ export function PlantsMetrics() {
         </div>
       )}
     </section>
+  )
+}
+
+/** This greenhouse week's sampling progress for one variety (sampling_weeks: the shared coverage rule). */
+function SamplingProgress({ cropId, year, week }: { cropId: string; year: number; week: number }) {
+  const sampling = useSamplingWeeks(cropId, year)
+  if (sampling.isPending) return null
+  const text = sampling.error ? `W${week}: sampling progress unavailable` : samplingProgressText(week, sampling.data.find((r) => r.iso_week === week))
+  return (
+    <span className={styles.density} title="Sampled stems with a record this greenhouse week, of the variety's sampled stems (the same stems Metrics and Projections count).">
+      {text}
+    </span>
   )
 }

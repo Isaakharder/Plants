@@ -90,6 +90,18 @@ export const weekLabel = (w: Week, multiYear: boolean) => (multiYear ? `${w.year
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
+/**
+ * Sampling progress under a variety's name: "W43: 40 / 56 stems checked (71%)".
+ * Checked = distinct sampled stems with any record that week (sampling_weeks'
+ * visited stems, the same stems Metrics divides by), of the stems in the
+ * variety's sampling plan that week. A stem counts once however many records
+ * it has, and never just for existing.
+ */
+export function samplingProgressText(week: number, row: { visited_stems: number; expected_stems: number } | undefined): string {
+  if (!row || row.expected_stems <= 0) return `W${week}: no sampled stems yet`
+  return `W${week}: ${row.visited_stems} / ${row.expected_stems} stems checked (${Math.floor((row.visited_stems / row.expected_stems) * 100)}%)`
+}
+
 /** Tooltip: the count, the sampled stems it is divided by, the rows, the conversion to /m², and the week's coverage. */
 export function cellDetail(m: WeekMetrics | undefined, key: MetricKey, variety: string, label: string, density: number | null, inProgress = false): string {
   const metric = METRICS.find((x) => x.key === key)!

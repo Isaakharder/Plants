@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cellDetail, coverageMark, coverageText, formatPerM2, isPartial, perM2, stemsPerM2, weekLabel, weekOfIsoIndex, weekRange, type WeekMetrics } from './metrics'
+import { cellDetail, coverageMark, coverageText, formatPerM2, isPartial, perM2, samplingProgressText, stemsPerM2, weekLabel, weekOfIsoIndex, weekRange, type WeekMetrics } from './metrics'
 import { isoWeekIndex } from './twin'
 
 // Phase 3 Levente, W43 (production copy): 56 of 56 sampled stems in 4 rows; 8,268 m², 56,160 picking stems.
@@ -75,5 +75,16 @@ describe('per m²', () => {
     expect(coverageText({ stems: 50, expected_stems: 56 })).toBe('50 of 56 stems observed (89%)') // 89.3%, flagged
     expect(coverageText({ stems: 56, expected_stems: 56 })).toBe('56 of 56 stems observed (100%)')
     expect(coverageText({ stems: 3, expected_stems: 0 })).toBe('3 of 0 stems observed')
+  })
+})
+
+describe('sampling progress under the variety name', () => {
+  it('shows this week\'s checked stems of the sampling plan, rounded down', () => {
+    expect(samplingProgressText(43, { visited_stems: 40, expected_stems: 56 })).toBe('W43: 40 / 56 stems checked (71%)')
+    expect(samplingProgressText(43, { visited_stems: 0, expected_stems: 84 })).toBe('W43: 0 / 84 stems checked (0%)')
+    expect(samplingProgressText(43, { visited_stems: 56, expected_stems: 56 })).toBe('W43: 56 / 56 stems checked (100%)')
+    expect(samplingProgressText(43, { visited_stems: 50, expected_stems: 56 })).toBe('W43: 50 / 56 stems checked (89%)')
+    expect(samplingProgressText(2, undefined)).toBe('W2: no sampled stems yet')
+    expect(samplingProgressText(2, { visited_stems: 0, expected_stems: 0 })).toBe('W2: no sampled stems yet')
   })
 })
