@@ -7,7 +7,9 @@
 
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
-import type { PhotoSide } from '../../lib/database.types'
+import type { HarvestEventInEffect, PhotoSide } from '../../lib/database.types'
+import { normalizeEvent } from '../harvests/api'
+import type { InspectionAnswer } from '../harvests/model'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../auth/AuthProvider'
 import { useOrganization } from '../organization/OrganizationProvider'
@@ -43,6 +45,7 @@ export const collectorKeys = {
   attentionRules: (organizationId: string) => ['collector', 'attentionRules', organizationId] as const,
   statusOptions: (organizationId: string) => ['collector', 'statusOptions', organizationId] as const,
   weekProgress: (organizationId: string) => ['collector', 'weekProgress', organizationId] as const,
+  harvests: (organizationId: string) => ['collector', 'harvests', organizationId] as const,
 }
 
 /** Offline, with nothing for this screen saved on the device. */
@@ -235,7 +238,7 @@ async function fetchWeekProgress(organizationId: string): Promise<WeekProgressDa
     fetchAll((after, limit, withCount) => {
       let q = supabase
         .from('stem_visits')
-        .select('id, crop_id, measurement_stem_id, year, week_number, checked, observed_at', withCount ? { count: 'exact' } : undefined)
+        .select('id, crop_id, measurement_stem_id, year, week_number, checked, observed_at, harvest_event_id, all_fruit_checked', withCount ? { count: 'exact' } : undefined)
         .eq('organization_id', organizationId)
         .gte('observed_at', since)
       if (after) q = q.gt('id', after)
@@ -326,16 +329,19 @@ export async function fetchRowCanvas(rowId: string): Promise<RowCanvasData> {
     fetchAll((after, limit, withCount) => {
       let q = supabase
         .from('stem_visits')
-        .select('id, measurement_stem_id, year, week_number, checked, observed_at, measurement_stems!inner(measurement_row_id)', count(withCount))
+        .select('id, measurement_stem_id, year, week_number, checked, observed_at, harvest_event_id, all_fruit_checked, measurement_stems!inner(measurement_row_id)', count(withCount))
         .eq('measurement_stems.measurement_row_id', rowId)
       if (after) q = q.gt('id', after)
       return q.order('id').limit(limit)
     }, (v) => v.id),
   ])
+  const nodeIds = new Set(nodes.map((n) => n.id))
+  const [harvestable, answers] = row ? await Promise.all([fetchHarvestableThisWeek(row.crop_id, nodeIds), fetchRecentAnswers(row.crop_id, nodeIds)]) : [[], []]
   return {
     row,
     stems,
-    harvestable: row ? await fetchHarvestableThisWeek(row.crop_id, new Set(nodes.map((n) => n.id))) : [],
+    harvestable,
+    answers,
     nodes: nodes.map(({ measurement_stems: _stem, ...node }) => node),
     statuses,
     growth: growth.map(({ measurement_stems: _stem, ...reading }) => ({ ...reading, growth_cm: Number(reading.growth_cm) })),
@@ -368,13 +374,73 @@ async function fetchHarvestableThisWeek(cropId: string, nodeIds: Set<string>): P
   }
 }
 
+/** How far back the phone keeps harvests and inspection answers. */
+const INSPECTION_DAYS = 21
+const inspectionSince = () => new Date(Date.now() - INSPECTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
+
+/**
+ * Post-harvest inspection answers of the last weeks on the row's nodes, with
+ * each answer's observation (node, status, time). Optional, like Harvestable
+ * marks: if they can't be read (e.g. a database without inspections yet) the
+ * canvas still loads and inspection mode shows nothing answered.
+ */
+async function fetchRecentAnswers(cropId: string, nodeIds: Set<string>): Promise<InspectionAnswer[]> {
+  try {
+    return await readRecentAnswers(cropId, nodeIds)
+  } catch (err) {
+    console.warn('[collector] inspection answers not loaded', err)
+    return []
+  }
+}
+
+async function readRecentAnswers(cropId: string, nodeIds: Set<string>): Promise<InspectionAnswer[]> {
+  const answers = await fetchAll((after, limit, withCount) => {
+    let q = supabase
+      .from('harvest_inspection_answers')
+      .select('node_observation_id, harvest_event_id', withCount ? { count: 'exact' as const } : undefined)
+      .eq('crop_id', cropId)
+      .gte('recorded_at', inspectionSince())
+    if (after) q = q.gt('node_observation_id', after)
+    return q.order('node_observation_id').limit(limit)
+  }, (a) => a.node_observation_id)
+  const result: InspectionAnswer[] = []
+  for (let i = 0; i < answers.length; i += 150) {
+    const chunk = answers.slice(i, i + 150)
+    const obs = check(await supabase.from('node_observations').select('id, plant_node_id, status, observed_at').in('id', chunk.map((a) => a.node_observation_id)))
+    const byId = new Map(obs.map((o) => [o.id, o]))
+    for (const a of chunk) {
+      const o = byId.get(a.node_observation_id)
+      if (o && nodeIds.has(o.plant_node_id)) result.push({ ...a, plant_node_id: o.plant_node_id, status: o.status, observed_at: o.observed_at })
+    }
+  }
+  return result
+}
+
+/** Harvests of the organization in the last weeks (in effect, with their sampled rows), for the inspection list. */
+export function useRecentHarvests(organizationId: string, userId: string) {
+  const queryClient = useQueryClient()
+  return useQuery(
+    collectorQuery<HarvestEventInEffect[]>(
+      queryClient,
+      collectorKeys.harvests(organizationId),
+      userId,
+      async () => {
+        const since = new Date(Date.now() - INSPECTION_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        const events = check(await supabase.rpc('harvest_events_in_effect', { p_organization_id: organizationId }))
+        return events.filter((e) => e.harvest_date >= since).map(normalizeEvent)
+      },
+      (base) => base,
+    ),
+  )
+}
+
 /** Stem checks of the current and the previous greenhouse week (what the collector shows). */
 function recentVisits<T extends { year: number; week_number: number }>(visits: T[], now: GreenhouseWeek = greenhouseIsoWeek()): T[] {
   const prev = previousIsoWeek(now)
   return visits.filter((v) => (v.year === now.year && v.week_number === now.week) || (v.year === prev.year && v.week_number === prev.week))
 }
 
-const EMPTY_CANVAS: RowCanvasData = { row: null, stems: [], nodes: [], statuses: [], growth: [], visits: [] }
+const EMPTY_CANVAS: RowCanvasData = { row: null, stems: [], nodes: [], statuses: [], growth: [], visits: [], answers: [] }
 
 /** Exported for tests. */
 export const rowCanvasQuery = (queryClient: QueryClient, rowId: string, userId: string) =>
@@ -480,7 +546,11 @@ export function useCollectorActions() {
       void triggerSync()
     }
 
-    const recordStatus = async (node: PlantNode, status: NodeStatus): Promise<LatestNodeStatus> => {
+    /**
+     * Records a status. In a post-harvest inspection (inspectionEventId) the
+     * observation is then tied to that harvest's inspection as an answer.
+     */
+    const recordStatus = async (node: PlantNode, status: NodeStatus, inspectionEventId: string | null = null): Promise<LatestNodeStatus> => {
       // The week is taken now, at save time, not when the page was opened.
       const { year, week } = currentGreenhouseWeek()
       const record = {
@@ -494,6 +564,15 @@ export function useCollectorActions() {
         observed_at: new Date().toISOString(),
       }
       await submit({ type: 'record_status', record, stemId: node.measurement_stem_id })
+      if (inspectionEventId) {
+        await submit({
+          type: 'record_inspection_answer',
+          record: { node_observation_id: record.id, harvest_event_id: inspectionEventId, organization_id: node.organization_id, crop_id: node.crop_id },
+          plantNodeId: node.id,
+          answerStatus: status,
+          observedAt: record.observed_at,
+        })
+      }
       return record
     }
 
@@ -594,9 +673,9 @@ export function useCollectorActions() {
        * observation record. Everything is kept on the device and sent in
        * order: the observation first, then each photo.
        */
-      async recordBreakerWithPhotos(node: PlantNode, photos: PreparedPhoto[], timing?: { captureSeconds: number }): Promise<LatestNodeStatus> {
+      async recordBreakerWithPhotos(node: PlantNode, photos: PreparedPhoto[], timing?: { captureSeconds: number }, inspectionEventId: string | null = null): Promise<LatestNodeStatus> {
         if (photos.map((p) => p.side).sort().join(',') !== 'back,front') throw new Error('Camera mode needs a front and a back photo.')
-        const observation = await recordStatus(node, 'BreakerFruit')
+        const observation = await recordStatus(node, 'BreakerFruit', inspectionEventId)
         for (const p of photos) await submitPhoto(node, observation.id, p, { captureSeconds: timing?.captureSeconds ?? null })
         return observation
       },
@@ -643,9 +722,10 @@ export function useCollectorActions() {
       /**
        * "✓ Stem checked": the worker confirms every node of this stem was
        * looked at this week, even if nothing changed. checked = false takes
-       * it back (a new record; nothing is edited).
+       * it back (a new record; nothing is edited). In a post-harvest
+       * inspection it is "✓ All fruit checked" for that harvest.
        */
-      async recordStemVisit(stem: MeasurementStem, checked: boolean): Promise<StemVisit> {
+      async recordStemVisit(stem: MeasurementStem, checked: boolean, inspectionEventId: string | null = null): Promise<StemVisit> {
         const { year, week } = currentGreenhouseWeek()
         const record = {
           id: newId(),
@@ -656,6 +736,8 @@ export function useCollectorActions() {
           week_number: week,
           checked,
           observed_at: new Date().toISOString(),
+          harvest_event_id: inspectionEventId,
+          all_fruit_checked: inspectionEventId ? checked : null,
         }
         await submit({ type: 'record_stem_visit', record })
         return record

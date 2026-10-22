@@ -1,4 +1,5 @@
 import type { CropColor, Database, NodeStatus } from '../../lib/database.types'
+import type { InspectionAnswer } from '../harvests/model'
 
 type Tables = Database['public']['Tables']
 
@@ -8,7 +9,9 @@ export type MeasurementStem = Tables['measurement_stems']['Row']
 export type PlantNode = Tables['plant_nodes']['Row']
 export type NodeObservation = Tables['node_observations']['Row']
 export type StemGrowthMeasurement = Tables['stem_growth_measurements']['Row']
-export type StemVisit = Pick<Tables['stem_visits']['Row'], 'id' | 'measurement_stem_id' | 'year' | 'week_number' | 'checked' | 'observed_at'>
+export type StemVisit = Pick<Tables['stem_visits']['Row'], 'id' | 'measurement_stem_id' | 'year' | 'week_number' | 'checked' | 'observed_at' | 'harvest_event_id' | 'all_fruit_checked'>
+/** An observation recorded as an answer in a harvest's post-harvest inspection (with its node, status and time). */
+export type { InspectionAnswer } from '../harvests/model'
 /** A Harvestable mark (this week's count; never a node status). The latest per node and week wins. */
 export type HarvestableMark = Pick<Tables['harvestable_marks']['Row'], 'id' | 'plant_node_id' | 'year' | 'week_number' | 'harvestable' | 'observed_at'>
 export type SamplingWeekEvent = Pick<Tables['sampling_week_events']['Row'], 'id' | 'crop_id' | 'year' | 'week_number' | 'event' | 'observed_at'>
@@ -47,6 +50,8 @@ export type RowCanvasData = {
   visits: StemVisit[]
   /** Harvestable marks of this row's nodes in the current greenhouse week (absent in copies saved before Harvestable existed). */
   harvestable?: HarvestableMark[]
+  /** Post-harvest inspection answers on this row's nodes (recent weeks; absent in copies saved before inspections existed). */
+  answers?: InspectionAnswer[]
 }
 
 /** This organization's stem checks and sampling completions for the weeks the home screen shows. */

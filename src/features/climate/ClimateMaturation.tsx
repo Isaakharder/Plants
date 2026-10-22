@@ -10,8 +10,9 @@ import { sortCrops } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
 import { useClimateSource, useZoneUse } from './api'
 import { ClimateTabs } from './ClimateTabs'
-import { MIN_TEMP_COVERAGE, studyResult, type Exclusion, type Fruit, type Summary } from './maturation'
-import { useMaturation } from './maturationData'
+import { MIN_TEMP_COVERAGE, studyResult, summarize, type Exclusion, type Fruit, type Summary } from './maturation'
+import { useMaturation, type MaturationData } from './maturationData'
+import { bandSummaries, evaluate, MIN_TEST, MIN_TRAIN, type Measure } from './colourProgression'
 import { pickVariety } from './varietyClimate'
 import styles from './Climate.module.css'
 
@@ -58,7 +59,12 @@ export function ClimateMaturation() {
     if (source.isPending || crops.isPending || zoneUse.isPending || (study.isPending && cropId)) return <LoadingState />
     if (source.error || study.error) return <ErrorState error={(source.error ?? study.error)!} />
     if (!cropId || !study.data) return <EmptyState title="No variety has climate zones yet" description="Assign each variety its zones in Settings › Climate." />
-    return <Study fruits={study.data.fruits} climateFrom={study.data.climateFrom} climateTo={study.data.climateTo} />
+    return (
+      <>
+        <Study fruits={study.data.fruits} climateFrom={study.data.climateFrom} climateTo={study.data.climateTo} />
+        <ColourToHarvest progression={study.data.progression} />
+      </>
+    )
   }
 
   return (
@@ -195,3 +201,129 @@ function Study({ fruits, climateFrom, climateTo }: { fruits: Fruit[]; climateFro
     </>
   )
 }
+
+const MEASURE_TEXT: Record<Measure, string> = { days: 'Days', degreeDays: '°C·days', radiation: 'Radiation (J/cm²)' }
+
+/**
+ * Post-harvest inspections: colour % at each Breaker photo against the time to
+ * the fruit's harvest, for fruit whose harvest date is inferred from a complete
+ * inspection or confirmed by a person. Exploratory: too few points give no
+ * evaluation, and nothing here feeds a forecast.
+ */
+function ColourToHarvest({ progression }: { progression: MaturationData['progression'] }) {
+  if (progression === null) {
+    return (
+      <div className={styles.card}>
+        <h3 className={styles.chartTitle}>Colour → harvest (post-harvest inspections)</h3>
+        <p className={`${styles.small} ${styles.muted}`}>Not available yet: harvests and inspections aren’t set up in this database.</p>
+      </div>
+    )
+  }
+  const { points, datedFruit, measuredFruit } = progression
+  const bands = bandSummaries(points)
+  const evaluations = evaluate(points)
+  const near = points.filter((p) => p.lastBeforeHarvest)
+  return (
+    <div className={styles.card}>
+      <h3 className={styles.chartTitle}>Colour → harvest (post-harvest inspections)</h3>
+      <p className={`${styles.small} ${styles.muted}`}>
+        Each point is a Breaker photo pair’s colour % (a person’s estimate wins over an automatic one) of a fruit whose harvest date is known: inferred from a
+        complete post-harvest inspection, or confirmed by a person. Time to harvest runs from the photo day to the harvest day; °C·days and radiation follow the
+        same coverage rules as above. Fruit without a dated harvest are left out; no date is guessed. The harvest’s minimum colour is the pickers’ target, not a
+        measurement.
+      </p>
+      <ul className={styles.small}>
+        <li>
+          {datedFruit} harvested fruit with a dated harvest; {measuredFruit} of them have colour measurements ({points.length} measurements, {near.length} “near
+          harvest”).
+        </li>
+        {near.length > 0 && (
+          <li className={styles.muted}>
+            Colour at the last photo before harvest: median {f(summarize(near.map((p) => p.percent)).median, 0)}% · median {f(summarize(near.map((p) => p.toHarvest.days)).median, 0)} days before
+            harvest.
+          </li>
+        )}
+      </ul>
+      {points.length === 0 ? (
+        <p className={`${styles.small} ${styles.muted}`}>
+          No points yet. They appear once Breakers photographed at a post-harvest inspection are found harvested at a later complete inspection.
+        </p>
+      ) : (
+        <>
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th className={styles.left}>Colour at photo</th>
+                  <th>Fruit · photos</th>
+                  <th>Days to harvest</th>
+                  <th>°C·days to harvest</th>
+                  <th>J/cm² to harvest</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bands.map((b) => (
+                  <tr key={b.label}>
+                    <td className={styles.left}>{b.label}</td>
+                    <td>
+                      {b.fruit} · {b.points}
+                    </td>
+                    {[b.days, b.degreeDays, b.radiation].map((x, i) => (
+                      <td key={i}>
+                        {x.n === 0 ? '—' : `${f(x.median, 0)} (${f(x.min, 0)}–${f(x.max, 0)})`}
+                        {x.n > 0 && <span className={styles.range}>n {x.n}{x.cv !== null ? ` · spread ${pct(x.cv)}` : ''}</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <h3 className={styles.chartTitle}>Which measure predicts the time left best?</h3>
+          <p className={`${styles.small} ${styles.muted}`}>
+            The prediction is the median of the photo’s colour band in the training points; the error is the mean absolute error ÷ the mean actual value, so the
+            three measures can be compared (lower = better). Needs at least {MIN_TRAIN} training and {MIN_TEST} test points.
+          </p>
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th className={styles.left}>Held out</th>
+                  <th>Train · test</th>
+                  {(['days', 'degreeDays', 'radiation'] as const).map((m) => (
+                    <th key={m}>{MEASURE_TEXT[m]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {evaluations.length === 0 ? (
+                  <tr>
+                    <td className={`${styles.left} ${styles.muted}`} colSpan={5}>
+                      Needs points on at least two harvest dates or two stems.
+                    </td>
+                  </tr>
+                ) : (
+                  evaluations.map((e) => (
+                    <tr key={e.split}>
+                      <td className={styles.left}>
+                        {e.split === 'later_dates' ? 'Later harvest dates' : 'Other stems'}
+                        <span className={styles.range}>{e.description}</span>
+                      </td>
+                      <td>
+                        {e.train} · {e.test}
+                      </td>
+                      {(['days', 'degreeDays', 'radiation'] as const).map((m) => (
+                        <td key={m}>{e.relativeError[m] === null ? <span className={styles.muted}>too few</span> : pct(e.relativeError[m])}</td>
+                      ))}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+

@@ -155,7 +155,7 @@ describe('many photos waiting on one phone', () => {
       calls++
       if (calls === 12) return { ok: false, retryable: true, message: 'Wi-Fi dropped' } // the connection drops mid-way
       if (w.type === 'upload_photo' && w.record.id === 'p7back') return { ok: false, retryable: false, message: 'Photo record: refused' }
-      sent.push(w.type === 'upload_photo' ? String(w.record.id) : String(w.record.id))
+      sent.push(String((w.record as { id: string }).id))
       return { ok: true }
     }
     const first = await queue.sync('u', execute)

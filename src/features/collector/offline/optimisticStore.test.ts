@@ -88,8 +88,35 @@ describe('stem checks and sampling completion (offline)', () => {
 
   it('shows a queued check on its own row only', () => {
     const merged = mergeRowCanvas(server, 'r1', [check, otherRow])
-    expect(merged.visits).toEqual([{ id: 'v1', measurement_stem_id: 's1', year: 2026, week_number: 42, checked: true, observed_at: '2026-10-16T12:00:00Z' }])
+    expect(merged.visits).toEqual([
+      { id: 'v1', measurement_stem_id: 's1', year: 2026, week_number: 42, checked: true, observed_at: '2026-10-16T12:00:00Z', harvest_event_id: null, all_fruit_checked: null },
+    ])
     expect(mergeRowCanvas(merged, 'r1', [check, otherRow])).toEqual(merged)
+  })
+
+  it('shows queued post-harvest answers and the inspection check before they sync', () => {
+    const answer = queued({
+      type: 'record_inspection_answer',
+      record: { node_observation_id: 'o9', harvest_event_id: 'h1', ...base },
+      plantNodeId: 'n1',
+      answerStatus: 'Harvested',
+      observedAt: '2026-10-19T19:00:00Z',
+    })
+    const elsewhere = queued({
+      type: 'record_inspection_answer',
+      record: { node_observation_id: 'o10', harvest_event_id: 'h1', ...base },
+      plantNodeId: 'n-elsewhere',
+      answerStatus: 'Harvested',
+      observedAt: '2026-10-19T19:00:00Z',
+    })
+    const inspected = queued({
+      type: 'record_stem_visit',
+      record: { id: 'v3', ...base, measurement_stem_id: 's1', year: 2026, week_number: 43, checked: true, observed_at: '2026-10-19T19:05:00Z', harvest_event_id: 'h1', all_fruit_checked: true },
+    })
+    const merged = mergeRowCanvas(server, 'r1', [answer, elsewhere, inspected])
+    expect(merged.answers).toEqual([{ node_observation_id: 'o9', harvest_event_id: 'h1', plant_node_id: 'n1', status: 'Harvested', observed_at: '2026-10-19T19:00:00Z' }])
+    expect(merged.visits).toEqual([expect.objectContaining({ id: 'v3', harvest_event_id: 'h1', all_fruit_checked: true })])
+    expect(mergeRowCanvas(merged, 'r1', [answer, elsewhere, inspected])).toEqual(merged)
   })
 
   it('adds queued checks and completions to the week progress, idempotently', () => {

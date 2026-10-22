@@ -35,13 +35,15 @@ function fakeDatabase() {
   const sent: string[] = []
   let failNext: null | { retryable: boolean; afterWrite: boolean } = null
   const execute: WriteExecutor = async (write) => {
-    sent.push(write.record.id)
+    // Every write in these tests has its own id (inspection answers are keyed by their observation).
+    const key = (write.record as { id: string }).id
+    sent.push(key)
     if (failNext && !failNext.afterWrite) {
       const { retryable } = failNext
       failNext = null
       return { ok: false, retryable, message: retryable ? 'Failed to fetch' : 'violates foreign key constraint' }
     }
-    if (!rows.has(write.record.id)) rows.set(write.record.id, write)
+    if (!rows.has(key)) rows.set(key, write)
     if (failNext?.afterWrite) {
       failNext = null
       // The write reached the database but the response never came back.
@@ -98,7 +100,7 @@ describe('OfflineQueue', () => {
     db.fail({ retryable: true, afterWrite: false })
     await queue.sync(USER, db.execute)
     expect(db.sent).toEqual(['r1'])
-    expect(queue.list(USER).map((a) => [a.record.id, a.status, a.attempts])).toEqual([['r1', 'pending', 1], ['s1', 'pending', 0]])
+    expect(queue.list(USER).map((a) => [(a.record as { id: string }).id, a.status, a.attempts])).toEqual([['r1', 'pending', 1], ['s1', 'pending', 0]])
   })
 
   it('keeps a rejected write as failed instead of discarding it, and retries it on request', async () => {
@@ -146,7 +148,7 @@ describe('OfflineQueue', () => {
     expect(await queue.withdrawCreateNode('n1')).toBe(true)
     // n2 already has a status queued against it, so it must be deactivated instead.
     expect(await queue.withdrawCreateNode('n2')).toBe(false)
-    expect(queue.list(USER).map((a) => a.record.id)).toEqual(['n2', 'o2'])
+    expect(queue.list(USER).map((a) => (a.record as { id: string }).id)).toEqual(['n2', 'o2'])
     // Reads that started before the withdrawal use this to not bring the node back.
     expect(queue.wasWithdrawn(n1.id)).toBe(true)
   })

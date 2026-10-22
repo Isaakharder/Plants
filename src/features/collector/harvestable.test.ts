@@ -96,12 +96,12 @@ describe('Harvestable in the offline queue', () => {
     let dropped = false
     // The first mark reaches the server but its response is lost: it is sent again (an insert-once upsert server-side).
     const first = await queue.sync('u', async (w) => {
-      sent.push(w.record.id as string)
+      sent.push((w.record as { id: string }).id)
       if (w.type === 'record_harvestable' && !dropped) { dropped = true; return { ok: false, retryable: true, message: 'network' } }
       return { ok: true }
     })
     expect(first.interrupted).toBe(true)
-    await queue.sync('u', async (w) => { sent.push(w.record.id as string); return { ok: true } })
+    await queue.sync('u', async (w) => { sent.push((w.record as { id: string }).id); return { ok: true } })
     expect(sent).toEqual(['o3', 'm1', 'm1', 'm2'])
     expect(queue.list('u')).toEqual([])
   })

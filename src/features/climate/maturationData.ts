@@ -7,13 +7,21 @@ import { supabase } from '../../lib/supabase'
 import { fetchAll } from '../collector/fetchAll'
 import { addDays } from './reports'
 import { localDateOf, studyFruits, type Fruit, type StudyClimate, type StudyFlag, type StudyNode, type StudyObservation } from './maturation'
+import { analysesInEffect, progressionPoints, type ColourAnalysis, type DatedHarvest, type ProgressionPoint } from './colourProgression'
+import { hasHarvestDate } from '../harvests/model'
 
 const check = <T,>(res: { data: T | null; error: { message: string } | null }): T => {
   if (res.error) throw new Error(res.error.message)
   return res.data as T
 }
 
-export type MaturationData = { fruits: Fruit[]; climateFrom: string | null; climateTo: string | null }
+export type MaturationData = {
+  fruits: Fruit[]
+  climateFrom: string | null
+  climateTo: string | null
+  /** Colour → harvest points from post-harvest inspections; null when the harvest functions aren't available. */
+  progression: { points: ProgressionPoint[]; datedFruit: number; measuredFruit: number } | null
+}
 
 export async function loadMaturation(cropId: string, timeZone: string): Promise<MaturationData> {
   const count = (withCount: boolean) => (withCount ? { count: 'exact' as const } : undefined)
@@ -76,7 +84,61 @@ export async function loadMaturation(cropId: string, timeZone: string): Promise<
     climateFrom = covered[0] ?? null
     climateTo = covered[covered.length - 1] ?? null
   }
-  return { fruits: studyFruits(observations, nodes, visits, studyFlags, climate, timeZone), climateFrom, climateTo }
+  return {
+    fruits: studyFruits(observations, nodes, visits, studyFlags, climate, timeZone),
+    climateFrom,
+    climateTo,
+    progression: await loadProgression(cropId, observations, nodes, climate, timeZone),
+  }
+}
+
+/**
+ * Colour measurements of fruit with a dated harvest (inferred or confirmed).
+ * Null when the harvest functions don't exist yet (database not migrated):
+ * the rest of the study still loads.
+ */
+async function loadProgression(
+  cropId: string,
+  observations: StudyObservation[],
+  nodes: StudyNode[],
+  climate: StudyClimate,
+  timeZone: string,
+): Promise<MaturationData['progression']> {
+  const links = await supabase.rpc('fruit_harvest_links', { p_crop_id: cropId })
+  if (links.error) {
+    console.warn('[maturation] harvest links not available', links.error.message)
+    return null
+  }
+  const crop = check(await supabase.from('crops').select('organization_id').eq('id', cropId).single()) as { organization_id: string }
+  const events = check(await supabase.rpc('harvest_events_in_effect', { p_organization_id: crop.organization_id, p_crop_id: cropId }))
+  const minColour = new Map(events.map((e) => [e.event_id, Number(e.min_colour_percent)]))
+  const dated: DatedHarvest[] = (links.data ?? [])
+    .filter((l) => hasHarvestDate(l.link_status) && l.harvest_date && l.link_event_id)
+    .map((l) => ({ node: l.plant_node_id, harvestDate: l.harvest_date!, status: l.link_status as DatedHarvest['status'], minColour: minColour.get(l.link_event_id!) ?? null }))
+  const analyses = await fetchAll<ColourAnalysis>((after, limit, withCount) => {
+    let q = supabase
+      .from('photo_colour_analyses')
+      .select('id, node_observation_id, kind, combined_percent, confidence, supersedes_id, created_at', withCount ? { count: 'exact' as const } : undefined)
+      .eq('crop_id', cropId)
+    if (after) q = q.gt('id', after)
+    return q.order('id').limit(limit)
+  }, (a) => a.id)
+  const obsById = new Map(observations.map((o) => [o.id, o]))
+  const stemOf = new Map(nodes.map((n) => [n.id, n.measurement_stem_id]))
+  const measurements = [...analysesInEffect(analyses.map((a) => ({ ...a, combined_percent: Number(a.combined_percent), confidence: a.confidence === null ? null : Number(a.confidence) }))).values()]
+    .map((a) => ({ a, o: obsById.get(a.node_observation_id) }))
+    .filter((x) => x.o)
+    .map(({ a, o }) => ({
+      node: o!.plant_node_id,
+      stem: stemOf.get(o!.plant_node_id) ?? '',
+      observationId: o!.id,
+      at: o!.observed_at,
+      percent: a.combined_percent,
+      byPerson: a.kind !== 'automatic',
+      confidence: a.confidence,
+    }))
+  const points = progressionPoints(measurements, dated, climate, timeZone)
+  return { points, datedFruit: dated.length, measuredFruit: new Set(points.map((p) => p.node)).size }
 }
 
 export function useMaturation(cropId: string | undefined, timeZone: string) {

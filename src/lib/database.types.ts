@@ -252,6 +252,127 @@ export type StemVisitRow = {
   observed_at: string
   recorded_at: string
   created_by: string | null
+  /** Post-harvest inspection: the harvest (event_id) this check belongs to; null for ordinary checks. */
+  harvest_event_id?: string | null
+  /** Post-harvest inspection: every fruit on the stem answered ("✓ All fruit checked"). */
+  all_fruit_checked?: boolean | null
+}
+
+export type HarvestCoverage = 'complete' | 'partial'
+export type HarvestRange = { from: number; to: number; coverage: HarvestCoverage }
+export type HarvestSampledRow = { row_id: string; row_name: string; row_number: number; coverage: HarvestCoverage }
+
+/** A harvest of greenhouse row ranges as now in effect (harvest_events_in_effect()). */
+export type HarvestEventInEffect = {
+  event_id: string
+  version_id: string
+  crop_id: string
+  harvest_date: string
+  finished_at: string | null
+  starts_at: string
+  ends_at: string
+  /** The grower's intended minimum mature colour, not the colour of the harvested fruit. */
+  min_colour_percent: number
+  harvested_kg: number | null
+  note: string | null
+  cancelled: boolean
+  versions: number
+  first_recorded_at: string
+  first_recorded_by: string
+  recorded_at: string
+  recorded_by: string
+  ranges: HarvestRange[]
+  sampled_rows: HarvestSampledRow[]
+}
+
+/** A node observation recorded as an answer in a harvest's post-harvest inspection. */
+export type HarvestInspectionAnswerRow = {
+  node_observation_id: string
+  harvest_event_id: string
+  organization_id: string
+  crop_id: string
+  recorded_at: string
+  created_by: string | null
+}
+
+export type InspectionState = 'not_started' | 'in_progress' | 'complete' | 'retracted'
+
+/** Inspection progress of one sampled stem for one harvest (post_harvest_inspection_stems()). */
+export type InspectionStemRow = {
+  event_id: string
+  harvest_date: string
+  measurement_row_id: string
+  row_name: string
+  coverage: HarvestCoverage
+  measurement_stem_id: string
+  stem_name: string
+  state: InspectionState
+  checked_at: string | null
+  to_confirm: number
+  answered: number
+  unanswered: number
+  new_nodes: number
+  harvested: number
+  later_harvest: boolean
+}
+
+export type HarvestLinkStatus =
+  | 'confirmed'
+  | 'rejected'
+  | 'not_from_inspection'
+  | 'inspection_incomplete'
+  | 'partial_row'
+  | 'later_harvest'
+  | 'no_earlier_record'
+  | 'no_matching_harvest'
+  | 'several_possible'
+  | 'inferred'
+
+/** Which harvest took a Harvested fruit (fruit_harvest_links()). */
+export type FruitHarvestLinkRow = {
+  node_observation_id: string
+  plant_node_id: string
+  measurement_stem_id: string
+  measurement_row_id: string
+  harvested_at: string
+  last_on_plant_at: string | null
+  last_on_plant_status: NodeStatus | null
+  inspection_event_id: string | null
+  candidate_event_ids: string[]
+  link_status: HarvestLinkStatus
+  link_event_id: string | null
+  harvest_date: string | null
+  reviewed_at: string | null
+  reviewed_by: string | null
+  review_note: string | null
+}
+
+export type HarvestLinkReviewRow = {
+  id: string
+  seq: number
+  organization_id: string
+  crop_id: string
+  node_observation_id: string
+  decision: 'confirmed' | 'rejected' | 'unreviewed'
+  harvest_event_id: string | null
+  note: string | null
+  link_snapshot: Record<string, unknown>
+  reviewed_at: string
+  reviewed_by: string
+}
+
+/** What a sampled stem's latest records say is on the plant (stem_inventory_latest()). */
+export type StemInventoryRow = {
+  measurement_row_id: string
+  row_name: string
+  measurement_stem_id: string
+  stem_name: string
+  last_record_at: string | null
+  set_fruit: number
+  mature_green: number
+  breakers: number
+  last_inspection_event_id: string | null
+  last_inspection_at: string | null
 }
 
 /** A pepper marked ready to pick in a greenhouse week (harvestable = false takes it back). Never a node status. */
@@ -526,7 +647,7 @@ export type ForecastLockJobRow = {
   year: number
   week: number
   sampling_event_id: string
-  status: 'pending' | 'waiting_for_sync' | 'running' | 'retry' | 'done' | 'superseded' | 'incomplete' | 'failed'
+  status: 'pending' | 'waiting_for_sync' | 'running' | 'retry' | 'done' | 'superseded' | 'incomplete' | 'failed' | 'paused'
   attempts: number
   next_attempt_at: string
   lease_until: string | null
@@ -939,7 +1060,33 @@ export type Database = {
       }
       stem_visits: {
         Row: StemVisitRow
-        Insert: Pick<StemVisitRow, 'id' | 'organization_id' | 'crop_id' | 'measurement_stem_id' | 'year' | 'week_number' | 'checked' | 'observed_at'>
+        Insert: Pick<StemVisitRow, 'id' | 'organization_id' | 'crop_id' | 'measurement_stem_id' | 'year' | 'week_number' | 'checked' | 'observed_at'> &
+          Partial<Pick<StemVisitRow, 'harvest_event_id' | 'all_fruit_checked'>>
+        Update: never
+        Relationships: []
+      }
+      harvest_events: {
+        Row: { id: string; event_id: string; organization_id: string; crop_id: string; harvest_date: string; finished_at: string | null; min_colour_percent: number; harvested_kg: number | null; note: string | null; cancelled: boolean; replaces_id: string | null; recorded_at: string; recorded_by: string }
+        Insert: never
+        Update: never
+        Relationships: []
+      }
+      harvest_event_ranges: {
+        Row: { harvest_event_version_id: string; organization_id: string; position: number; from_row: number; to_row: number; coverage: HarvestCoverage }
+        Insert: never
+        Update: never
+        Relationships: []
+      }
+      harvest_inspection_answers: {
+        Row: HarvestInspectionAnswerRow
+        Insert: Pick<HarvestInspectionAnswerRow, 'node_observation_id' | 'harvest_event_id' | 'organization_id' | 'crop_id'>
+        Update: never
+        Relationships: []
+      }
+      harvest_link_reviews: {
+        Row: HarvestLinkReviewRow
+        Insert: Pick<HarvestLinkReviewRow, 'organization_id' | 'crop_id' | 'node_observation_id' | 'decision'> &
+          Partial<Pick<HarvestLinkReviewRow, 'id' | 'harvest_event_id' | 'note' | 'link_snapshot'>>
         Update: never
         Relationships: []
       }
@@ -1094,6 +1241,41 @@ export type Database = {
       weekly_harvestable: {
         Args: { p_crop_id: string; p_year: number }
         Returns: WeeklyHarvestableRow[]
+      }
+      record_harvest_event: {
+        Args: {
+          p_crop_id: string
+          p_harvest_date: string | null
+          p_finished_at: string | null
+          p_min_colour_percent: number | null
+          p_ranges: HarvestRange[] | null
+          p_harvested_kg?: number | null
+          p_note?: string | null
+          p_replaces_id?: string | null
+          p_cancel?: boolean
+          p_id?: string | null
+        }
+        Returns: { version_id: string; event_id: string; sampled_rows: HarvestSampledRow[] }[]
+      }
+      harvest_events_in_effect: {
+        Args: { p_organization_id: string; p_crop_id?: string | null; p_as_of?: string }
+        Returns: HarvestEventInEffect[]
+      }
+      post_harvest_inspection_stems: {
+        Args: { p_crop_id: string; p_as_of?: string }
+        Returns: InspectionStemRow[]
+      }
+      fruit_harvest_links: {
+        Args: { p_crop_id: string; p_as_of?: string }
+        Returns: FruitHarvestLinkRow[]
+      }
+      stem_inventory_latest: {
+        Args: { p_crop_id: string; p_as_of?: string }
+        Returns: StemInventoryRow[]
+      }
+      post_harvest_workflow_from: {
+        Args: { p_crop_id: string }
+        Returns: number | null
       }
       sampling_weeks: {
         Args: { p_crop_id: string; p_year: number; p_as_of?: string }

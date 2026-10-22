@@ -5,6 +5,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { useCrops } from '../crops/api'
 import { sortCrops, type Crop } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
+import { useWorkflowFrom } from '../harvests/api'
 import { ProjectionsTabs } from '../projections/ProjectionsTabs'
 import wpd from '../projections/WeeklyPlantDataTab.module.css'
 import {
@@ -70,6 +71,9 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
   const invalidate = useInvalidateForecasts()
   const live = useLiveAccuracy(crop)
   const jobs = useLockJobs(crop.id)
+  // Post-harvest inspections: official locking is paused from this week (yyyyww) on.
+  const workflowFrom = useWorkflowFrom(crop.id).data ?? null
+  const paused = (week: number) => workflowFrom !== null && now.year * 100 + week >= workflowFrom
   const [selectedRun, setSelectedRun] = useState<string | null>(null)
   const [busy, setBusy] = useState<'preview' | 'lock' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -168,7 +172,11 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
 
   // Completed weeks without a locked forecast that can be locked: every sampled stem checked (the server enforces it too).
   const completedUnlocked = samplingRows.filter(
-    (r) => r.state === 'complete' && r.checked_stems >= r.expected_stems && !runs.data?.some((run) => run.origin_year === now.year && run.origin_week === r.iso_week),
+    (r) =>
+      r.state === 'complete' &&
+      r.checked_stems >= r.expected_stems &&
+      !paused(r.iso_week) &&
+      !runs.data?.some((run) => run.origin_year === now.year && run.origin_week === r.iso_week),
   )
 
   return (
@@ -223,6 +231,14 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
       </div>
 
       {error && <div className={styles.error}>{error}</div>}
+
+      {workflowFrom !== null && (
+        <div className={styles.pending} role="status">
+          {crop.name} uses post-harvest inspections from {Math.floor(workflowFrom / 100)}-W{String(workflowFrom % 100).padStart(2, '0')}. The Breakers-only
+          method (and its {'harvest-ready'} share) was calibrated on Friday walkthroughs, so official forecasts aren’t locked for those weeks until it is reviewed.
+          Previews still work for comparison; forecasts already locked are unchanged.
+        </div>
+      )}
 
       {/* Lock buttons stay in sight when a completed week can be locked. */}
       {completedUnlocked.length > 0 && (
@@ -291,6 +307,7 @@ const JOB_TEXT: Record<string, (job: { last_error: string | null; next_attempt_a
   retry: (j) => `the server will retry at ${dateTime(j.next_attempt_at)} (${j.last_error ?? 'error'})`,
   failed: (j) => `the server couldn’t lock it: ${j.last_error ?? 'unknown error'}`,
   incomplete: (j) => `not locked: ${j.last_error ?? 'not every sampled stem was checked'} Check the remaining stems and mark sampling complete again.`,
+  paused: (j) => `not locked: ${j.last_error ?? 'official forecasts are paused for the post-harvest workflow.'}`,
 }
 
 function LockStatus(props: {

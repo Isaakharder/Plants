@@ -13,7 +13,7 @@
 //     preview) are stored in the queue entry itself (IndexedDB keeps Blobs), so
 //     they survive reloads and offline days until they have been uploaded.
 
-import type { Database } from '../../../lib/database.types'
+import type { Database, NodeStatus } from '../../../lib/database.types'
 
 type Insert<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Insert']
 
@@ -29,6 +29,12 @@ export type QueuedWrite =
   | { type: 'record_sampling_event'; record: Insert<'sampling_week_events'> }
   /** Harvestable this week (or taken back): a separate record, never a node status. */
   | { type: 'record_harvestable'; record: Insert<'harvestable_marks'> }
+  /**
+   * Ties an observation (queued just before it) to a harvest's post-harvest
+   * inspection. Its node, status and time are kept on the device only, to
+   * show the answer before it syncs; never sent.
+   */
+  | { type: 'record_inspection_answer'; record: Insert<'harvest_inspection_answers'>; plantNodeId: string; answerStatus: NodeStatus; observedAt: string }
   /**
    * A Breaker photo: the original image and its small preview, kept on the
    * device until uploaded, and its record. Queued after its observation.

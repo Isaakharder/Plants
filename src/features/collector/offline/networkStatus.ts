@@ -58,6 +58,9 @@ export async function executeWrite(write: QueuedWrite): Promise<WriteResult> {
         return supabase.from('sampling_week_events').upsert(write.record, insertOnce)
       case 'record_harvestable':
         return supabase.from('harvestable_marks').upsert(write.record, insertOnce)
+      case 'record_inspection_answer':
+        // One answer per observation: a replay is a no-op.
+        return supabase.from('harvest_inspection_answers').upsert(write.record, { onConflict: 'node_observation_id', ignoreDuplicates: true })
     }
   })()
   if (!res.error) return { ok: true }

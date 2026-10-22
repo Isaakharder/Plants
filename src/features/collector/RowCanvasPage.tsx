@@ -8,14 +8,16 @@
 //   * legacy CropLink statuses (GolfBall, Harvestable, …) are not carried over
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { duplicateExplanation, rowAttention, useNow, type NodeAttention } from './attention';
 import { COLORS } from '../plantArt/colors';
 import { statusTone } from '../plantArt/frames';
 import { StatusIcon } from '../plantArt/StatusArt';
 import { useOrganization } from '../organization/OrganizationProvider';
-import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRowCanvas } from './api';
+import { NotOnDeviceError, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRecentHarvests, useRowCanvas } from './api';
+import { InspectionPanel } from './InspectionPanel';
+import { dayLabel, nodeName, rangesLabel, stemInspection, type StemInspection } from '../harvests/model';
 import { pickerOptions } from './statusOptions';
 import { checkedStemIds, nextUncheckedIndex } from './samplingProgress';
 import { BreakerCapture, type CaptureMode } from './BreakerCapture';
@@ -123,6 +125,24 @@ export function RowCanvasPage() {
   const row = canvasQuery.data?.row ?? null;
   const crop = row ? crops?.find(c => c.id === row.crop_id) : undefined;
 
+  // Post-harvest inspection (?harvest=<harvest>): every fruit on the stem is
+  // answered for that harvest, and "Still Breaker" / photos work once per
+  // inspection instead of once per week (a row can be harvested twice a week).
+  const [search] = useSearchParams();
+  const harvestParam = search.get('harvest');
+  const recentHarvests = useRecentHarvests(organization.id, userId);
+  const inspection = useMemo(() => {
+    const e = recentHarvests.data?.find(h => h.event_id === harvestParam);
+    return e && !e.cancelled && e.sampled_rows.some(r => r.row_id === rowId) ? e : null;
+  }, [recentHarvests.data, harvestParam, rowId]);
+  const inspectionId = inspection?.event_id ?? null;
+  const answers = useMemo(() => canvasQuery.data?.answers ?? [], [canvasQuery.data]);
+  // Observations that are answers of this inspection.
+  const answerIds = useMemo(
+    () => new Set(answers.filter(a => a.harvest_event_id === inspectionId).map(a => a.node_observation_id)),
+    [answers, inspectionId],
+  );
+
   // Header: loaded by rowId; router state is only a fast first paint.
   const ctx = (location.state ?? {}) as Partial<CanvasState>;
   const rowName      = row?.row_name ?? ctx.rowName ?? 'Row';
@@ -162,16 +182,26 @@ export function RowCanvasPage() {
   }, [drafts, canvasQuery.data]);
   const [message,  setMessage]  = useState('');
 
-  /** The node's latest record when it is a Breaker from an earlier week (Friday walkthrough: still Breaker?). */
+  /**
+   * The node's latest record when it is a Breaker from an earlier week (Friday walkthrough: still Breaker?).
+   * In an inspection: a Breaker not yet answered in this inspection.
+   */
   const breakerEarlier = (stemId: string, nodeId: string): LatestNodeStatus | null => {
     const latest = (statusesByStem[stemId] ?? []).find(s => s.plant_node_id === nodeId);
-    return latest && latest.status === 'BreakerFruit' && (latest.year < currentYear || (latest.year === currentYear && latest.week_number < currentWeek)) ? latest : null;
+    if (!latest || latest.status !== 'BreakerFruit') return null;
+    if (inspectionId) return answerIds.has(latest.id) ? null : latest;
+    return latest.year < currentYear || (latest.year === currentYear && latest.week_number < currentWeek) ? latest : null;
   };
 
-  /** The node's Breaker of this greenhouse week, if one is recorded (queued writes included). */
+  /**
+   * The node's Breaker of this greenhouse week, if one is recorded (queued writes included).
+   * In an inspection: the Breaker answered in this inspection.
+   */
   const breakerThisWeek = (stemId: string, nodeId: string): LatestNodeStatus | null => {
     const latest = (statusesByStem[stemId] ?? []).find(s => s.plant_node_id === nodeId);
-    return latest && latest.status === 'BreakerFruit' && latest.year === currentYear && latest.week_number === currentWeek ? latest : null;
+    if (!latest || latest.status !== 'BreakerFruit') return null;
+    if (inspectionId) return answerIds.has(latest.id) ? latest : null;
+    return latest.year === currentYear && latest.week_number === currentWeek ? latest : null;
   };
 
   const [vegModal,     setVegModal]     = useState(false);
@@ -252,8 +282,28 @@ export function RowCanvasPage() {
     () => checkedStemIds(canvasQuery.data?.visits ?? [], { year: currentYear, week: currentWeek }),
     [canvasQuery.data, currentYear, currentWeek],
   );
-  const checkedCount = stems.filter(s => checkedThisWeek.has(s.id)).length;
-  const activeChecked = activeStem ? checkedThisWeek.has(activeStem.id) : false;
+  // In an inspection: each stem's answers and whether "✓ All fruit checked" completes it.
+  const latestByNode = useMemo(
+    () => new Map((canvasQuery.data?.statuses ?? []).map(s => [s.plant_node_id, s.status])),
+    [canvasQuery.data],
+  );
+  const inspectionByStem = useMemo(() => {
+    if (!inspectionId) return null;
+    const visits = canvasQuery.data?.visits ?? [];
+    return new Map<string, StemInspection>(stems.map(s => [
+      s.id,
+      stemInspection(inspectionId, (nodesByStem[s.id] ?? []).map(n => n.id), latestByNode, answers, visits.filter(v => v.measurement_stem_id === s.id)),
+    ]));
+  }, [inspectionId, stems, nodesByStem, latestByNode, answers, canvasQuery.data]);
+  const inspectedIds = useMemo(
+    () => new Set(inspectionByStem ? [...inspectionByStem].filter(([, i]) => i.state === 'complete').map(([id]) => id) : []),
+    [inspectionByStem],
+  );
+  const activeInspection = activeStem && inspectionByStem ? inspectionByStem.get(activeStem.id) ?? null : null;
+
+  const doneIds = inspectionId ? inspectedIds : checkedThisWeek;
+  const checkedCount = stems.filter(s => doneIds.has(s.id)).length;
+  const activeChecked = activeStem ? doneIds.has(activeStem.id) : false;
   const [checking, setChecking] = useState(false);
 
   /**
@@ -264,18 +314,20 @@ export function RowCanvasPage() {
     if (!activeStem || checking) return;
     setChecking(true);
     try {
-      await actions.recordStemVisit(activeStem, checked);
+      await actions.recordStemVisit(activeStem, checked, inspectionId);
       if (!checked) {
-        setMessage(`${activeStem.stem_name} is no longer marked checked.`);
+        setMessage(inspectionId ? `${activeStem.stem_name}: inspection no longer marked complete.` : `${activeStem.stem_name} is no longer marked checked.`);
         return;
       }
-      const nowChecked = new Set(checkedThisWeek).add(activeStem.id);
+      const nowChecked = new Set(doneIds).add(activeStem.id);
       const done = stems.filter(s => nowChecked.has(s.id)).length;
       const next = nextUncheckedIndex(stems.map(s => s.id), safeIndex, nowChecked);
       if (next === null) {
-        setMessage(`${activeStem.stem_name} checked ✓ All ${stems.length} stems in ${rowName} are checked this week.`);
+        setMessage(inspectionId
+          ? `${activeStem.stem_name} inspected ✓ All ${stems.length} stems in ${rowName} are inspected for this harvest.`
+          : `${activeStem.stem_name} checked ✓ All ${stems.length} stems in ${rowName} are checked this week.`);
       } else {
-        setMessage(`${activeStem.stem_name} checked ✓ ${done} of ${stems.length} in this row. Now ${stems[next].stem_name}.`);
+        setMessage(`${activeStem.stem_name} ${inspectionId ? 'inspected' : 'checked'} ✓ ${done} of ${stems.length} in this row. Now ${stems[next].stem_name}.`);
         setActiveStemIndex(next);
         canvasRef.current?.scrollTo({ top: 0 });
       }
@@ -338,7 +390,7 @@ export function RowCanvasPage() {
     }
     setSaving(true);
     try {
-      await actions.recordBreakerWithPhotos(statusPickerCtx.node, photos, timing);
+      await actions.recordBreakerWithPhotos(statusPickerCtx.node, photos, timing, inspectionId);
       // The photos are queued now: the photo step deletes its draft.
       setDrafts(d => d.filter(x => x.nodeId !== statusPickerCtx.node.id));
       const nodeLabel = statusPickerCtx.node.is_side_shoot
@@ -388,12 +440,12 @@ export function RowCanvasPage() {
     if (!statusPickerCtx) return;
     setSaving(true);
     try {
-      await actions.recordStatus(statusPickerCtx.node, status);
+      await actions.recordStatus(statusPickerCtx.node, status, inspectionId);
       const nodeLabel = statusPickerCtx.node.is_side_shoot
         ? (statusPickerCtx.node.node_label ?? 'Shoot')
         : `Node ${statusPickerCtx.node.node_number}`;
       const still = status === 'BreakerFruit' && breakerEarlier(statusPickerCtx.stem.id, statusPickerCtx.node.id);
-      setMessage(still ? `${nodeLabel}: still Breaker (W${currentWeek})` : `${nodeLabel}: ${STATUS_LABEL[status]}`);
+      setMessage(still ? `${nodeLabel}: still Breaker (${inspectionId ? 'after this harvest' : `W${currentWeek}`})` : `${nodeLabel}: ${STATUS_LABEL[status]}`);
       closeBreakerStep();
       setStatusPickerCtx(null);
     } catch (err: unknown) {
@@ -415,6 +467,20 @@ export function RowCanvasPage() {
       setMessage(harvestable ? `${nodeLabel}: Harvestable (W${currentWeek})` : `${nodeLabel}: Harvestable taken back`);
       closeBreakerStep();
       setStatusPickerCtx(null);
+    } catch (err: unknown) {
+      setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** Inspection quick answers: still there (same status again) or Harvested, straight from the list. */
+  async function handleQuickAnswer(node: PlantNode, status: NodeStatus) {
+    if (!inspectionId || saving) return;
+    setSaving(true);
+    try {
+      await actions.recordStatus(node, status, inspectionId);
+      setMessage(`${nodeName(node)}: ${status === 'Harvested' ? 'Harvested' : `still ${STATUS_LABEL[status]}`}`);
     } catch (err: unknown) {
       setMessage(`Not saved: ${err instanceof Error ? err.message : 'Save failed'}`);
     } finally {
@@ -570,6 +636,22 @@ export function RowCanvasPage() {
 
       <OfflineBanner />
 
+      {/* ── Post-harvest inspection banner ── */}
+      {inspection ? (
+        <div className="inspection-banner" role="status">
+          <span>
+            <strong>Post-harvest inspection</strong> · harvest {dayLabel(inspection.harvest_date)} · {rangesLabel(inspection.ranges)} · aim ≥ {inspection.min_colour_percent}%
+          </span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(`/mobile/row/${rowId}`, { state: location.state, replace: true })}>
+            Leave
+          </button>
+        </div>
+      ) : harvestParam && recentHarvests.data ? (
+        <div className="inspection-banner inspection-banner--warning" role="alert">
+          This harvest isn’t available for {rowName} (cancelled, older than 3 weeks, or not covering this row). Records here are ordinary records.
+        </div>
+      ) : null}
+
       {/* ── Stem navigation bar ── */}
       {stems.length > 0 && (
         <div className="stem-nav-bar">
@@ -582,10 +664,10 @@ export function RowCanvasPage() {
             ←
           </button>
           <span className="stem-nav-name">
-            {activeChecked && <span className="stem-nav-checked" aria-label="checked this week">✓ </span>}
+            {activeChecked && <span className="stem-nav-checked" aria-label={inspectionId ? 'inspected' : 'checked this week'}>✓ </span>}
             {activeStem?.stem_name ?? ''}
             <span className="stem-nav-counter">
-              &nbsp;{safeIndex + 1} / {stems.length} · {checkedCount} checked
+              &nbsp;{safeIndex + 1} / {stems.length} · {checkedCount} {inspectionId ? 'inspected' : 'checked'}
             </span>
           </span>
           <button
@@ -662,6 +744,24 @@ export function RowCanvasPage() {
           </div>
         ) : activeStem ? (
           <div className="stem-single">
+
+            {activeInspection && (
+              <InspectionPanel
+                toConfirm={activeInspection.toConfirm}
+                answered={activeInspection.answered}
+                nodes={allNodes}
+                latest={latestByNode}
+                saving={saving}
+                onStillThere={node => {
+                  const status = latestByNode.get(node.id);
+                  // A Breaker goes through the Breaker step: still Breaker, with optional new photos.
+                  if (status === 'BreakerFruit') setStatusPickerCtx({ stem: activeStem!, node });
+                  else if (status) void handleQuickAnswer(node, status);
+                }}
+                onHarvested={node => void handleQuickAnswer(node, 'Harvested')}
+                onOther={node => { setStatusPickerCtx({ stem: activeStem!, node }); setPickerStep(node.id, 'grid'); }}
+              />
+            )}
 
             {/* Growing tip — always at the top */}
             <div className="stem-tip-actions">
@@ -849,7 +949,33 @@ export function RowCanvasPage() {
       </div>
 
       {/* ── Stem check (thumb reach, below the canvas) ── */}
-      {activeStem && (
+      {activeStem && activeInspection && (
+        <div className={`stem-check-bar${activeChecked ? ' stem-check-bar--done' : ''}`}>
+          {activeChecked ? (
+            <>
+              <span className="stem-check-done">✓ {activeStem.stem_name} inspected after this harvest</span>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={checking} onClick={() => void handleStemChecked(false)}>
+                Undo
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary stem-check-button"
+              disabled={checking || activeInspection.toConfirm.length > 0}
+              onClick={() => void handleStemChecked(true)}
+            >
+              ✓ All fruit checked
+              <span className="stem-check-remaining">
+                {activeInspection.toConfirm.length > 0
+                  ? `${activeInspection.toConfirm.length} fruit still to confirm`
+                  : `${stems.length - checkedCount} of ${stems.length} stems left in this row`}
+              </span>
+            </button>
+          )}
+        </div>
+      )}
+      {activeStem && !activeInspection && (
         <div className={`stem-check-bar${activeChecked ? ' stem-check-bar--done' : ''}`}>
           {activeChecked ? (
             <>

@@ -54,6 +54,7 @@ export function mergeRowCanvas(data: RowCanvasData, rowId: string, queued: Queue
   const growth = new Map(data.growth.map((g) => [`${g.measurement_stem_id}:${g.year}:${g.week_number}`, g]))
   const visits = new Map((data.visits ?? []).map((v) => [v.id, v]))
   const harvestable = new Map((data.harvestable ?? []).map((m) => [m.id, m]))
+  const answers = new Map((data.answers ?? []).map((x) => [x.node_observation_id, x]))
 
   for (const a of queued) {
     switch (a.type) {
@@ -99,10 +100,30 @@ export function mergeRowCanvas(data: RowCanvasData, rowId: string, queued: Queue
       case 'record_harvestable':
         if (nodes.some((n) => n.id === a.record.plant_node_id)) harvestable.set(a.record.id, harvestableMarkOf(a.record))
         break
+      case 'record_inspection_answer':
+        if (nodes.some((n) => n.id === a.plantNodeId)) {
+          answers.set(a.record.node_observation_id, {
+            node_observation_id: a.record.node_observation_id,
+            harvest_event_id: a.record.harvest_event_id,
+            plant_node_id: a.plantNodeId,
+            status: a.answerStatus,
+            observed_at: a.observedAt,
+          })
+        }
+        break
     }
   }
 
-  return { row, stems, nodes, statuses: [...statuses.values()], growth: [...growth.values()], visits: [...visits.values()], harvestable: [...harvestable.values()] }
+  return {
+    row,
+    stems,
+    nodes,
+    statuses: [...statuses.values()],
+    growth: [...growth.values()],
+    visits: [...visits.values()],
+    harvestable: [...harvestable.values()],
+    answers: [...answers.values()],
+  }
 }
 
 const harvestableMarkOf = (r: HarvestableMark): HarvestableMark => ({
@@ -133,6 +154,8 @@ const stemVisitOf = (r: StemVisit): StemVisit => ({
   week_number: r.week_number,
   checked: r.checked,
   observed_at: r.observed_at,
+  harvest_event_id: r.harvest_event_id ?? null,
+  all_fruit_checked: r.all_fruit_checked ?? null,
 })
 
 /** Adds queued stem checks and sampling completions to the home screen's week progress. */

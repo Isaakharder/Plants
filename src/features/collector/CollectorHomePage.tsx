@@ -8,7 +8,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { cropStatus } from '../crops/model';
 import { useOrganization } from '../organization/OrganizationProvider';
-import { NotOnDeviceError, prefetchRowCanvases, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRowCards, useWeekProgress } from './api';
+import { NotOnDeviceError, prefetchRowCanvases, useAttentionRules, useCollectorActions, useCollectorCrops, useMobileStatusOptions, useRecentHarvests, useRowCards, useWeekProgress } from './api';
+import { HarvestInspectionsPanel } from './HarvestInspectionsPanel';
+import { inspectableHarvests } from '../harvests/model';
 import { OfflineBanner } from './components/OfflineBanner';
 import { TextPromptModal } from './components/TextPromptModal';
 import { previousIsoWeek, useGreenhouseWeek } from './greenhouseWeek';
@@ -29,6 +31,8 @@ export function CollectorHomePage() {
   const cropsQuery = useCollectorCrops(organization.id, userId);
   const rowCardsQuery = useRowCards(organization.id, userId);
   const weekProgress = useWeekProgress(organization.id, userId);
+  // Harvests to inspect (downloaded here, so they are on the phone offline).
+  const recentHarvests = useRecentHarvests(organization.id, userId);
   // Download the attention rules up front so the rows have them offline.
   useAttentionRules(organization.id, userId);
   // Downloaded here too, so the picker has the organization's choice before the phone goes offline.
@@ -85,14 +89,14 @@ export function CollectorHomePage() {
     }));
   }, [weekProgress.data, rowCardsQuery.data, varieties, currentYear, currentWeek]);
 
-  function openCanvas(row: MobileRowCard, variety: CollectorCrop) {
+  function openCanvas(row: MobileRowCard, variety: CollectorCrop, harvestId: string | null = null) {
     const state: CanvasState = {
       rowName: row.row_name,
       varietyId: variety.id,
       varietyName: variety.name,
       varietyColor: cropColorVar(variety.color),
     };
-    navigate(`/mobile/row/${row.id}`, { state });
+    navigate(`/mobile/row/${row.id}${harvestId ? `?harvest=${harvestId}` : ''}`, { state });
   }
 
 
@@ -143,6 +147,15 @@ export function CollectorHomePage() {
                     breakers={progressByVariety.get(variety.id)!.breakers}
                     onComplete={(week, note, seen) => actions.recordSamplingEvent(variety.id, week, 'completed', note, seen)}
                     onReopen={week => actions.recordSamplingEvent(variety.id, week, 'reopened', null)}
+                  />
+                )}
+
+                {rowCards && (
+                  <HarvestInspectionsPanel
+                    harvests={inspectableHarvests(recentHarvests.data ?? [], variety.id)}
+                    rows={rowCards}
+                    visits={weekProgress.data?.visits ?? []}
+                    onOpen={(row, harvestId) => openCanvas(row, variety, harvestId)}
                   />
                 )}
 
