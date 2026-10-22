@@ -148,5 +148,21 @@
 
 /* Partial sampling: shown, but marked (and explained in the tooltip). */
 .partial {
-  color: #9a6512;
+  color: var(--warning);
+}
+
+/* The current week, still being sampled: a quiet label under the week, never the warning. */
+.inProgress {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+
+.legend {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }

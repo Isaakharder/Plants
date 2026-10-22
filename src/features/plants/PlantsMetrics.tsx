@@ -5,12 +5,13 @@
 
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
+import { useGreenhouseWeek } from '../collector/greenhouseWeek'
 import { cropColorVar } from '../collector/display'
 import { useCrops } from '../crops/api'
 import { sortCrops } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
 import { useWeeklyMetrics } from './api'
-import { METRICS, cellDetail, formatPerM2, isPartial, MIN_COVERAGE, perM2, stemsPerM2, weekLabel, weekRange, type WeekMetrics } from './metrics'
+import { METRICS, cellDetail, coverageMark, formatPerM2, MIN_COVERAGE, perM2, stemsPerM2, weekLabel, weekRange, type WeekMetrics } from './metrics'
 import twinStyles from './PlantsTwin.module.css'
 import styles from './PlantsMetrics.module.css'
 
@@ -22,6 +23,9 @@ export function PlantsMetrics() {
   const metrics = useWeeklyMetrics(organization.id)
   const scroller = useRef<HTMLDivElement>(null)
   const [tip, setTip] = useState<Tip | null>(null)
+  // The greenhouse's current week (Toronto time) is still being sampled.
+  const today = useGreenhouseWeek()
+  const currentYw = today.year * 100 + today.week
 
   const varieties = useMemo(() => sortCrops(crops.data ?? []), [crops.data])
   const weeks = useMemo(() => weekRange(metrics.data ?? []), [metrics.data])
@@ -57,6 +61,7 @@ export function PlantsMetrics() {
               {weeks.map((w) => (
                 <th key={w.yw} scope="col">
                   {weekLabel(w, multiYear)}
+                  {w.yw === currentYw && <span className={styles.inProgress}>In progress</span>}
                 </th>
               ))}
             </tr>
@@ -81,8 +86,9 @@ export function PlantsMetrics() {
                     const m: WeekMetrics | undefined = byCropWeek.get(`${crop.id}:${w.yw}`)
                     const density = stemsPerM2(crop)
                     const value = formatPerM2(perM2(m, metric.key, density))
-                    const partial = value !== '—' && isPartial(m)
-                    const detail = cellDetail(m, metric.key, crop.name, weekLabel(w, multiYear), density)
+                    const inProgress = w.yw === currentYw
+                    const partial = value !== '—' && coverageMark(m, inProgress) === 'partial'
+                    const detail = cellDetail(m, metric.key, crop.name, weekLabel(w, multiYear), density, inProgress)
                     return (
                       <td
                         key={w.yw}
@@ -113,8 +119,7 @@ export function PlantsMetrics() {
         <p className={styles.note}>
           Per m², per variety and week: fruit counted on the sampled stems observed that week (all rows, side shoots included) ÷ those stems × the variety’s
           stems/m² (picking stems ÷ area). A node counts in its latest recorded state; stems not observed are left out, never counted as zero; duplicate
-          records count once. * Partial sampling: fewer than {Math.round(MIN_COVERAGE * 100)}% of the variety’s sampled stems observed. Hover a value for the
-          counts.
+          records count once. Hover a value for the counts.
         </p>
         <span className={twinStyles.updated}>
           {metrics.isFetching ? 'Updating…' : updated ? `Updated ${updated}` : ''}
@@ -125,6 +130,11 @@ export function PlantsMetrics() {
         </span>
       </div>
       {body}
+      {weeks.length > 0 && varieties.length > 0 && (
+        <p className={styles.legend}>
+          <span className={styles.partial}>*</span> = partial sampling (less than {Math.round(MIN_COVERAGE * 100)}%)
+        </p>
+      )}
       {tip && (
         <div className={styles.tooltip} role="tooltip" style={{ left: tip.x, top: tip.y }}>
           {tip.text}

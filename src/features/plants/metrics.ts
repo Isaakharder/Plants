@@ -48,6 +48,22 @@ export function perM2(m: WeekMetrics | undefined, key: MetricKey, density: numbe
 /** Partial sampling: fewer than 90% of the variety's sampled stems observed that week. */
 export const isPartial = (m: WeekMetrics | undefined) => Boolean(m && m.expected_stems > 0 && m.stems / m.expected_stems < MIN_COVERAGE)
 
+/**
+ * How a cell is marked. The current week is still being sampled, so it is
+ * "in progress", never partial; a finished week below 90% coverage is partial.
+ */
+export type CoverageMark = 'in-progress' | 'partial' | null
+export function coverageMark(m: WeekMetrics | undefined, inProgress: boolean): CoverageMark {
+  if (inProgress) return 'in-progress'
+  return isPartial(m) ? 'partial' : null
+}
+
+/** "40 of 56 stems observed (71%)". Rounded down, so a week under 90% never reads 90%. */
+export function coverageText(m: Pick<WeekMetrics, 'stems' | 'expected_stems'>): string {
+  const pct = m.expected_stems > 0 ? ` (${Math.floor((m.stems / m.expected_stems) * 100)}%)` : ''
+  return `${m.stems} of ${m.expected_stems} stems observed${pct}`
+}
+
 export const formatPerM2 = (v: number | null) => (v === null ? '—' : v.toFixed(1))
 
 export type Week = { year: number; week: number; yw: number; index: number }
@@ -74,14 +90,16 @@ export const weekLabel = (w: Week, multiYear: boolean) => (multiYear ? `${w.year
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
-/** Tooltip: the count, the sampled stems it is divided by, the rows, and the conversion to /m². */
-export function cellDetail(m: WeekMetrics | undefined, key: MetricKey, variety: string, label: string, density: number | null): string {
+/** Tooltip: the count, the sampled stems it is divided by, the rows, the conversion to /m², and the week's coverage. */
+export function cellDetail(m: WeekMetrics | undefined, key: MetricKey, variety: string, label: string, density: number | null, inProgress = false): string {
   const metric = METRICS.find((x) => x.key === key)!
   const head = `${variety} · ${label} · ${metric.label}`
-  if (!m || m.stems <= 0) return `${variety} · ${label}: no sampled stems observed this week`
-  const counts = `${m[key]} ${metric.counted} on ${m.stems} of ${m.expected_stems} sampled stems (${plural(m.rows_, 'row')})`
-  if (density === null) return `${head}: ${counts}. Not shown per m²: the variety's area or picking stems aren't set.`
+  if (!m || m.stems <= 0) return `${variety} · ${label}: no sampled stems observed ${inProgress ? 'yet (week in progress)' : 'this week'}`
+  const counts = `${m[key]} ${metric.counted} on ${plural(m.stems, 'sampled stem')} (${plural(m.rows_, 'row')})`
+  const mark = coverageMark(m, inProgress)
+  const coverage =
+    mark === 'in-progress' ? ` Week in progress: so far ${coverageText(m)}.` : mark === 'partial' ? ` Partial sampling: ${coverageText(m)}.` : ` ${coverageText(m)}.`
+  if (density === null) return `${head}: ${counts}. Not shown per m²: the variety's area or picking stems aren't set.${coverage}`
   const perStem = m[key] / m.stems
-  const partial = isPartial(m) ? ` Partial sampling: only ${m.stems} of ${m.expected_stems} sampled stems observed.` : ''
-  return `${head}: ${counts} = ${perStem.toFixed(2)} per stem × ${density.toFixed(2)} stems/m² = ${(perStem * density).toFixed(1)} /m².${partial}`
+  return `${head}: ${counts} = ${perStem.toFixed(2)} per stem × ${density.toFixed(2)} stems/m² = ${(perStem * density).toFixed(1)} /m².${coverage}`
 }
