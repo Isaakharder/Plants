@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { isAuthRetryableFetchError, type Session } from '@supabase/supabase-js'
 import { authStorageKey, supabase } from '../../lib/supabase'
-import { recoveryLinkFromUrl, type RecoveryLink } from './passwordReset'
+import { PASSWORD_RESET_ENABLED, recoveryLinkFromUrl, type RecoveryLink } from './passwordReset'
 
 type AuthState = { session: Session | null; loading: boolean }
 
@@ -12,7 +12,7 @@ const RecoveryContext = createContext<{ recovery: RecoveryLink | null; endRecove
 // for the tab (sessionStorage) so a reload still shows the new-password form.
 const RECOVERY_KEY = 'plants-password-recovery'
 function initialRecovery(): RecoveryLink | null {
-  if (typeof window === 'undefined') return null // imported by tests outside a browser
+  if (typeof window === 'undefined' || !PASSWORD_RESET_ENABLED) return null // tests outside a browser; reset switched off
   const fromUrl = recoveryLinkFromUrl(window.location)
   if (fromUrl?.kind === 'recovery') keepRecovery(true)
   if (fromUrl) return fromUrl
@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // offline refresh failure apart from being signed out.
       if (event === 'INITIAL_SESSION') return
       // Supabase redirected a reset link somewhere else than /reset-password.
-      if (event === 'PASSWORD_RECOVERY') {
+      if (event === 'PASSWORD_RECOVERY' && PASSWORD_RESET_ENABLED) {
         keepRecovery(true)
         setRecovery({ kind: 'recovery' })
       }

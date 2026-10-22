@@ -9,6 +9,13 @@ import { isAuthRetryableFetchError, isAuthSessionMissingError, type AuthError } 
 
 export const RESET_PATH = '/reset-password'
 
+/**
+ * Shown only when VITE_PASSWORD_RESET is "on": off by default until Supabase
+ * sends the reset emails through a real email provider (Resend). Off, the
+ * sign-in page has no "Forgot password?" link and reset links are ignored.
+ */
+export const PASSWORD_RESET_ENABLED = import.meta.env.VITE_PASSWORD_RESET === 'on'
+
 /** Same minimum as sign-up. */
 export const MIN_PASSWORD_LENGTH = 8
 

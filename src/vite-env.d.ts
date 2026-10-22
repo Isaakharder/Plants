@@ -9,6 +9,8 @@ interface ImportMetaEnv {
   readonly VITE_HARVESTABLE?: string
   /** "on" shows the post-harvest workflow (Harvests page, inspections on the phone). Off by default until the real-phone test passes. */
   readonly VITE_POST_HARVEST_INSPECTIONS?: string
+  /** "on" shows "Forgot password?" and the reset page. Off by default until reset emails are delivered (custom SMTP). */
+  readonly VITE_PASSWORD_RESET?: string
 }
 
 interface ImportMeta {

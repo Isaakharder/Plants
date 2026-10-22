@@ -2,14 +2,14 @@ import { useState, type FormEvent } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { CenteredPanel } from '../../components/CenteredPanel'
-import { resetRedirectUrl, resetRequestOutcome } from './passwordReset'
+import { PASSWORD_RESET_ENABLED, resetRedirectUrl, resetRequestOutcome } from './passwordReset'
 
 type Mode = 'sign-in' | 'sign-up' | 'forgot'
 
 export function SignInPage() {
   // "Request a new link" on an expired reset link opens the reset form.
   const location = useLocation()
-  const [mode, setMode] = useState<Mode>((location.state as { forgot?: boolean } | null)?.forgot ? 'forgot' : 'sign-in')
+  const [mode, setMode] = useState<Mode>(PASSWORD_RESET_ENABLED && (location.state as { forgot?: boolean } | null)?.forgot ? 'forgot' : 'sign-in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -90,7 +90,7 @@ export function SignInPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </label>
-        {mode === 'sign-in' && (
+        {mode === 'sign-in' && PASSWORD_RESET_ENABLED && (
           <button className="forgot-password-link" type="button" onClick={() => switchMode('forgot')}>
             Forgot password?
           </button>

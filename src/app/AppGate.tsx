@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { CenteredPanel } from '../components/CenteredPanel'
 import { ErrorState, LoadingState } from '../components/States'
 import { useAuth, usePasswordRecovery } from '../features/auth/AuthProvider'
-import { RESET_PATH } from '../features/auth/passwordReset'
+import { PASSWORD_RESET_ENABLED, RESET_PATH } from '../features/auth/passwordReset'
 import { ResetPasswordPage } from '../features/auth/ResetPasswordPage'
 import { SignInPage } from '../features/auth/SignInPage'
 import { CreateOrganizationPage } from '../features/organization/CreateOrganizationPage'
@@ -27,7 +27,7 @@ export function AppGate({ children }: { children: ReactNode }) {
   }
   if (loading) return <FullPageLoading />
   // A password-reset link: choose the new password before anything else.
-  if (recovery || pathname === RESET_PATH) return <ResetPasswordPage />
+  if (PASSWORD_RESET_ENABLED && (recovery || pathname === RESET_PATH)) return <ResetPasswordPage />
   if (!session) return <SignInPage />
 
   return (
