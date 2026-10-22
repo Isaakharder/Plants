@@ -7,6 +7,8 @@ interface ImportMetaEnv {
   readonly VITE_BREAKER_PHOTOS?: string
   /** "off" hides the Harvestable button and labels (marks already recorded stay stored). */
   readonly VITE_HARVESTABLE?: string
+  /** "on" shows the post-harvest workflow (Harvests page, inspections on the phone). Off by default until the real-phone test passes. */
+  readonly VITE_POST_HARVEST_INSPECTIONS?: string
 }
 
 interface ImportMeta {

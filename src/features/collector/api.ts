@@ -9,7 +9,7 @@ import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-quer
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { HarvestEventInEffect, PhotoSide } from '../../lib/database.types'
 import { normalizeEvent } from '../harvests/api'
-import { earliestEditable, greenhouseToday, type InspectionAnswer } from '../harvests/model'
+import { earliestEditable, greenhouseToday, POST_HARVEST_ENABLED, type InspectionAnswer } from '../harvests/model'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../auth/AuthProvider'
 import { useOrganization } from '../organization/OrganizationProvider'
@@ -426,8 +426,8 @@ async function readRecentAnswers(cropId: string, nodeIds: Set<string>): Promise<
 /** Harvests of the organization from the last 14 days (in effect, with their sampled rows), for the inspection list. */
 export function useRecentHarvests(organizationId: string, userId: string) {
   const queryClient = useQueryClient()
-  return useQuery(
-    collectorQuery<HarvestEventInEffect[]>(
+  return useQuery({
+    ...collectorQuery<HarvestEventInEffect[]>(
       queryClient,
       collectorKeys.harvests(organizationId),
       userId,
@@ -438,7 +438,9 @@ export function useRecentHarvests(organizationId: string, userId: string) {
       },
       (base) => base,
     ),
-  )
+    // Off unless the post-harvest workflow is switched on: no harvest cards, no inspection mode.
+    enabled: POST_HARVEST_ENABLED,
+  })
 }
 
 /** Stem checks of the current and the previous greenhouse week (what the collector shows). */

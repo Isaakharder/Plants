@@ -8,6 +8,14 @@
 
 import type { HarvestCoverage, HarvestEventInEffect, HarvestLinkStatus, HarvestRange, HarvestSampledRow, InspectionState, NodeStatus } from '../../lib/database.types'
 
+/**
+ * The post-harvest workflow is shown only when VITE_POST_HARVEST_INSPECTIONS
+ * is "on" (off by default until it has passed a real-phone test). Turning it
+ * off hides the Harvests page and inspection mode; nothing recorded is lost,
+ * and the database keeps enforcing its rules either way.
+ */
+export const POST_HARVEST_ENABLED = import.meta.env.VITE_POST_HARVEST_INSPECTIONS === 'on'
+
 /** Fruit still on the plant: what a post-harvest inspection must answer. */
 export const ON_PLANT: ReadonlySet<NodeStatus> = new Set(['SetFruit', 'MatureGreen', 'BreakerFruit'])
 

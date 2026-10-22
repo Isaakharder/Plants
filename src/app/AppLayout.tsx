@@ -2,12 +2,13 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { LeafIcon } from '../components/CenteredPanel'
 import { signOut } from '../features/auth/AuthProvider'
 import { useOrganization } from '../features/organization/OrganizationProvider'
+import { POST_HARVEST_ENABLED } from '../features/harvests/model'
 import styles from './AppLayout.module.css'
 
 const NAV_ITEMS = [
   { to: '/projections', label: 'Projections' },
   { to: '/climate', label: 'Climate' },
-  { to: '/harvests', label: 'Harvests' },
+  ...(POST_HARVEST_ENABLED ? [{ to: '/harvests', label: 'Harvests' }] : []),
   { to: '/plants', label: 'Plants' },
   { to: '/photos', label: 'Photos' },
   { to: '/settings', label: 'Settings' },

@@ -19,6 +19,7 @@ import { PlantsPage } from '../pages/PlantsPage'
 import { ProjectionsPage } from '../pages/ProjectionsPage'
 import { PhotosPage } from '../features/photos/PhotosPage'
 import { HarvestsPage } from '../features/harvests/HarvestsPage'
+import { POST_HARVEST_ENABLED } from '../features/harvests/model'
 import { SettingsPage } from '../pages/SettingsPage'
 import { AppGate } from './AppGate'
 import { AppLayout } from './AppLayout'
@@ -52,7 +53,7 @@ export function App() {
                   <Route path="maturation" element={<ClimateMaturation />} />
                   <Route path="imports" element={<ClimateImports />} />
                 </Route>
-                <Route path="harvests" element={<HarvestsPage />} />
+                {POST_HARVEST_ENABLED && <Route path="harvests" element={<HarvestsPage />} />}
                 <Route path="plants" element={<PlantsPage />} />
                 <Route path="photos" element={<PhotosPage />} />
                 <Route path="settings" element={<SettingsPage />} />
