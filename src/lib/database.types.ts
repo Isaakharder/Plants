@@ -1286,6 +1286,10 @@ export type Database = {
         Args: { p_crop_id: string; p_year: number; p_as_of?: string }
         Returns: SamplingWeekRow[]
       }
+      stem_sampling_plan: {
+        Args: { p_crop_id: string; p_as_of?: string }
+        Returns: { measurement_stem_id: string; measurement_row_id: string; start_yw: number; start_week: string; end_yw: number | null; end_week: string | null }[]
+      }
       crop_quality_flags: {
         Args: { p_crop_id: string; p_as_of?: string }
         Returns: QualityFlagRow[]
