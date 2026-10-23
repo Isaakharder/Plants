@@ -219,3 +219,48 @@ export function componentsTitle(w: ViewWeek, scale: number, basis: ForecastBasis
   if (w.afwSource) lines.push(`AFW ${w.afwG?.toFixed(0)} g: ${w.afwSource}`)
   return lines.join('\n')
 }
+
+// ── Ready % experiments (nothing is saved) ──────────────────────────────────
+
+const nextWeek = (view: ForecastView) => view.weeks.find((w) => w.horizon === 1)
+
+/**
+ * Whether Ready % can be tried on this forecast: a Breakers-only forecast
+ * whose next week has a projection (Breakers counted, an AFW, so kg). Full
+ * lifecycle forecasts and weeks without enough data can't.
+ */
+export function readyShareAdjustable(view: ForecastView): boolean {
+  const next = nextWeek(view)
+  return view.basis === 'breaker_only' && view.breakers !== null && view.harvestReadyShare !== null && Boolean(next?.available) && next!.afwG !== null && next!.kg !== null
+}
+
+/**
+ * The same forecast with another harvest-ready share, for experimenting. In a
+ * Breakers-only forecast next week is share × this week's Breakers × scale
+ * peppers, × AFW for kg (engine/breaker.ts), so it is recalculated from the
+ * saved forecast's own counts, scale, AFW and case weight. The saved forecast
+ * (locked or preliminary) is never changed or regenerated.
+ */
+export function withReadyShare(view: ForecastView, share: number): ForecastView {
+  if (!readyShareAdjustable(view)) return view
+  const total = view.breakers!.total
+  const old = nextWeek(view)!
+  const sampleFruit = share * total
+  const cropFruit = sampleFruit * view.scale
+  const kg = (cropFruit * old.afwG!) / 1000
+  const next: ViewWeek = { ...old, sampleFruit, cropFruit, kg, cases: cases(kg, view.caseWeightKg), components: old.components && { ...old.components, breaker: sampleFruit } }
+  const shift = (sum: number | null, before: number | null, after: number | null) => (sum === null || before === null || after === null ? sum : sum - before + after)
+  const marketingKg = old.window === 'marketing' ? shift(view.marketing.kg, old.kg, kg) : view.marketing.kg
+  return {
+    ...view,
+    weeks: view.weeks.map((w) => (w.horizon === 1 ? next : w)),
+    harvestReadyShare: share,
+    marketing: {
+      ...view.marketing,
+      cropFruit: old.window === 'marketing' ? shift(view.marketing.cropFruit, old.cropFruit, cropFruit) : view.marketing.cropFruit,
+      kg: marketingKg,
+      cases: cases(marketingKg, view.caseWeightKg),
+    },
+    breakers: { ...view.breakers!, possibleLaterCrop: (1 - share) * total * view.scale },
+  }
+}

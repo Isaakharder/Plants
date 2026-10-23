@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { ForecastRunRow, ForecastRunWeekRow } from '../../lib/database.types'
+import { breakerForecast } from './engine/breaker'
 import { forecast } from './engine/forecast'
 import { simulateCrop, toEngineInput } from './engine/testing/simulate'
 import { weekIndex, weekOfIndex, weekStartInstant } from './engine/weeks'
-import { componentsTitle, statusExplanation, viewFromPreview, viewFromRun } from './forecastView'
+import type { EngineInput } from './engine/types'
+import { componentsTitle, readyShareAdjustable, statusExplanation, viewFromPreview, viewFromRun, withReadyShare } from './forecastView'
 
 const START = weekIndex(2026, 20)
 const END = weekIndex(2026, 40)
@@ -68,5 +70,55 @@ describe('viewFromRun', () => {
     expect(v.marketing.kg).toBe(200)
     expect(v.scale).toBe(1000)
     expect(v.weeks.map((w) => w.window).slice(4, 6)).toEqual(['marketing', 'outlook'])
+  })
+})
+
+describe('Ready % experiments', () => {
+  // Cadalora-like: 124 Breakers on 74 checked stems, 218,784 picking stems, 174 g AFW.
+  const stems = Array.from({ length: 74 }, (_, i) => `s${i}`)
+  const friday = new Date(Date.UTC(2026, 9, 16, 12)).toISOString()
+  const input: EngineInput = {
+    crop: { id: 'c', pickingStems: 218_784, areaM2: 100 },
+    stems: stems.map((id) => ({ id, rowId: 'r', isActive: true })),
+    nodes: Array.from({ length: 124 }, (_, i) => ({ id: `s${i % 74}.${Math.floor(i / 74)}`, stemId: `s${i % 74}`, isSideShoot: false, isActive: true, createdAt: '2026-01-01T00:00:00Z' })),
+    observations: Array.from({ length: 124 }, (_, i) => ({ id: `o${i}`, nodeId: `s${i % 74}.${Math.floor(i / 74)}`, year: 2026, week: 42, status: 'BreakerFruit' as const, observedAt: friday, recordedAt: friday })),
+    growth: [],
+    stemVisits: stems.map((stemId) => ({ stemId, year: 2026, week: 42, checked: true, observedAt: friday, recordedAt: friday })),
+    samplingEvents: [],
+    afw: [{ year: 2026, week: 43, afwG: 174 }],
+    flags: [],
+  }
+  const viewAt = (share: number, afw = true) =>
+    viewFromPreview(
+      { result: breakerForecast(afw ? input : { ...input, afw: [] }, { originIndex: weekIndex(2026, 42), cutoff: '2100-01-01T00:00:00Z', harvestReadyShare: share }), afwHistory: 'log', origin: { year: 2026, week: 42 }, completion: null, computedAt: friday },
+      20,
+    )
+
+  it('recalculates next week exactly as the engine would with that share', () => {
+    const tried = withReadyShare(viewAt(0.85), 0.7)
+    const engine = viewAt(0.7)
+    expect(tried.harvestReadyShare).toBe(0.7)
+    for (const k of ['sampleFruit', 'cropFruit', 'kg', 'cases'] as const) expect(tried.weeks[0][k]!).toBeCloseTo(engine.weeks[0][k]!, 6)
+    expect(tried.breakers!.possibleLaterCrop).toBeCloseTo(engine.breakers!.possibleLaterCrop, 6)
+    expect(tried.marketing).toEqual(engine.marketing)
+    expect(tried.weeks.slice(1)).toEqual(engine.weeks.slice(1))
+  })
+
+  it('never changes the saved forecast it starts from', () => {
+    const saved = viewAt(0.7)
+    const copy = JSON.parse(JSON.stringify(saved))
+    withReadyShare(saved, 0.95)
+    expect(JSON.parse(JSON.stringify(saved))).toEqual(copy)
+    expect(withReadyShare(saved, 0.7).weeks[0].kg).toBeCloseTo(saved.weeks[0].kg!, 9) // the saved share gives the saved kg
+  })
+
+  it('is only offered where a projection can be calculated', () => {
+    expect(readyShareAdjustable(viewAt(0.7))).toBe(true)
+    expect(readyShareAdjustable(viewAt(0.7, false))).toBe(false) // no AFW: no kg
+    expect(readyShareAdjustable({ ...viewAt(0.7), basis: 'lifecycle' })).toBe(false)
+    const noNext = viewAt(0.7)
+    expect(readyShareAdjustable({ ...noNext, weeks: noNext.weeks.map((w) => (w.horizon === 1 ? { ...w, available: false } : w)) })).toBe(false)
+    const unchanged = viewAt(0.7, false)
+    expect(withReadyShare(unchanged, 0.9)).toBe(unchanged)
   })
 })

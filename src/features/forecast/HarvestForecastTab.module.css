@@ -533,3 +533,54 @@
     letter-spacing: 0;
   }
 }
+
+/* What-if Ready %: the typed value, and the numbers it changed (not saved). */
+.experimentBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border: 1px dashed #8a5cb0;
+  border-radius: var(--radius-md);
+  background: #f7f0fc;
+  font-size: var(--text-sm);
+}
+
+.experimentTag {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: #6b3a8c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.experimentActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.table td.experimental {
+  color: #6b3a8c;
+  background: #f7f0fc;
+  font-style: italic;
+}
+
+.table .readyTried {
+  border-color: #8a5cb0;
+  background: #f7f0fc;
+  color: #6b3a8c;
+  font-weight: 600;
+}
+
+.readySaved {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}

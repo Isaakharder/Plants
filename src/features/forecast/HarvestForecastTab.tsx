@@ -35,9 +35,11 @@ import {
   STATUS_LABEL,
   componentsTitle,
   formatCount,
+  readyShareAdjustable,
   statusExplanation,
   viewFromPreview,
   viewFromRun,
+  withReadyShare,
   type ForecastView,
 } from './forecastView'
 import styles from './HarvestForecastTab.module.css'
@@ -104,6 +106,21 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
     return null
   }, [showPreliminary, stored.saved, shownRun, runWeeks.data, crop.case_weight_kg])
 
+  // Ready % experiments: on any forecast with a next-week projection (locked or preliminary), kept in this page only.
+  // The saved forecast is never changed; another forecast (variety, sampling week, snapshot) starts from its saved value.
+  const viewKey = view ? `${crop.id}:${view.runId ?? 'preview'}:${view.at}` : ''
+  const [trial, setTrial] = useState<{ key: string; share: number } | null>(null)
+  // Bumped by "Reset to saved forecast" so the Ready % field shows the saved value again.
+  const [resets, setResets] = useState(0)
+  const resetTrial = () => {
+    setTrial(null)
+    setResets((n) => n + 1)
+  }
+  const adjustable = view !== null && readyShareAdjustable(view)
+  const trialShare = adjustable && trial?.key === viewKey ? trial.share : null
+  const shown = view && trialShare !== null ? withReadyShare(view, trialShare) : view
+  const experimenting = trialShare !== null && view !== null && Math.abs(trialShare - (view.harvestReadyShare ?? 0)) > 1e-9
+
   const lockedThisWeek = runs.data?.find((r) => r.origin_year === now.year && r.origin_week === now.week)
   const firstTargetStarts = weekStartInstant(now.index + 1)
 
@@ -123,10 +140,10 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
   }
 
   /**
-   * Ready % edited in the table: saved as the variety's setting from the shown
-   * sampling week on (a new entry in the settings history), then a new
-   * preliminary forecast version is generated with it. Locked forecasts are
-   * never touched.
+   * Only on request ("Save … and regenerate", preliminary forecasts): the tried
+   * Ready % becomes the variety's setting from the shown sampling week on (a new
+   * entry in the settings history), and a new preliminary version is generated
+   * with it. Locked forecasts are never touched.
    */
   async function saveReadyShare(percent: number, originYear: number, originWeek: number) {
     setBusy('preview')
@@ -144,6 +161,7 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
       await generatePreview(crop, originYear, originWeek, live.data?.validatedByBasis)
       await invalidate()
       setSelectedRun(null)
+      resetTrial()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -255,20 +273,57 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
         <LoadingState />
       ) : runs.error || sampling.error ? (
         <ErrorState error={runs.error ?? sampling.error} />
-      ) : !view ? (
+      ) : !view || !shown ? (
         <EmptyState
           title={`No forecast for ${crop.name} yet`}
           description={`The official forecast locks automatically when a week’s sampling is marked complete in the collector. Generate forecast shows one now from the W${originWeek} sampling${originRow && originRow.state !== 'complete' ? ' (preliminary: not marked complete)' : ''}.`}
         />
       ) : (
         <>
+          {experimenting && (
+            <div className={styles.experimentBar} role="status">
+              <span className={styles.experimentTag}>What-if</span>
+              <span>
+                Ready % {formatPercent(trialShare)} instead of the saved {formatPercent(view.harvestReadyShare)}: next week’s peppers, kg and cases are recalculated
+                on this page only. The {view.source === 'locked' ? `${STATUS_LABEL[view.status]} forecast locked` : 'preliminary forecast saved'} {dateTime(view.at)} is
+                unchanged, and stays what Production Totals and accuracy use.
+              </span>
+              <span className={styles.experimentActions}>
+                <button type="button" className="button button-secondary" onClick={resetTrial} disabled={busy !== null}>
+                  Reset to saved forecast
+                </button>
+                {showPreliminary && (
+                  <button
+                    type="button"
+                    className="button button-link"
+                    disabled={busy !== null}
+                    onClick={() => void saveReadyShare(Math.round(1000 * trialShare!) / 10, view.originYear, view.originWeek)}
+                    title={`Saves ${formatPercent(trialShare)} as ${crop.name}’s Ready % from W${view.originWeek} on (Forecast settings history) and generates a new preliminary version`}
+                  >
+                    {busy === 'preview' ? 'Saving…' : `Save as ${crop.name}’s Ready % from W${view.originWeek} and regenerate`}
+                  </button>
+                )}
+              </span>
+            </div>
+          )}
           <ForecastTable
-            onReadyShare={showPreliminary && view.basis === 'breaker_only' ? (pct) => saveReadyShare(pct, view.originYear, view.originWeek) : undefined}
+            readyShare={
+              adjustable
+                ? {
+                    saved: view.harvestReadyShare!,
+                    value: trialShare ?? view.harvestReadyShare!,
+                    fieldKey: `${viewKey}:${resets}`,
+                    onChange: (share) => setTrial({ key: viewKey, share }),
+                  }
+                : undefined
+            }
+            experimental={experimenting}
             onRegenerate={showPreliminary && stored.outdated ? () => void runPreview() : undefined}
             regenerating={busy === 'preview'}
-            view={view}
-            scored={view.runId ? live.data?.scored.find((s) => s.run.id === view.runId) : undefined}
-            actual={view.runId ? live.data?.actual.runs.find((s) => s.run.id === view.runId) : undefined}
+            view={shown}
+            // Comparisons with what happened belong to the saved forecast: hidden while experimenting.
+            scored={view.runId && !experimenting ? live.data?.scored.find((s) => s.run.id === view.runId) : undefined}
+            actual={view.runId && !experimenting ? live.data?.actual.runs.find((s) => s.run.id === view.runId) : undefined}
             accuracy={live.data?.accuracy}
             actualAccuracy={live.data?.actual}
             outdated={showPreliminary && stored.outdated}
@@ -287,7 +342,7 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
             job={jobs.data?.find((j) => j.year === now.year && j.week === now.week) ?? null}
             firstTargetStarts={firstTargetStarts.toISOString()}
           />
-          {view && <ForecastExplanation view={view} />}
+          {shown && <ForecastExplanation view={shown} />}
         </div>
       </details>
 
@@ -361,13 +416,16 @@ function ForecastTable({
   actualAccuracy,
   outdated,
   onRegenerate,
-  onReadyShare,
+  readyShare,
+  experimental,
   regenerating,
   onBackToLocked,
 }: {
   view: ForecastView
-  /** A preliminary Breakers-only forecast: save a new Ready % and regenerate (absent: read-only). */
-  onReadyShare?: (percent: number) => Promise<void>
+  /** Ready % can be tried on this forecast (saved: its own share; value: the one shown). Absent: read-only. */
+  readyShare?: { saved: number; value: number; fieldKey: string; onChange: (share: number) => void }
+  /** What-if: next week shows a Ready % typed in, not the saved forecast. */
+  experimental?: boolean
   /** A saved preliminary forecast whose data changed since it was generated. */
   outdated?: boolean
   onRegenerate?: () => void
@@ -412,6 +470,7 @@ function ForecastTable({
     const hs = horizonStatus(w.horizon)
     const block = o?.status === 'unreliable' ? scored?.units.find((u) => u.block && u.weeks.includes(o.targetIndex)) : undefined
     const afwNeeded = w.afwG === null
+    const trial = Boolean(experimental) && w.horizon === 1
     return (
       <tr key={w.horizon} className={w.window === 'outlook' ? styles.outlookRow : undefined} title={componentsTitle(w, view.scale, view.basis)}>
         <th scope="row">
@@ -420,15 +479,16 @@ function ForecastTable({
         </th>
         <td className={styles.readyCell}>
           {breakerOnly && w.horizon === 1 ? (
-            onReadyShare ? (
+            readyShare ? (
               <ReadyInput
-                key={`${view.at}:${view.harvestReadyShare}`}
-                value={Math.round(1000 * (view.harvestReadyShare ?? 0)) / 10}
+                key={readyShare.fieldKey}
+                value={Math.round(1000 * readyShare.value) / 10}
+                saved={Math.round(1000 * readyShare.saved) / 10}
                 busy={Boolean(regenerating)}
-                onSave={onReadyShare}
+                onChange={(percent) => readyShare.onChange(percent / 100)}
               />
             ) : (
-              <span title="The harvest-ready share this locked forecast was computed with (read-only)">{formatPercent(view.harvestReadyShare)}</span>
+              <span title="Ready % can be tried once next week has a projection (Breakers counted and an AFW entered)">{formatPercent(view.harvestReadyShare)}</span>
             )
           ) : (
             <span className={styles.dash} title={breakerOnly ? undefined : 'Full lifecycle forecasts use stage-transition modelling, not one harvest-ready %'}>
@@ -436,13 +496,15 @@ function ForecastTable({
             </span>
           )}
         </td>
-        <td>{formatCount(w.cropFruit)}</td>
+        <td className={trial ? styles.experimental : undefined}>{formatCount(w.cropFruit)}</td>
         <td title={w.afwSource ?? 'No AFW entered for this variety: enter one in Weekly Plant Data to calculate kg and cases.'}>
           {afwNeeded ? '—' : w.afwG!.toFixed(0)}
           {w.afwKind === 'grower' && <span className={styles.grower}>Grower</span>}
         </td>
-        <td className={styles.kg}>{afwNeeded ? '—' : formatCount(w.kg)}</td>
-        <td>{afwNeeded ? '—' : formatCount(w.cases)}</td>
+        <td className={`${styles.kg} ${trial ? styles.experimental : ''}`} title={trial ? 'What-if: recalculated with the Ready % you typed, not saved' : undefined}>
+          {afwNeeded ? '—' : formatCount(w.kg)}
+        </td>
+        <td className={trial ? styles.experimental : undefined}>{afwNeeded ? '—' : formatCount(w.cases)}</td>
         {withActual && (
           <>
             <td className={styles.observed} title={a?.status === 'awaiting_actual' ? 'Enter the actual kg in Weekly Plant Data' : undefined}>
@@ -538,7 +600,7 @@ function ForecastTable({
         <thead>
           <tr>
             <th scope="col">Week</th>
-            <th scope="col" title="Breakers only: the share of this Friday’s Breakers expected to be harvested next week. Edit it on a preliminary forecast and press Enter.">
+            <th scope="col" title="Breakers only: the share of this Friday’s Breakers expected to be harvested next week. Type another % to try it: next week’s kg and cases update on this page only; the saved forecast is unchanged.">
               Ready %
             </th>
             <th scope="col" title="Peppers expected to be harvested on the whole crop">
@@ -586,10 +648,10 @@ function ForecastTable({
           <tr className={styles.totalRow}>
             <th scope="row">Weeks 1–{MARKETING_WEEKS} total</th>
             <td />
-            <td>{formatCount(view.marketing.cropFruit)}</td>
+            <td className={experimental && view.marketing.cropFruit !== null ? styles.experimental : undefined}>{formatCount(view.marketing.cropFruit)}</td>
             <td />
-            <td className={styles.kg}>{formatCount(view.marketing.kg)}</td>
-            <td>{formatCount(view.marketing.cases)}</td>
+            <td className={`${styles.kg} ${experimental && view.marketing.kg !== null ? styles.experimental : ''}`}>{formatCount(view.marketing.kg)}</td>
+            <td className={experimental && view.marketing.cases !== null ? styles.experimental : undefined}>{formatCount(view.marketing.cases)}</td>
             {withActual && (
               <>
                 <td />
@@ -628,37 +690,39 @@ function ForecastTable({
 
 const formatPercent = (share: number | null) => (share === null ? '—' : `${Math.round(1000 * share) / 10}%`)
 
-/** Ready % in the next-week row: type a number, press Enter (or Regenerate) to save it and regenerate. */
-function ReadyInput({ value, busy, onSave }: { value: number; busy: boolean; onSave: (percent: number) => Promise<void> }) {
-  // Keyed by the shown forecast's value: a new forecast version starts a fresh field.
+/**
+ * Ready % in the next-week row: typing a valid % (0–100) updates next week's
+ * peppers, kg and cases at once, as an experiment (nothing is saved). Escape
+ * goes back to the saved value.
+ */
+function ReadyInput({ value, saved, busy, onChange }: { value: number; saved: number; busy: boolean; onChange: (percent: number) => void }) {
   const [text, setText] = useState(String(value))
   const parsed = Number(text.replace(',', '.'))
   const valid = text.trim() !== '' && Number.isFinite(parsed) && parsed >= 0 && parsed <= 100
-  const changed = valid && Math.abs(parsed - value) > 1e-9
-  const save = () => {
-    if (changed && !busy) void onSave(Math.round(parsed * 10) / 10)
-  }
+  const tried = valid && Math.abs(parsed - saved) > 1e-9
   return (
     <span className={styles.readyEdit}>
       <input
-        className={`input ${styles.readyInput}`}
+        className={`input ${styles.readyInput} ${tried ? styles.readyTried : ''}`}
         inputMode="decimal"
         value={text}
         aria-label="Harvest-ready %"
         aria-invalid={!valid}
         disabled={busy}
-        title="Share of this Friday’s Breakers expected to be harvested next week (0–100). Press Enter to save and regenerate."
-        onChange={(e) => setText(e.target.value)}
+        title={`Share of this Friday’s Breakers expected to be harvested next week (0–100). Saved: ${saved}%. Try another value: kg and cases update here only. Escape: back to ${saved}%.`}
+        onChange={(e) => {
+          setText(e.target.value)
+          const n = Number(e.target.value.replace(',', '.'))
+          if (e.target.value.trim() !== '' && Number.isFinite(n) && n >= 0 && n <= 100) onChange(n)
+        }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') save()
-          if (e.key === 'Escape') setText(String(value))
+          if (e.key === 'Escape') {
+            setText(String(saved))
+            onChange(saved)
+          }
         }}
       />
-      {changed && (
-        <button type="button" className={`button button-primary ${styles.readyButton}`} onClick={save} disabled={busy}>
-          {busy ? '…' : 'Regenerate'}
-        </button>
-      )}
+      {tried && <span className={styles.readySaved}>saved {saved}%</span>}
     </span>
   )
 }
