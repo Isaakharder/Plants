@@ -584,3 +584,54 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+/*
+ * Toolbar fields (Variety, Preview from, Ready %, Case kg): one row, bottoms
+ * aligned. Next to the tabs and three buttons they only fit on wide screens;
+ * below that they take their own row under the tabs, still side by side. On a
+ * phone they wrap, each row still bottom-aligned.
+ */
+.forecastSelectors {
+  flex-wrap: nowrap;
+  align-items: flex-end;
+}
+
+.varietyField {
+  width: 220px;
+}
+
+.weekReady {
+  width: 120px;
+}
+
+@media (max-width: 1720px) {
+  .forecastSelectors {
+    flex-basis: 100%;
+    order: 3;
+    justify-content: flex-start;
+    padding-bottom: var(--space-3);
+  }
+  .forecastButtons {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .forecastSelectors {
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+  /* Variety gets its own row; the three short fields share the next one. */
+  .forecastSelectors > .varietyField {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .forecastSelectors > label:not(.varietyField) {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+  }
+  .forecastSelectors > label:not(.varietyField) input {
+    width: 100%;
+  }
+}
