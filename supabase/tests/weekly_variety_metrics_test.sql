@@ -20,10 +20,10 @@ insert into public.organizations (id, name) values
 insert into public.organization_members (organization_id, user_id, role) values
   ('eeeeeeee-0000-4000-8000-00000000e0a0', 'eeeeeeee-0000-4000-8000-00000000e001', 'member'),
   ('ffffffff-0000-4000-8000-00000000f0b0', 'ffffffff-0000-4000-8000-00000000f001', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems) values
-  ('eeeeeeee-0000-4000-8000-00000000ec01', 'eeeeeeee-0000-4000-8000-00000000e0a0', 'Crop A', 'red', '2026-01-05', '2026-12-31', 100, 700),
-  ('eeeeeeee-0000-4000-8000-00000000ec02', 'eeeeeeee-0000-4000-8000-00000000e0a0', 'Crop Empty', 'red', '2026-01-05', '2026-12-31', 100, 700),
-  ('ffffffff-0000-4000-8000-00000000fc01', 'ffffffff-0000-4000-8000-00000000f0b0', 'Crop B', 'red', '2026-01-05', '2026-12-31', 100, 700);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, pepper_type_id) values
+  ('eeeeeeee-0000-4000-8000-00000000ec01', 'eeeeeeee-0000-4000-8000-00000000e0a0', 'Crop A', 'red', '2026-01-05', '2026-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = 'eeeeeeee-0000-4000-8000-00000000e0a0' and t.key = 'bell')),
+  ('eeeeeeee-0000-4000-8000-00000000ec02', 'eeeeeeee-0000-4000-8000-00000000e0a0', 'Crop Empty', 'red', '2026-01-05', '2026-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = 'eeeeeeee-0000-4000-8000-00000000e0a0' and t.key = 'bell')),
+  ('ffffffff-0000-4000-8000-00000000fc01', 'ffffffff-0000-4000-8000-00000000f0b0', 'Crop B', 'red', '2026-01-05', '2026-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = 'ffffffff-0000-4000-8000-00000000f0b0' and t.key = 'bell'));
 insert into public.measurement_rows (id, organization_id, crop_id, row_name, sort_order) values
   ('eeeeeeee-0000-4000-8000-00000000e101', 'eeeeeeee-0000-4000-8000-00000000e0a0', 'eeeeeeee-0000-4000-8000-00000000ec01', 'Row 1', 1),
   ('eeeeeeee-0000-4000-8000-00000000e102', 'eeeeeeee-0000-4000-8000-00000000e0a0', 'eeeeeeee-0000-4000-8000-00000000ec01', 'Row 2', 2),

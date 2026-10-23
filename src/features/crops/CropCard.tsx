@@ -5,7 +5,7 @@ import { ColorDot, StatusBadge } from './CropBadges'
 import { cropDescription, cropStatus, stemsPerM2, type Crop } from './model'
 import styles from './CropCard.module.css'
 
-export function CropCard({ crop }: { crop: Crop }) {
+export function CropCard({ crop, pepperType }: { crop: Crop; pepperType: string | null }) {
   const status = cropStatus(crop)
   return (
     <Link to={`/settings/varieties/${crop.id}`} className={`${styles.card} ${styles[status]}`}>
@@ -14,7 +14,7 @@ export function CropCard({ crop }: { crop: Crop }) {
           <ColorDot color={crop.color} />
           <div>
             <h3 className={styles.name}>{crop.name}</h3>
-            <p className={styles.description}>{cropDescription(crop.color)}</p>
+            <p className={styles.description}>{cropDescription(crop.color, pepperType)}</p>
           </div>
         </div>
         <StatusBadge status={status} />

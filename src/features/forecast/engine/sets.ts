@@ -19,16 +19,28 @@
 // lands in one week only. Crop totals scale the sampled peppers by the
 // week's Sets/m² × area.
 //
-// Survival and timing per variety, never borrowed from another variety:
-//   measured     from the variety's own completed cohorts (harvest window of
-//                MAX_AGE weeks over, whatever their outcome): for peppers
-//                still on the plant at age a, the share later harvested and
-//                when. Peppers resolved after the window are left out.
-//   provisional  stated assumptions until there are enough completed cohorts:
-//                survival from set and harvest 5–8 weeks after set. A cohort
-//                keeps its own observations: its expected losses are the
-//                assumed total minus those already seen (never below zero),
-//                its harvest at most what is still on the plant.
+// Model groups: every variety belongs to one pepper type (pepper_types), and
+// learns and falls back only within it. Survival and timing come from, in
+// order:
+//   1. measured, variety     the variety's own completed cohorts (harvest
+//                            window of MAX_AGE weeks over, whatever their
+//                            outcome): for peppers still on the plant at age
+//                            a, the share later harvested and when. Peppers
+//                            resolved after the window are left out.
+//   2. measured, pepper type completed cohorts of all varieties of the SAME
+//                            type, only when the type allows it
+//                            (pool_within_type; off by default).
+//   3. provisional           stated assumptions: the variety's own setting,
+//                            else its type's. A cohort keeps its own
+//                            observations: its expected losses are the
+//                            assumed total minus those already seen (never
+//                            below zero), its harvest at most what is still
+//                            on the plant.
+//   4. not configured        no provisional values for the type: no estimate,
+//                            and the page says so. Another type's values are
+//                            never used.
+// Cohorts carry their pepper type; mixing types is refused (ModelGroupError).
+// AFW: the variety's entered AFW, else the type's provisional default (if any).
 //
 // Which Sets count: sampled weeks except the baseline (every fruit already on
 // the plant), catch-up peppers (a node position missed earlier) and partly
@@ -43,20 +55,30 @@
 import { chooseAfw } from './afw'
 import type { EngineAfw } from './types'
 
-export const SETS_MODEL_VERSION = 'sets-potential-2026.10.4'
+export const SETS_MODEL_VERSION = 'sets-potential-2026.11.1'
 
 /** Harvest window followed (weeks after set), as in set_cohort_outcomes. */
 export const MAX_AGE = 10
 
-/**
- * Provisional assumptions for a variety without enough completed cohorts.
- * Not measured: placeholders to review. Survival can be changed on the page
- * (nothing is saved). Timing spreads harvest over 5–8 weeks after set.
- */
-export const PROVISIONAL_ASSUMPTIONS = {
-  survival: 0.6,
-  timing: [0, 0, 0, 0, 0, 0.2, 0.3, 0.3, 0.2, 0, 0] as number[],
+/** A variety's model group (pepper_types): what it falls back on before it has enough history of its own. */
+export type ModelGroup = {
+  pepperTypeId: string
+  name: string
+  /** Provisional survival from set (0–1); null: not configured. */
+  provisionalSurvival: number | null
+  /** Provisional share of the harvest at each age 0 … MAX_AGE; null: not configured. */
+  provisionalTiming: number[] | null
+  /** AFW for a variety with no AFW entered yet; null: none. */
+  defaultAfwG: number | null
+  /** Let a variety without enough completed cohorts use those of other varieties of this type. */
+  poolWithinType: boolean
 }
+
+/** A variety's own provisional settings (crops.sets_provisional_*): null uses its type's. */
+export type VarietyOverrides = { provisionalSurvival: number | null; provisionalTiming: number[] | null }
+
+/** Thrown when cohorts of another pepper type reach a model group's parameters. */
+export class ModelGroupError extends Error {}
 
 /** Measured parameters need this many completed cohorts and set peppers. */
 export const MIN_COMPLETED_COHORTS = 4
@@ -74,6 +96,9 @@ export const MIN_CATCHUP_SETS = 20
 
 /** One set week's sampled peppers and their outcomes by age (set_cohort_outcomes). Week indexes (weeks.ts). */
 export type Cohort = {
+  /** The variety's pepper type: cohorts are only ever used within their own type. */
+  pepperTypeId: string
+  cropId: string
   setIndex: number
   sets: number
   harvestedByAge: number[]
@@ -89,13 +114,15 @@ const sum = (v: number[], from = 0, to = v.length - 1) => v.slice(from, to + 1).
 export const harvestedOf = (c: Cohort) => sum(c.harvestedByAge)
 export const lostOf = (c: Cohort) => sum(c.lostByAge)
 
-export type Parameter<T> = { value: T; kind: 'measured' | 'provisional'; basis: string }
+export type ParameterSource = 'variety' | 'pepper type' | 'variety setting' | 'pepper type setting' | 'this page'
+export type Parameter<T> = { value: T; kind: 'measured' | 'provisional'; source: ParameterSource; basis: string }
 
 export type VarietyParameters = {
-  /** Share of set peppers harvested (from set). */
-  survival: Parameter<number>
-  /** Share of harvested peppers picked at each age 0 … MAX_AGE (adds up to 1). */
-  timing: Parameter<number[]>
+  group: ModelGroup
+  /** Share of set peppers harvested (from set); null: not configured. */
+  survival: Parameter<number> | null
+  /** Share of harvested peppers picked at each age 0 … MAX_AGE (adds up to 1); null: not configured. */
+  timing: Parameter<number[]> | null
   /** Measured only: per age a, P(harvested | still on the plant at the end of age a) and when (null: too few peppers). */
   afterAge: ({ survival: number; timing: number[] } | null)[]
   completed: Cohort[]
@@ -103,61 +130,101 @@ export type VarietyParameters = {
   incomplete: Cohort[]
 }
 
+export type ParameterOptions = {
+  group: ModelGroup
+  /** Cohorts of all varieties of the same pepper type (pool_within_type only). */
+  typeCohorts?: Cohort[]
+  overrides?: VarietyOverrides
+  /** Survival typed on the page (provisional only; never saved). */
+  provisionalSurvival?: number
+  /** Backtests: use the provisional assumptions even when measured values exist. */
+  forceProvisional?: boolean
+}
+
+const closedAt = (originIndex: number) => (c: Cohort) => c.setIndex + MAX_AGE < originIndex
+const usable = (cohorts: Cohort[], originIndex: number) =>
+  cohorts.filter((c) => !c.isBaseline && c.sets > 0 && c.setIndex <= originIndex).sort((a, b) => b.setIndex - a.setIndex)
+
+/** Survival, timing and survival after each age from completed cohorts (null: not enough of them). */
+function measuredFrom(completed: Cohort[], source: 'variety' | 'pepper type', describe: string, group: ModelGroup) {
+  const sets = completed.reduce((s, c) => s + c.sets, 0)
+  const weeks = new Set(completed.map((c) => c.setIndex)).size
+  if (weeks < MIN_COMPLETED_COHORTS || sets < MIN_COMPLETED_SETS) return null
+  const byAge = (f: (c: Cohort) => number[]) => Array.from({ length: MAX_AGE + 1 }, (_, d) => completed.reduce((s, c) => s + f(c)[d], 0))
+  const h = byAge((c) => c.harvestedByAge)
+  const l = byAge((c) => c.lostByAge)
+  const H = sum(h)
+  const L = sum(l)
+  const later = completed.reduce((s, c) => s + c.resolvedLater + c.onPlant, 0)
+  const afterAge = Array.from({ length: MAX_AGE + 1 }, (_, a) => {
+    const hAfter = sum(h, a + 1)
+    const resolved = hAfter + sum(l, a + 1)
+    if (resolved < MIN_AT_AGE || hAfter === 0) return null
+    return { survival: hAfter / resolved, timing: h.map((n, d) => (d > a ? n / hAfter : 0)) }
+  })
+  const survival: Parameter<number> = {
+    value: H + L > 0 ? H / (H + L) : 0,
+    kind: 'measured',
+    source,
+    basis: `${H} harvested, ${L} aborted or pruned in ${describe}${later ? `; ${later} resolved after ${MAX_AGE} weeks or still on the plant left out` : ''}`,
+  }
+  const timing: Parameter<number[]> | null =
+    H > 0
+      ? { value: h.map((n) => n / H), kind: 'measured', source, basis: `harvest ages of the ${H} harvested peppers in ${describe}` }
+      : group.provisionalTiming
+        ? { value: group.provisionalTiming, kind: 'provisional', source: 'pepper type setting', basis: `${group.name} assumption: no harvested peppers in ${describe}` }
+        : null
+  return { survival, timing, afterAge }
+}
+
 /**
- * The variety's survival and timing from its own completed cohorts set by the
- * origin, else the provisional assumptions (survival can be overridden).
+ * The variety's survival and timing: measured from its own completed cohorts,
+ * else (if its type allows) from completed cohorts of its pepper type, else
+ * provisional settings of the variety or its type. Never another type's.
  */
-export function varietyParameters(
-  cohorts: Cohort[],
-  originIndex: number,
-  label: (index: number) => string,
-  options: { provisionalSurvival?: number; forceProvisional?: boolean } = {},
-): VarietyParameters {
-  const known = cohorts.filter((c) => !c.isBaseline && c.sets > 0 && c.setIndex <= originIndex).sort((a, b) => b.setIndex - a.setIndex)
-  const closed = (c: Cohort) => c.setIndex + MAX_AGE < originIndex
+export function varietyParameters(cohorts: Cohort[], originIndex: number, label: (index: number) => string, options: ParameterOptions): VarietyParameters {
+  const { group } = options
+  const foreign = [...cohorts, ...(options.typeCohorts ?? [])].find((c) => c.pepperTypeId !== group.pepperTypeId)
+  if (foreign) throw new ModelGroupError(`A cohort of another pepper type (${foreign.pepperTypeId}) reached the ${group.name} model`)
+  const closed = closedAt(originIndex)
+  const known = usable(cohorts, originIndex)
   const completed = known.filter(closed).slice(0, RECENT_COHORTS)
   const incomplete = known.filter((c) => !closed(c))
   const sets = completed.reduce((s, c) => s + c.sets, 0)
-  const enough = completed.length >= MIN_COMPLETED_COHORTS && sets >= MIN_COMPLETED_SETS
-  if (enough && !options.forceProvisional) {
-    const byAge = (f: (c: Cohort) => number[]) => Array.from({ length: MAX_AGE + 1 }, (_, d) => completed.reduce((s, c) => s + f(c)[d], 0))
-    const h = byAge((c) => c.harvestedByAge)
-    const l = byAge((c) => c.lostByAge)
-    const H = sum(h)
-    const L = sum(l)
-    const span = `${completed.length} completed cohorts (${label(completed.at(-1)!.setIndex)}–${label(completed[0].setIndex)}, ${sets} set peppers)`
-    const later = completed.reduce((s, c) => s + c.resolvedLater + c.onPlant, 0)
-    const afterAge = Array.from({ length: MAX_AGE + 1 }, (_, a) => {
-      const hAfter = sum(h, a + 1)
-      const resolved = hAfter + sum(l, a + 1)
-      if (resolved < MIN_AT_AGE || hAfter === 0) return null
-      return { survival: hAfter / resolved, timing: h.map((n, d) => (d > a ? n / hAfter : 0)) }
-    })
-    return {
-      survival: {
-        value: H + L > 0 ? H / (H + L) : 0,
-        kind: 'measured',
-        basis: `${H} harvested, ${L} aborted or pruned in ${span}${later ? `; ${later} resolved after ${MAX_AGE} weeks or still on the plant left out` : ''}`,
-      },
-      timing:
-        H > 0
-          ? { value: h.map((n) => n / H), kind: 'measured', basis: `harvest ages of the ${H} harvested peppers in ${span}` }
-          : { value: PROVISIONAL_ASSUMPTIONS.timing, kind: 'provisional', basis: `assumption, 5–8 weeks after set: no harvested peppers in ${span}` },
-      afterAge,
-      completed,
-      incomplete,
+  const span = (list: Cohort[], what: string) =>
+    `${list.length} completed ${what} (${label(list.at(-1)!.setIndex)}–${label(list[0].setIndex)}, ${list.reduce((s, c) => s + c.sets, 0)} set peppers)`
+
+  if (!options.forceProvisional) {
+    const own = completed.length ? measuredFrom(completed, 'variety', span(completed, 'cohorts'), group) : null
+    if (own) return { group, ...own, completed, incomplete }
+    if (group.poolWithinType && options.typeCohorts) {
+      const pool = usable(options.typeCohorts, originIndex).filter(closed)
+      const recentWeeks = [...new Set(pool.map((c) => c.setIndex))].slice(0, RECENT_COHORTS)
+      const pooled = pool.filter((c) => recentWeeks.includes(c.setIndex))
+      const varieties = new Set(pooled.map((c) => c.cropId)).size
+      const typed = pooled.length ? measuredFrom(pooled, 'pepper type', `${span(pooled, `${group.name} cohorts`)} from ${varieties} variet${varieties === 1 ? 'y' : 'ies'}`, group) : null
+      if (typed) return { group, ...typed, completed: pooled, incomplete }
     }
   }
+
   const why = options.forceProvisional
     ? 'provisional by request'
     : `${completed.length} completed cohort${completed.length === 1 ? '' : 's'} (${sets} set peppers); measured values need ${MIN_COMPLETED_COHORTS} and ${MIN_COMPLETED_SETS}`
-  return {
-    survival: { value: options.provisionalSurvival ?? PROVISIONAL_ASSUMPTIONS.survival, kind: 'provisional', basis: `assumption: ${why}` },
-    timing: { value: PROVISIONAL_ASSUMPTIONS.timing, kind: 'provisional', basis: `assumption, 5–8 weeks after set: ${why}` },
-    afterAge: [],
-    completed,
-    incomplete,
-  }
+  const survival: Parameter<number> | null =
+    options.provisionalSurvival !== undefined
+      ? { value: options.provisionalSurvival, kind: 'provisional', source: 'this page', basis: `tried on this page, not saved: ${why}` }
+      : options.overrides?.provisionalSurvival != null
+        ? { value: options.overrides.provisionalSurvival, kind: 'provisional', source: 'variety setting', basis: `variety assumption: ${why}` }
+        : group.provisionalSurvival !== null
+          ? { value: group.provisionalSurvival, kind: 'provisional', source: 'pepper type setting', basis: `${group.name} assumption: ${why}` }
+          : null
+  const timing: Parameter<number[]> | null =
+    options.overrides?.provisionalTiming != null
+      ? { value: options.overrides.provisionalTiming, kind: 'provisional', source: 'variety setting', basis: `variety assumption: ${why}` }
+      : group.provisionalTiming !== null
+        ? { value: group.provisionalTiming, kind: 'provisional', source: 'pepper type setting', basis: `${group.name} assumption: ${why}` }
+        : null
+  return { group, survival, timing, afterAge: [], completed, incomplete }
 }
 
 /** A week of weekly_new_sets() with its sampling coverage. Week indexes. */
@@ -239,6 +306,8 @@ export type OutlookWeek = {
 
 export type SetsPotential = {
   parameters: VarietyParameters
+  /** Why there is no estimate (provisional values not configured for the pepper type), else null. */
+  notConfigured: string | null
   weeks: SetsWeek[]
   potential: PotentialWeek[]
   /** Sets-based harvest due next week (the Breakers week): shown, never added to the Breakers forecast. */
@@ -255,6 +324,10 @@ export type SetsPotentialInput = {
   /** Harvest weeks listed after next week. */
   weeksAhead: number
   label: (index: number) => string
+  /** The variety's model group, and what may be used within it. */
+  group: ModelGroup
+  typeCohorts?: Cohort[]
+  overrides?: VarietyOverrides
   provisionalSurvival?: number
   /** Count weeks flagged as possible catch-up (left out by default). */
   includePossibleCatchup?: boolean
@@ -275,11 +348,28 @@ function timingAfter(timing: number[], a: number): number[] {
 export function setsPotential(input: SetsPotentialInput): SetsPotential {
   const { originIndex, areaM2 } = input
   const parameters = varietyParameters(input.cohorts, originIndex, input.label, input)
-  const afwAt = (t: number) => chooseAfw(input.afw, originIndex, t, 'last', true)
+  const { group } = input
+  // The variety's AFW; before any is entered, its type's provisional default (if configured).
+  const afwAt = (t: number) =>
+    chooseAfw(input.afw, originIndex, t, 'last', true) ??
+    (group.defaultAfwG !== null ? { grams: group.defaultAfwG, source: `${group.name} provisional AFW (none entered yet)`, kind: 'model' as const } : null)
   const weeks = usableSets(
     input.sets.filter((s) => s.index <= originIndex),
     input.includePossibleCatchup,
   )
+  if (!parameters.survival || !parameters.timing) {
+    const missing = [!parameters.survival && 'survival', !parameters.timing && 'harvest timing'].filter(Boolean).join(' and ')
+    return {
+      parameters,
+      notConfigured: `No ${missing} for ${group.name} yet: set its provisional assumptions in Settings (never borrowed from another pepper type).`,
+      weeks,
+      potential: [],
+      dueNextWeek: { fruit: 0, kg: null },
+      outlook: [],
+    }
+  }
+  const survivalValue = parameters.survival.value
+  const timingValue = parameters.timing.value
   const cohorts = new Map(input.cohorts.map((c) => [c.setIndex, c]))
   const potential: PotentialWeek[] = []
   for (const w of weeks) {
@@ -303,8 +393,8 @@ export function setsPotential(input: SetsPotentialInput): SetsPotential {
       survivalBasis = 'measured at age'
     } else {
       // Survival budget: the cohort's expected losses are the assumed total minus those already seen.
-      p = onPlant > 0 ? Math.min(1, Math.max(0, (parameters.survival.value * set - h) / onPlant)) : 0
-      timing = timingAfter(parameters.timing.value, age)
+      p = onPlant > 0 ? Math.min(1, Math.max(0, (survivalValue * set - h) / onPlant)) : 0
+      timing = timingAfter(timingValue, age)
       survivalBasis = 'survival budget'
     }
     const futureHarvest = onPlant * p
@@ -358,12 +448,12 @@ export function setsPotential(input: SetsPotentialInput): SetsPotential {
     return { fruit, kg }
   }
   const recorded = new Set(potential.map((p) => p.setIndex))
-  const typical = parameters.timing.value
+  const typical = timingValue
   const outlook: OutlookWeek[] = Array.from({ length: input.weeksAhead }, (_, i) => {
     const t = originIndex + 2 + i
     const afw = afwAt(t)
     const coverage = typical.reduce((s, share, d) => s + (recorded.has(t - d) ? share : 0), 0)
     return { targetIndex: t, ...at(t), afwG: afw?.grams ?? null, afwSource: afw?.source ?? null, coverage }
   })
-  return { parameters, weeks, potential, dueNextWeek: at(originIndex + 1), outlook }
+  return { parameters, notConfigured: null, weeks, potential, dueNextWeek: at(originIndex + 1), outlook }
 }

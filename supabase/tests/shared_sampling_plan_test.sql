@@ -18,8 +18,8 @@ insert into auth.users (id, email, aud, role) values
 insert into public.organizations (id, name) values ('dddddddd-0000-4000-8000-00000000d0a0', 'SP Org');
 insert into public.organization_members (organization_id, user_id, role) values
   ('dddddddd-0000-4000-8000-00000000d0a0', 'dddddddd-0000-4000-8000-00000000d001', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems) values
-  ('dddddddd-0000-4000-8000-00000000dc01', 'dddddddd-0000-4000-8000-00000000d0a0', 'Crop P', 'red', '2026-01-05', '2026-12-31', 100, 700);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, pepper_type_id) values
+  ('dddddddd-0000-4000-8000-00000000dc01', 'dddddddd-0000-4000-8000-00000000d0a0', 'Crop P', 'red', '2026-01-05', '2026-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = 'dddddddd-0000-4000-8000-00000000d0a0' and t.key = 'bell'));
 
 -- Friday of week w, 2026, at noon Toronto.
 create function pg_temp.fri(w integer) returns timestamptz language sql immutable as

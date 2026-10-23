@@ -48,3 +48,17 @@
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
+
+/* Optional forecasting overrides: inherited from the pepper type when empty. */
+.overrides {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.overrides legend {
+  padding: 0 4px;
+}

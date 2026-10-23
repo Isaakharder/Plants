@@ -43,3 +43,54 @@
   text-transform: uppercase;
   color: var(--text-muted);
 }
+
+/* Pepper types (forecasting model groups). */
+.typeList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.typeCard {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.typeHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.typeStats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  margin: 8px 0 0;
+  font-size: var(--text-sm);
+}
+
+.typeStats dt {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.typeStats dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+
+.notConfigured {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.checkRow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: var(--text-sm);
+}

@@ -24,7 +24,29 @@ type CropRow = {
   picking_stems: number
   /** Kilograms per case for forecasts in cases; null = cases not shown. */
   case_weight_kg: number | null
+  /** The forecasting model group (pepper_types): the variety learns and falls back only within it. */
+  pepper_type_id: string
+  /** The variety's own provisional Sets assumptions; null uses its pepper type's. */
+  sets_provisional_survival: number | null
+  sets_provisional_timing: number[] | null
   created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+// ---- Pepper types: forecasting model groups (20261109000000_pepper_types.sql) ----
+
+/** A pepper type and the provisional assumptions its varieties fall back on (null: not configured). */
+export type PepperTypeRow = {
+  id: string
+  organization_id: string
+  key: string
+  name: string
+  provisional_survival: number | null
+  /** Share of the harvest at each age 0 … 10 weeks after set (adds up to 1). */
+  provisional_timing: number[] | null
+  default_afw_g: number | null
+  pool_within_type: boolean
   created_at: string
   updated_at: string
 }
@@ -961,8 +983,18 @@ export type Database = {
       }
       crops: {
         Row: CropRow
-        Insert: Omit<CropRow, 'id' | 'created_by' | 'created_at' | 'updated_at' | 'case_weight_kg'> & { case_weight_kg?: number | null }
+        Insert: Omit<CropRow, 'id' | 'created_by' | 'created_at' | 'updated_at' | 'case_weight_kg' | 'sets_provisional_survival' | 'sets_provisional_timing'> & {
+          case_weight_kg?: number | null
+          sets_provisional_survival?: number | null
+          sets_provisional_timing?: number[] | null
+        }
         Update: Partial<Omit<CropRow, 'id' | 'organization_id' | 'created_by' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+      pepper_types: {
+        Row: PepperTypeRow
+        Insert: Omit<PepperTypeRow, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Pick<PepperTypeRow, 'name' | 'provisional_survival' | 'provisional_timing' | 'default_afw_g' | 'pool_within_type'>>
         Relationships: []
       }
       measurement_rows: {
@@ -1277,6 +1309,10 @@ export type Database = {
       set_cohort_outcomes: {
         Args: { p_crop_id: string; p_year: number }
         Returns: SetCohortOutcomeRow[]
+      }
+      pepper_type_cohort_outcomes: {
+        Args: { p_pepper_type_id: string; p_year: number }
+        Returns: (SetCohortOutcomeRow & { crop_id: string; pepper_type_id: string })[]
       }
       weekly_fruit_loss: {
         Args: { p_crop_id: string; p_year: number; p_as_of?: string }

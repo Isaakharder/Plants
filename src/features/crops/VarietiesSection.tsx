@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { useOrganization } from '../organization/OrganizationProvider'
-import { useCrops } from './api'
+import { useCrops, usePepperTypes } from './api'
 import { CropCard } from './CropCard'
 import { CreateCropDialog } from './CreateCropDialog'
 import { cropStatus, sortCrops, type Crop } from './model'
@@ -10,6 +10,8 @@ import styles from './VarietiesSection.module.css'
 export function VarietiesSection() {
   const organization = useOrganization()
   const { data: crops, isPending, error } = useCrops(organization.id)
+  const pepperTypes = usePepperTypes(organization.id)
+  const typeName = (crop: Crop) => pepperTypes.data?.find((t) => t.id === crop.pepper_type_id)?.name ?? null
   const [creating, setCreating] = useState(false)
 
   const createButton = (
@@ -44,11 +46,11 @@ export function VarietiesSection() {
         />
       ) : (
         <>
-          <CropGrid crops={current} />
+          <CropGrid crops={current} typeName={typeName} />
           {finished.length > 0 && (
             <div className={styles.group}>
               <h3 className={styles.groupTitle}>Finished</h3>
-              <CropGrid crops={finished} />
+              <CropGrid crops={finished} typeName={typeName} />
             </div>
           )}
         </>
@@ -59,12 +61,12 @@ export function VarietiesSection() {
   )
 }
 
-function CropGrid({ crops }: { crops: Crop[] }) {
+function CropGrid({ crops, typeName }: { crops: Crop[]; typeName: (crop: Crop) => string | null }) {
   if (crops.length === 0) return null
   return (
     <div className={styles.grid}>
       {crops.map((crop) => (
-        <CropCard key={crop.id} crop={crop} />
+        <CropCard key={crop.id} crop={crop} pepperType={typeName(crop)} />
       ))}
     </div>
   )

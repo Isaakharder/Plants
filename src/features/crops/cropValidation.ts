@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { isIsoDate } from '../../lib/dates'
 import { formatArea, parseNumberInput } from '../../lib/format'
 import type { Crop, CropColor } from './model'
+import { formatTiming, parsePercent, parseTiming } from './pepperTypes'
 
 /** Raw form state: everything is a string while the user types. */
 export type CropFormValues = {
@@ -11,6 +12,11 @@ export type CropFormValues = {
   pullout_date: string
   area_m2: string
   picking_stems: string
+  /** The variety's pepper type (forecasting model group); required, never defaulted. */
+  pepper_type_id: string
+  /** Optional Sets outlook overrides; empty inherits the pepper type's assumptions. */
+  sets_provisional_survival: string
+  sets_provisional_timing: string
 }
 
 export type CropFormField = keyof CropFormValues
@@ -23,6 +29,9 @@ export const emptyCropForm: CropFormValues = {
   pullout_date: '',
   area_m2: '',
   picking_stems: '',
+  pepper_type_id: '',
+  sets_provisional_survival: '',
+  sets_provisional_timing: '',
 }
 
 export function cropToForm(crop: Crop): CropFormValues {
@@ -33,6 +42,9 @@ export function cropToForm(crop: Crop): CropFormValues {
     pullout_date: crop.pullout_date,
     area_m2: formatArea(Number(crop.area_m2)),
     picking_stems: String(crop.picking_stems),
+    pepper_type_id: crop.pepper_type_id,
+    sets_provisional_survival: crop.sets_provisional_survival === null ? '' : String(Math.round(crop.sets_provisional_survival * 1000) / 10),
+    sets_provisional_timing: formatTiming(crop.sets_provisional_timing),
   }
 }
 
@@ -62,6 +74,24 @@ const cropSchema = z
     pullout_date: dateField('Pullout date'),
     area_m2: numberField('Growing area', { integer: false }),
     picking_stems: numberField('Picking stems', { integer: true }),
+    pepper_type_id: z.string().min(1, 'Choose a pepper type'),
+    // Optional overrides: empty → null (the pepper type's value applies).
+    sets_provisional_survival: z.string().transform((text, ctx) => {
+      const r = parsePercent(text)
+      if ('error' in r) {
+        ctx.addIssue({ code: 'custom', message: r.error })
+        return z.NEVER
+      }
+      return r.value
+    }),
+    sets_provisional_timing: z.string().transform((text, ctx) => {
+      const r = parseTiming(text)
+      if ('error' in r) {
+        ctx.addIssue({ code: 'custom', message: r.error })
+        return z.NEVER
+      }
+      return r.shares
+    }),
   })
   .refine((v) => v.pullout_date > v.planting_date, {
     path: ['pullout_date'],

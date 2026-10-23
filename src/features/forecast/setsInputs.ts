@@ -1,13 +1,15 @@
 // Pure assembly of the Sets production potential inputs from database rows
 // (shared by the page and scripts/sets-backtest.ts).
 
-import type { SamplingWeekRow, SetCohortOutcomeRow, WeeklyNewSetsRow } from '../../lib/database.types'
-import type { Cohort, SetsWeekInput } from './engine/sets'
+import type { PepperTypeRow, SamplingWeekRow, SetCohortOutcomeRow, WeeklyNewSetsRow } from '../../lib/database.types'
+import type { Cohort, ModelGroup, SetsWeekInput } from './engine/sets'
 import { weekIndex } from './engine/weeks'
 
-/** set_cohort_outcomes rows as cohorts (aborted and pruned together as lost). */
-export function cohortsFrom(rows: SetCohortOutcomeRow[]): Cohort[] {
+/** set_cohort_outcomes rows of one variety as cohorts (aborted and pruned together as lost), tagged with its pepper type. */
+export function cohortsFrom(rows: SetCohortOutcomeRow[], cropId: string, pepperTypeId: string): Cohort[] {
   return rows.map((r) => ({
+    cropId,
+    pepperTypeId,
     setIndex: weekIndex(r.set_year, r.set_week),
     sets: r.sets,
     harvestedByAge: r.harvested_by_age,
@@ -34,4 +36,21 @@ export function setsWeeks(newSets: WeeklyNewSetsRow[], samplingRows: SamplingWee
       inProgress: r.iso_week >= currentWeek,
     }
   })
+}
+
+/** pepper_type_cohort_outcomes rows: each keeps the variety and pepper type the database returned. */
+export function typeCohortsFrom(rows: (SetCohortOutcomeRow & { crop_id: string; pepper_type_id: string })[]): Cohort[] {
+  return rows.flatMap((r) => cohortsFrom([r], r.crop_id, r.pepper_type_id))
+}
+
+/** A pepper_types row as the model group (numbers normalised). */
+export function modelGroupFrom(t: PepperTypeRow): ModelGroup {
+  return {
+    pepperTypeId: t.id,
+    name: t.name,
+    provisionalSurvival: t.provisional_survival === null ? null : Number(t.provisional_survival),
+    provisionalTiming: t.provisional_timing?.map(Number) ?? null,
+    defaultAfwG: t.default_afw_g === null ? null : Number(t.default_afw_g),
+    poolWithinType: t.pool_within_type,
+  }
 }

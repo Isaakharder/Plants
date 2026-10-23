@@ -17,8 +17,8 @@ insert into auth.users (id, email, aud, role) values
 insert into public.organizations (id, name) values ('cccccccc-0000-4000-8000-00000000c0a0', 'SPI Org');
 insert into public.organization_members (organization_id, user_id, role) values
   ('cccccccc-0000-4000-8000-00000000c0a0', 'cccccccc-0000-4000-8000-00000000c001', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems) values
-  ('cccccccc-0000-4000-8000-00000000cc01', 'cccccccc-0000-4000-8000-00000000c0a0', 'Crop S', 'red', '2026-01-01', '2026-12-31', 100, 700);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, pepper_type_id) values
+  ('cccccccc-0000-4000-8000-00000000cc01', 'cccccccc-0000-4000-8000-00000000c0a0', 'Crop S', 'red', '2026-01-01', '2026-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = 'cccccccc-0000-4000-8000-00000000c0a0' and t.key = 'bell'));
 insert into public.measurement_rows (id, organization_id, crop_id, row_name) values
   ('cccccccc-0000-4000-8000-00000000c1a1', 'cccccccc-0000-4000-8000-00000000c0a0', 'cccccccc-0000-4000-8000-00000000cc01', 'Row S');
 insert into public.measurement_stems (id, organization_id, crop_id, measurement_row_id, stem_name) values

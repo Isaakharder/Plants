@@ -13,10 +13,10 @@
 //   npx rolldown scripts/sets-backtest.ts -o <dir>/sets-backtest.mjs -p node && node <dir>/sets-backtest.mjs <export.json> <current-week>
 
 import { readFileSync } from 'node:fs'
-import type { SamplingWeekRow, SetCohortOutcomeRow, WeeklyNewSetsRow } from '../src/lib/database.types'
+import type { PepperTypeRow, SamplingWeekRow, SetCohortOutcomeRow, WeeklyNewSetsRow } from '../src/lib/database.types'
 import { MAX_AGE, setsPotential, type Cohort } from '../src/features/forecast/engine/sets'
 import { weekIndex, weekLabel, ywIndex } from '../src/features/forecast/engine/weeks'
-import { cohortsFrom, setsWeeks } from '../src/features/forecast/setsInputs'
+import { cohortsFrom, modelGroupFrom, setsWeeks } from '../src/features/forecast/setsInputs'
 
 type Export = {
   crops: { name: string; area: number }[]
@@ -29,6 +29,8 @@ type Export = {
   /** Per pepper (crop_node_stages): set, harvest and loss weeks (yw), first record week. */
   nodes: { crop: string; set: number | null; harv: number | null; loss: number | null; first: number }[]
   actuals: { crop: string; week: number; kg: number | null }[]
+  /** Each variety's pepper type (its model group). */
+  pepperTypes: Record<string, PepperTypeRow>
 }
 
 const data: Export = JSON.parse(readFileSync(process.argv[2], 'utf8'))
@@ -39,6 +41,12 @@ const label = (i: number) => weekLabel(i, YEAR)
 const fmt = (v: number | null, d = 2) => (v === null || !Number.isFinite(v) ? '—' : v.toFixed(d))
 const pct = (v: number | null) => (v === null || !Number.isFinite(v) ? '—' : `${(100 * v).toFixed(0)}%`)
 const kgText = (v: number | null) => (v === null ? 'no AFW' : `${Math.round(v).toLocaleString('en-US')} kg`)
+/** A variety's model group; refuses a variety without one (never a default type). */
+const groupOf = (crop: string) => {
+  const t = data.pepperTypes?.[crop]
+  if (!t) throw new Error(`${crop}: no pepper type in the export`)
+  return modelGroupFrom(t)
+}
 const afwOf = (crop: string) => data.afw.filter((a) => a.crop === crop).map((a) => ({ year: YEAR, week: a.week, afwG: Number(a.afw) }))
 
 /** Cohorts as known at the origin: outcomes after it are unknown (still on the plant). */
@@ -49,7 +57,7 @@ function cohortsAt(crop: string, origin: number): Cohort[] {
     if (n.crop !== crop || n.set === null) continue
     const set = ywIndex(n.set)
     if (set > origin) continue
-    const c = byWeek.get(set) ?? { setIndex: set, sets: 0, harvestedByAge: Array(MAX_AGE + 1).fill(0), lostByAge: Array(MAX_AGE + 1).fill(0), resolvedLater: 0, onPlant: 0, isBaseline: set === baseline }
+    const c = byWeek.get(set) ?? { pepperTypeId: groupOf(crop).pepperTypeId, cropId: crop, setIndex: set, sets: 0, harvestedByAge: Array(MAX_AGE + 1).fill(0), lostByAge: Array(MAX_AGE + 1).fill(0), resolvedLater: 0, onPlant: 0, isBaseline: set === baseline }
     byWeek.set(set, c)
     c.sets++
     const harv = n.harv === null ? null : ywIndex(n.harv)
@@ -99,9 +107,10 @@ function backtest(crop: string, title: string, opts: { twoWeek?: boolean; forceP
       afw: [],
       weeksAhead: 9,
       label,
+      group: groupOf(crop),
       forceProvisional: opts.forceProvisional,
     })
-    if (!opts.forceProvisional && r.parameters.survival.kind !== 'measured') continue
+    if (!opts.forceProvisional && r.parameters.survival?.kind !== 'measured') continue
     for (const w of r.outlook) {
       if (w.coverage < 0.9) continue
       const h = w.targetIndex - origin
@@ -122,9 +131,9 @@ function backtest(crop: string, title: string, opts: { twoWeek?: boolean; forceP
 
 console.log('Mathieu parameters as known at each origin (completed cohorts only):')
 for (const o of [34, 38, 41, 43]) {
-  const p = setsPotential({ cohorts: cohortsAt('Mathieu', idx(o)), sets: [], originIndex: idx(o), areaM2: 1, afw: [], weeksAhead: 1, label }).parameters
+  const p = setsPotential({ cohorts: cohortsAt('Mathieu', idx(o)), sets: [], originIndex: idx(o), areaM2: 1, afw: [], weeksAhead: 1, label, group: groupOf('Mathieu') }).parameters
   const after = p.afterAge.map((x, a) => (x ? `${a}:${pct(x.survival)}` : '')).filter(Boolean).join(' ')
-  console.log(`  W${o}: survival ${pct(p.survival.value)} ${p.survival.kind} (${p.survival.basis})${after ? `\n        P(harvested | still on the plant at age): ${after}` : ''}`)
+  console.log(`  W${o}: survival ${pct(p.survival?.value ?? null)} ${p.survival?.kind} (${p.survival?.basis})${after ? `\n        P(harvested | still on the plant at age): ${after}` : ''}`)
 }
 backtest('Mathieu', 'A. Mathieu, measured parameters, weekly harvested/m² (harvest weeks ≥90% covered by recorded Sets)')
 backtest('Mathieu', 'A2. Same, two-week totals (Mathieu is picked every other week)', { twoWeek: true })
@@ -137,7 +146,8 @@ for (const include of [false, true]) {
     const sampled = data.sampling[name].filter((s) => s.visited_stems > 0 && s.iso_week <= CURRENT_WEEK).at(-1)
     if (!sampled) continue
     const r = setsPotential({
-      cohorts: cohortsFrom(data.outcomes[name]),
+      cohorts: cohortsFrom(data.outcomes[name], name, groupOf(name).pepperTypeId),
+      group: groupOf(name),
       sets: setsWeeks(data.newSets[name], data.sampling[name], YEAR, CURRENT_WEEK),
       originIndex: idx(sampled.iso_week),
       areaM2: Number(area),
@@ -147,6 +157,10 @@ for (const include of [false, true]) {
       includePossibleCatchup: include,
     })
     const { survival, timing } = r.parameters
+    if (!survival || !timing) {
+      console.log(`\n  ${name}: ${r.notConfigured}`)
+      continue
+    }
     const flagged = r.weeks.filter((w) => w.status === 'possible_catchup').map((w) => `${label(w.index)} (${pct(w.firstSeenShare)} first seen set)`)
     console.log(`\n  ${name} (from W${sampled.iso_week}): survival ${pct(survival.value)} ${survival.kind} · timing ${timing.kind}${flagged.length ? ` · possible catch-up: ${flagged.join(', ')}` : ''}`)
     for (const p of r.potential.slice(-4)) {

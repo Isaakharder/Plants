@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { Crop } from '../crops/model'
 import { formatTwoDecimals } from '../../lib/format'
-import { MAX_AGE, PROVISIONAL_ASSUMPTIONS, SETS_MODEL_VERSION, harvestedOf, lostOf, type Cohort, type Parameter, type PotentialWeek, type SetsWeek } from './engine/sets'
+import { Link } from 'react-router-dom'
+import { MAX_AGE, SETS_MODEL_VERSION, harvestedOf, lostOf, type Cohort, type Parameter, type PotentialWeek, type SetsWeek } from './engine/sets'
 import { weekIndex, weekLabel } from './engine/weeks'
 import { formatCount, type ForecastView } from './forecastView'
 import { buildSetsPotential, useSetsOutlookData } from './setsOutlookData'
@@ -26,8 +27,20 @@ const timingText = (timing: number[]) =>
     .map(([d, share]) => `${d} wks ${pct(share)}`)
     .join(' · ')
 
-function KindTag({ p }: { p: Parameter<unknown> }) {
-  return <span className={p.kind === 'measured' ? styles.tagMeasured : styles.tagProvisional}>{p.kind === 'measured' ? 'Measured' : 'Provisional'}</span>
+const SOURCE_LABEL: Record<Parameter<unknown>['source'], (group: string) => string> = {
+  variety: () => 'this variety',
+  'pepper type': (group) => `${group} varieties`,
+  'variety setting': () => 'variety setting',
+  'pepper type setting': (group) => `${group} setting`,
+  'this page': () => 'tried on this page',
+}
+
+function KindTag({ p, group }: { p: Parameter<unknown>; group: string }) {
+  return (
+    <span className={p.kind === 'measured' ? styles.tagMeasured : styles.tagProvisional}>
+      {p.kind === 'measured' ? 'Measured' : 'Provisional'} · {SOURCE_LABEL[p.source](group)}
+    </span>
+  )
 }
 
 const survivalTitle = (p: PotentialWeek) =>
@@ -82,7 +95,31 @@ export function SetsPotentialCard({
 
   const label = (index: number) => weekLabel(index, year)
   const { parameters, potential, outlook, dueNextWeek } = result
-  const { survival, timing } = parameters
+  const { survival, timing, group } = parameters
+  const head = (
+    <div className={styles.cardHead}>
+      <h2 className={styles.compactTitle}>
+        Sets production potential
+        <span className={styles.titleSep}>·</span>
+        <span className={styles.statusExperimental}>Experimental · Estimated</span>
+      </h2>
+      <span className={styles.versionNote}>
+        Model group: {group.name} · planning estimate, not a forecast · from the W{originWeek} sampling · {SETS_MODEL_VERSION}
+      </span>
+    </div>
+  )
+  if (result.notConfigured || !survival || !timing) {
+    return (
+      <div className={styles.card}>
+        {head}
+        <ul className={styles.inlineNotes}>
+          <li>
+            {result.notConfigured} <Link to="/settings">Pepper types in Settings</Link>
+          </li>
+        </ul>
+      </div>
+    )
+  }
   const origin = weekIndex(year, originWeek)
   // Sampling weeks listed: the recent ones with any Plants Sets data (excluded ones say why).
   const shownWeeks = result.weeks.filter((w) => w.status !== 'not_sampled' && w.index > origin - 10).reverse()
@@ -99,23 +136,15 @@ export function SetsPotentialCard({
 
   return (
     <div className={styles.card}>
-      <div className={styles.cardHead}>
-        <h2 className={styles.compactTitle}>
-          Sets production potential
-          <span className={styles.titleSep}>·</span>
-          <span className={styles.statusExperimental}>Experimental · Estimated</span>
-        </h2>
-        <span className={styles.versionNote}>
-          Planning estimate, not a forecast · from the W{originWeek} sampling · {SETS_MODEL_VERSION}
-        </span>
-      </div>
+      {head}
 
       <ul className={styles.inlineNotes}>
         <li>Not an official forecast or production commitment, and not yet checked against actual harvests. The official next-week forecast is the Breakers row.</li>
         <li>
-          Harvest timing is {timing.kind === 'provisional' ? 'an assumption (5–8 weeks after set)' : 'measured from completed cohorts'} and not validated as a forecast.
+          Harvest timing is {timing.kind === 'provisional' ? `a provisional ${group.name} assumption` : 'measured from completed cohorts'} and not validated as a forecast.
         </li>
         {survival.kind === 'provisional' && <li>Survival is an assumption: {crop.name} doesn’t have enough completed cohorts of its own yet.</li>}
+        {survival.source === 'pepper type' && <li>Measured from other {group.name} varieties: {crop.name} doesn’t have enough completed cohorts of its own yet.</li>}
         {survival.kind === 'measured' && parameters.completed.length > 0 && (
           <li>
             Survival is measured on cohorts set {label(parameters.completed.at(-1)!.setIndex)}–{label(parameters.completed[0].setIndex)}; fruit set later in the
@@ -144,7 +173,7 @@ export function SetsPotentialCard({
       <dl className={styles.assumptions}>
         <div>
           <dt>
-            Survival <KindTag p={survival} />
+            Survival <KindTag p={survival} group={group.name} />
           </dt>
           <dd>
             <strong>{pct(survival.value)}</strong> of set peppers harvested · {survival.basis}.{' '}
@@ -157,7 +186,7 @@ export function SetsPotentialCard({
                 <input
                   className={`input ${styles.readyInput}`}
                   inputMode="decimal"
-                  value={survivalText ?? String(Math.round(100 * PROVISIONAL_ASSUMPTIONS.survival))}
+                  value={survivalText ?? String(Math.round(1000 * survival.value) / 10)}
                   onChange={(e) => setSurvivalText(e.target.value)}
                   aria-label="Provisional survival %"
                   aria-invalid={survivalText !== null && tried === undefined}
@@ -169,7 +198,7 @@ export function SetsPotentialCard({
         </div>
         <div>
           <dt>
-            Maturation timing <KindTag p={timing} />
+            Maturation timing <KindTag p={timing} group={group.name} />
           </dt>
           <dd>
             Weeks from set to harvest: {timingText(timing.value)} · {timing.basis}

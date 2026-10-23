@@ -32,10 +32,10 @@ insert into public.organization_members (organization_id, user_id, role) values
   ('cccccccc-0000-4000-8000-00000000d0a0', 'cccccccc-0000-4000-8000-00000000d001', 'owner'),
   ('cccccccc-0000-4000-8000-00000000d0a0', 'cccccccc-0000-4000-8000-00000000d002', 'member'),
   ('dddddddd-0000-4000-8000-00000000d0b0', 'dddddddd-0000-4000-8000-00000000d003', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems) values
-  ('cccccccc-0000-4000-8000-00000000dc01', 'cccccccc-0000-4000-8000-00000000d0a0', 'Cadalora', 'red', '2020-01-06', '2099-12-31', 100, 700),
-  ('cccccccc-0000-4000-8000-00000000dc02', 'cccccccc-0000-4000-8000-00000000d0a0', 'Silverstone', 'red', '2020-01-06', '2099-12-31', 100, 700),
-  ('cccccccc-0000-4000-8000-00000000dc03', 'cccccccc-0000-4000-8000-00000000d0a0', 'Bay Crop', 'yellow', '2020-01-06', '2099-12-31', 100, 700);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, pepper_type_id) values
+  ('cccccccc-0000-4000-8000-00000000dc01', 'cccccccc-0000-4000-8000-00000000d0a0', 'Cadalora', 'red', '2020-01-06', '2099-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = 'cccccccc-0000-4000-8000-00000000d0a0' and t.key = 'bell')),
+  ('cccccccc-0000-4000-8000-00000000dc02', 'cccccccc-0000-4000-8000-00000000d0a0', 'Silverstone', 'red', '2020-01-06', '2099-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = 'cccccccc-0000-4000-8000-00000000d0a0' and t.key = 'bell')),
+  ('cccccccc-0000-4000-8000-00000000dc03', 'cccccccc-0000-4000-8000-00000000d0a0', 'Bay Crop', 'yellow', '2020-01-06', '2099-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = 'cccccccc-0000-4000-8000-00000000d0a0' and t.key = 'bell'));
 insert into public.measurement_rows (id, organization_id, crop_id, row_name, sort_order) values
   ('cccccccc-0000-4000-8000-00000000d101', 'cccccccc-0000-4000-8000-00000000d0a0', 'cccccccc-0000-4000-8000-00000000dc01', 'Row 171', 1),
   ('cccccccc-0000-4000-8000-00000000d102', 'cccccccc-0000-4000-8000-00000000d0a0', 'cccccccc-0000-4000-8000-00000000dc01', 'Row 172', 2),

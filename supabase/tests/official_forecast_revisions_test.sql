@@ -16,8 +16,8 @@ insert into public.organizations (id, name) values ('cccccccc-0000-4000-8000-000
 insert into public.organization_members (organization_id, user_id, role) values
   ('cccccccc-0000-4000-8000-00000000c0a0', 'cccccccc-0000-4000-8000-00000000c001', 'member'),
   ('cccccccc-0000-4000-8000-00000000c0b0', 'cccccccc-0000-4000-8000-00000000c002', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, case_weight_kg) values
-  ('cccccccc-0000-4000-8000-00000000cc01', 'cccccccc-0000-4000-8000-00000000c0a0', 'Crop R', 'red', '2026-01-05', '2026-12-31', 100, 1000, 5);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, case_weight_kg, pepper_type_id) values
+  ('cccccccc-0000-4000-8000-00000000cc01', 'cccccccc-0000-4000-8000-00000000c0a0', 'Crop R', 'red', '2026-01-05', '2026-12-31', 100, 1000, 5, (select t.id from public.pepper_types t where t.organization_id = 'cccccccc-0000-4000-8000-00000000c0a0' and t.key = 'bell'));
 
 create function pg_temp.run(id text, week integer, basis text, share numeric, deadline timestamptz) returns void language sql as $$
   insert into public.sampling_week_events (id, organization_id, crop_id, year, week_number, event, observed_at, recorded_at)

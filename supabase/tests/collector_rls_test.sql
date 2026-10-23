@@ -20,9 +20,9 @@ insert into public.organizations (id, name) values
 insert into public.organization_members (organization_id, user_id, role) values
   ('aaaaaaaa-0000-4000-8000-0000000000a0', 'aaaaaaaa-0000-4000-8000-000000000001', 'owner'),
   ('bbbbbbbb-0000-4000-8000-0000000000b0', 'bbbbbbbb-0000-4000-8000-000000000001', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, created_by) values
-  ('aaaaaaaa-0000-4000-8000-00000000c001', 'aaaaaaaa-0000-4000-8000-0000000000a0', 'Crop A', 'red', '2026-01-01', '2026-12-01', 100, 100, null),
-  ('bbbbbbbb-0000-4000-8000-00000000c001', 'bbbbbbbb-0000-4000-8000-0000000000b0', 'Crop B', 'red', '2026-01-01', '2026-12-01', 100, 100, null);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, created_by, pepper_type_id) values
+  ('aaaaaaaa-0000-4000-8000-00000000c001', 'aaaaaaaa-0000-4000-8000-0000000000a0', 'Crop A', 'red', '2026-01-01', '2026-12-01', 100, 100, null, (select t.id from public.pepper_types t where t.organization_id = 'aaaaaaaa-0000-4000-8000-0000000000a0' and t.key = 'bell')),
+  ('bbbbbbbb-0000-4000-8000-00000000c001', 'bbbbbbbb-0000-4000-8000-0000000000b0', 'Crop B', 'red', '2026-01-01', '2026-12-01', 100, 100, null, (select t.id from public.pepper_types t where t.organization_id = 'bbbbbbbb-0000-4000-8000-0000000000b0' and t.key = 'bell'));
 
 -- ---------------------------------------------------------------- user A
 set local role authenticated;

@@ -3,13 +3,14 @@ import { Link, useParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { daysBetween, formatDateLong, todayIso } from '../../lib/dates'
 import { formatArea, formatInteger } from '../../lib/format'
-import { useCrop, useUpdateCrop } from './api'
+import { useCrop, usePepperTypes, useUpdateCrop } from './api'
 import { ColorDot, StatusBadge } from './CropBadges'
 import { CropForm } from './CropForm'
 import { DeleteCropDialog } from './DeleteCropDialog'
 import { CropClimateZones } from '../climate/CropClimateZones'
 import { cropToForm } from './cropValidation'
 import { colorLabel, cropDescription, cropStatus, type Crop } from './model'
+import { useOrganization } from '../organization/OrganizationProvider'
 import styles from './CropDetailPage.module.css'
 
 export function CropDetailPage() {
@@ -39,6 +40,9 @@ function CropDetail({ crop }: { crop: Crop }) {
   const [deleting, setDeleting] = useState(false)
   const update = useUpdateCrop(crop.id)
   const status = cropStatus(crop)
+  const organization = useOrganization()
+  const pepperTypes = usePepperTypes(organization.id)
+  const pepperType = pepperTypes.data?.find((t) => t.id === crop.pepper_type_id) ?? null
 
   const deleteDialog = <DeleteCropDialog crop={crop} open={deleting} onClose={() => setDeleting(false)} />
 
@@ -49,6 +53,7 @@ function CropDetail({ crop }: { crop: Crop }) {
           <h1 className={styles.editTitle}>Edit {crop.name}</h1>
           <CropForm
             initialValues={cropToForm(crop)}
+            pepperTypes={pepperTypes.data ?? []}
             submitLabel="Save changes"
             submitting={update.isPending}
             serverError={update.error?.message}
@@ -81,7 +86,7 @@ function CropDetail({ crop }: { crop: Crop }) {
           <div>
             <h1 className={styles.name}>{crop.name}</h1>
             <p className={styles.description}>
-              {cropDescription(crop.color)} · planted {crop.planting_date.slice(0, 4)}
+              {cropDescription(crop.color, pepperType?.name ?? null)} · planted {crop.planting_date.slice(0, 4)}
             </p>
           </div>
         </div>

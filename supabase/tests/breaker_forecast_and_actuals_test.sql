@@ -19,8 +19,8 @@ insert into public.organizations (id, name) values
 insert into public.organization_members (organization_id, user_id, role) values
   ('aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000d001', 'owner'),
   ('bbbbbbbb-0000-4000-8000-00000000d0b0', 'bbbbbbbb-0000-4000-8000-00000000d001', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, case_weight_kg) values
-  ('aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'Crop A', 'orange', '2025-12-01', '2027-12-01', 100, 700, 5);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, case_weight_kg, pepper_type_id) values
+  ('aaaaaaaa-0000-4000-8000-00000000dc01', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'Crop A', 'orange', '2025-12-01', '2027-12-01', 100, 700, 5, (select t.id from public.pepper_types t where t.organization_id = 'aaaaaaaa-0000-4000-8000-00000000d0a0' and t.key = 'bell'));
 insert into public.measurement_rows (id, organization_id, crop_id, row_name) values
   ('aaaaaaaa-0000-4000-8000-00000000d101', 'aaaaaaaa-0000-4000-8000-00000000d0a0', 'aaaaaaaa-0000-4000-8000-00000000dc01', 'Row A');
 insert into public.measurement_stems (id, organization_id, crop_id, measurement_row_id, stem_name, created_at) values

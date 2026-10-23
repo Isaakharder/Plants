@@ -14,8 +14,11 @@ export const CROP_COLORS: { value: CropColor; label: string }[] = [
 
 export const colorLabel = (color: CropColor) => CROP_COLORS.find((c) => c.value === color)?.label ?? color
 
-/** "Red Bell Pepper", or "Bell Pepper" for Other. */
-export const cropDescription = (color: CropColor) => (color === 'other' ? 'Bell Pepper' : `${colorLabel(color)} Bell Pepper`)
+/** "Red Bell Pepper" from the colour and the variety's pepper type; the type alone for Other. */
+export const cropDescription = (color: CropColor, pepperType: string | null) => {
+  const type = pepperType ?? 'Pepper'
+  return color === 'other' ? type : `${colorLabel(color)} ${type}`
+}
 
 /**
  * Planting density, derived from the stored area and picking stems (never

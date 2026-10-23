@@ -19,8 +19,8 @@ insert into public.organization_members (organization_id, user_id, role) values
   ('aaaaaaaa-0000-4000-8000-0000000c20a0', 'aaaaaaaa-0000-4000-8000-0000000c2001', 'owner'),
   ('aaaaaaaa-0000-4000-8000-0000000c20a0', 'aaaaaaaa-0000-4000-8000-0000000c2002', 'member'),
   ('bbbbbbbb-0000-4000-8000-0000000c20b0', 'bbbbbbbb-0000-4000-8000-0000000c2001', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems) values
-  ('aaaaaaaa-0000-4000-8000-0000000c2c01', 'aaaaaaaa-0000-4000-8000-0000000c20a0', 'Cadalora', 'orange', '2025-12-01', '2026-12-01', 1000, 700);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, pepper_type_id) values
+  ('aaaaaaaa-0000-4000-8000-0000000c2c01', 'aaaaaaaa-0000-4000-8000-0000000c20a0', 'Cadalora', 'orange', '2025-12-01', '2026-12-01', 1000, 700, (select t.id from public.pepper_types t where t.organization_id = 'aaaaaaaa-0000-4000-8000-0000000c20a0' and t.key = 'bell'));
 insert into public.climate_sources (id, organization_id, name) values
   ('aaaaaaaa-0000-4000-8000-0000000c2501', 'aaaaaaaa-0000-4000-8000-0000000c20a0', 'Synopta');
 insert into public.climate_agent_keys (id, organization_id, source_id, label, key_prefix, key_hash) values

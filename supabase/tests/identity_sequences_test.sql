@@ -13,8 +13,8 @@ insert into auth.users (id, email, aud, role) values
 insert into public.organizations (id, name) values ('99999999-0000-4000-8000-0000000090a0', 'Sequence Org');
 insert into public.organization_members (organization_id, user_id, role) values
   ('99999999-0000-4000-8000-0000000090a0', '99999999-0000-4000-8000-000000009001', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems) values
-  ('99999999-0000-4000-8000-0000000090c1', '99999999-0000-4000-8000-0000000090a0', 'Seq Crop', 'red', '2026-01-05', '2026-12-31', 100, 700);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, pepper_type_id) values
+  ('99999999-0000-4000-8000-0000000090c1', '99999999-0000-4000-8000-0000000090a0', 'Seq Crop', 'red', '2026-01-05', '2026-12-31', 100, 700, (select t.id from public.pepper_types t where t.organization_id = '99999999-0000-4000-8000-0000000090a0' and t.key = 'bell'));
 
 -- A copy loaded with its original ids: AFW history 1–40 and actual kg 1–16, counters untouched
 -- (as on a fresh database; counters aren't transactional, so set them explicitly).

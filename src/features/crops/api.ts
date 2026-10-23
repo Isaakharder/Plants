@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
+import type { PepperTypeRow } from '../../lib/database.types'
 import type { Crop } from './model'
 import type { CropInput } from './cropValidation'
 
@@ -10,7 +11,53 @@ const cropKeys = {
   detail: (id: string) => ['crops', 'detail', id] as const,
 }
 
-const normalize = (crop: Crop): Crop => ({ ...crop, area_m2: Number(crop.area_m2) })
+const num = (v: number | null) => (v === null ? null : Number(v))
+const normalize = (crop: Crop): Crop => ({
+  ...crop,
+  area_m2: Number(crop.area_m2),
+  sets_provisional_survival: num(crop.sets_provisional_survival),
+  sets_provisional_timing: crop.sets_provisional_timing?.map(Number) ?? null,
+})
+
+export type PepperType = PepperTypeRow
+
+const normalizeType = (t: PepperTypeRow): PepperType => ({
+  ...t,
+  provisional_survival: num(t.provisional_survival),
+  provisional_timing: t.provisional_timing?.map(Number) ?? null,
+  default_afw_g: num(t.default_afw_g),
+})
+
+/** The organization's pepper types (forecasting model groups), by name. */
+export function usePepperTypes(organizationId: string) {
+  return useQuery({
+    queryKey: ['crops', 'pepperTypes', organizationId] as const,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('pepper_types').select('*').eq('organization_id', organizationId).order('name')
+      if (error) throw error
+      return data.map(normalizeType)
+    },
+  })
+}
+
+export type PepperTypeChange = Partial<Pick<PepperType, 'provisional_survival' | 'provisional_timing' | 'default_afw_g' | 'pool_within_type'>>
+
+/** Owners change a pepper type's provisional assumptions (RLS refuses others). */
+export function useUpdatePepperType(organizationId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, change }: { id: string; change: PepperTypeChange }) => {
+      const { data, error } = await supabase.from('pepper_types').update(change).eq('id', id).select('id')
+      if (error) throw error
+      if (data.length === 0) throw new Error('Only owners can change pepper type assumptions.')
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['crops', 'pepperTypes', organizationId] }),
+        queryClient.invalidateQueries({ queryKey: ['forecast', 'setsPotential'] }),
+      ]),
+  })
+}
 
 export function useCrops(organizationId: string) {
   return useQuery({

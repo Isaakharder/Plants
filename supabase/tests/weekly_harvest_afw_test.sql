@@ -40,10 +40,10 @@ insert into public.organizations (id, name) values
 insert into public.organization_members (organization_id, user_id, role) values
   ('c0000000-0000-4000-8000-00000000a000', 'c0000000-0000-4000-8000-0000000000a1', 'member'),
   ('c0000000-0000-4000-8000-00000000b000', 'c0000000-0000-4000-8000-0000000000b1', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, created_by) values
-  ('c0000000-0000-4000-8000-00000000a0c1', 'c0000000-0000-4000-8000-00000000a000', 'Crop A1', 'red', '2026-01-01', '2026-12-01', 11787, 80136, null),
-  ('c0000000-0000-4000-8000-00000000a0c2', 'c0000000-0000-4000-8000-00000000a000', 'Crop A2', 'orange', '2026-01-01', '2026-12-01', 5000, 30000, null),
-  ('c0000000-0000-4000-8000-00000000b0c1', 'c0000000-0000-4000-8000-00000000b000', 'Crop B', 'red', '2026-01-01', '2026-12-01', 100, 100, null);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, created_by, pepper_type_id) values
+  ('c0000000-0000-4000-8000-00000000a0c1', 'c0000000-0000-4000-8000-00000000a000', 'Crop A1', 'red', '2026-01-01', '2026-12-01', 11787, 80136, null, (select t.id from public.pepper_types t where t.organization_id = 'c0000000-0000-4000-8000-00000000a000' and t.key = 'bell')),
+  ('c0000000-0000-4000-8000-00000000a0c2', 'c0000000-0000-4000-8000-00000000a000', 'Crop A2', 'orange', '2026-01-01', '2026-12-01', 5000, 30000, null, (select t.id from public.pepper_types t where t.organization_id = 'c0000000-0000-4000-8000-00000000a000' and t.key = 'bell')),
+  ('c0000000-0000-4000-8000-00000000b0c1', 'c0000000-0000-4000-8000-00000000b000', 'Crop B', 'red', '2026-01-01', '2026-12-01', 100, 100, null, (select t.id from public.pepper_types t where t.organization_id = 'c0000000-0000-4000-8000-00000000b000' and t.key = 'bell'));
 
 -- Cohort results for every crop before any AFW is entered.
 create temporary table cohorts_before as

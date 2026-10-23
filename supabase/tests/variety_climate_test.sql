@@ -15,9 +15,9 @@ insert into public.organizations (id, name) values
 insert into public.organization_members (organization_id, user_id, role) values
   ('aaaaaaaa-0000-4000-8000-0000000c50a0', 'aaaaaaaa-0000-4000-8000-0000000c5001', 'owner'),
   ('bbbbbbbb-0000-4000-8000-0000000c50b0', 'bbbbbbbb-0000-4000-8000-0000000c5001', 'owner');
-insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems) values
-  ('aaaaaaaa-0000-4000-8000-0000000c5c01', 'aaaaaaaa-0000-4000-8000-0000000c50a0', 'Variety A', 'red', '2026-01-05', '2026-12-15', 1000, 7000),
-  ('aaaaaaaa-0000-4000-8000-0000000c5c02', 'aaaaaaaa-0000-4000-8000-0000000c50a0', 'Variety B', 'yellow', '2026-01-05', '2026-12-15', 1000, 7000);
+insert into public.crops (id, organization_id, name, color, planting_date, pullout_date, area_m2, picking_stems, pepper_type_id) values
+  ('aaaaaaaa-0000-4000-8000-0000000c5c01', 'aaaaaaaa-0000-4000-8000-0000000c50a0', 'Variety A', 'red', '2026-01-05', '2026-12-15', 1000, 7000, (select t.id from public.pepper_types t where t.organization_id = 'aaaaaaaa-0000-4000-8000-0000000c50a0' and t.key = 'bell')),
+  ('aaaaaaaa-0000-4000-8000-0000000c5c02', 'aaaaaaaa-0000-4000-8000-0000000c50a0', 'Variety B', 'yellow', '2026-01-05', '2026-12-15', 1000, 7000, (select t.id from public.pepper_types t where t.organization_id = 'aaaaaaaa-0000-4000-8000-0000000c50a0' and t.key = 'bell'));
 insert into public.climate_sources (id, organization_id, name) values
   ('aaaaaaaa-0000-4000-8000-0000000c5501', 'aaaaaaaa-0000-4000-8000-0000000c50a0', 'Synopta');
 
