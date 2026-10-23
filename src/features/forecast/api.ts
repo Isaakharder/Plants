@@ -178,17 +178,18 @@ export function currentWeek() {
 // ── Production Totals ─────────────────────────────────────────────────────
 
 /**
- * Production Totals: every saved forecast whose target week is in `year`
+ * Production Totals: every saved forecast whose target week is in `years`
  * (locked forecasts and every saved preliminary version, with when each was
  * saved) and the actual kg entered per variety and week. Read as stored; no
  * forecast is recalculated (productionHistory.ts chooses which one counts).
  */
-export function useProductionHistory(cropIds: string[], year: number) {
+export function useProductionHistory(cropIds: string[], years: number[]) {
   return useQuery({
-    queryKey: ['forecast', 'productionHistory', [...cropIds].sort().join(','), year],
-    enabled: cropIds.length > 0,
+    queryKey: ['forecast', 'productionHistory', [...cropIds].sort().join(','), years.join(',')],
+    enabled: cropIds.length > 0 && years.length > 0,
     queryFn: async (): Promise<{ snapshots: Snapshot[]; actuals: Actual[] }> => {
-      const origins = [year - 1, year]
+      const origins = [Math.min(...years) - 1, ...years]
+      const inYears = (yw: number) => years.includes(Math.floor(yw / 100))
       const runs = check(
         await supabase.from('forecast_runs').select('id, crop_id, origin_year, origin_week, kind, locked_at').in('crop_id', cropIds).in('origin_year', origins),
       )
@@ -198,7 +199,7 @@ export function useProductionHistory(cropIds: string[], year: number) {
               .from('forecast_run_weeks')
               .select('run_id, target_year, target_week, available, kg')
               .in('run_id', runs.map((r) => r.id))
-              .eq('target_year', year),
+              .in('target_year', years),
           )
         : []
       const runById = new Map(runs.map((r) => [r.id, r]))
@@ -229,7 +230,7 @@ export function useProductionHistory(cropIds: string[], year: number) {
       }, (r) => (r as unknown as PreviewRow).id)) as unknown as PreviewRow[]
       const preliminary: Snapshot[] = previews.flatMap((p) =>
         (p.weeks ?? [])
-          .filter((w) => Math.floor(w.targetYw / 100) === year)
+          .filter((w) => inYears(w.targetYw))
           .map((w) => ({
             cropId: p.crop_id,
             targetYw: w.targetYw,
@@ -247,7 +248,7 @@ export function useProductionHistory(cropIds: string[], year: number) {
           .from('weekly_harvest_actuals')
           .select('id, crop_id, year, week, actual_kg, entered_at', withCount ? { count: 'exact' } : undefined)
           .in('crop_id', cropIds)
-          .eq('year', year)
+          .in('year', years)
         if (after) q = q.gt('id', after)
         return q.order('id').limit(limit)
       }, (r) => String(r.id))

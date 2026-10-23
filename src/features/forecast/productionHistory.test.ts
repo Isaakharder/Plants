@@ -5,6 +5,7 @@ import {
   formatError,
   historyWeeks,
   latestActuals,
+  viewWeeks,
   phaseOf,
   productionHistory,
   weekStartsAt,
@@ -108,11 +109,11 @@ describe('the page', () => {
 
   it('computes accuracy only over completed weeks with both values, with the error sign', () => {
     const done = productionHistory(CROPS, SNAPSHOTS, ACTUALS, 2026, 202644) // W43 now completed
-    const yellow = done.accuracy.byGroup.get('yellow')!
+    const yellow = done.summary.byGroup.get('yellow')!.accuracy
     // P3 Levente: 6677 projected, 5251 actual: (6677 − 5251) / 6677 = +21.4% (overestimated).
     expect(yellow).toMatchObject({ projected: 6677, actual: 5251, matched: 1 })
     expect(formatError(yellow.errorPct)).toBe('+21.4%')
-    const all = done.accuracy.all
+    const all = done.summary.all.accuracy
     // Matched: Silverstone W43 and P3 Levente W43. Cadalora/Mathieu W43 have no actual; W42 has no forecast.
     expect(all).toMatchObject({ projected: 21371 + 6677, actual: 15567 + 5251, matched: 2, weeks: 1 })
     expect(all.excluded).toEqual({ forecast: 4, actual: 2 })
@@ -136,5 +137,25 @@ describe('actual kg', () => {
       { id: 4, crop_id: 'A', year: 2026, week: 43, actual_kg: null, entered_at: '2026-10-22T11:00:00Z' },
     ])
     expect(got.map((a) => [a.yw, a.kg])).toEqual([[202642, 1300], [202643, null]])
+  })
+})
+
+describe('quick views', () => {
+  it('next week and next 5 weeks: the coming weeks, newest first, with or without a forecast', () => {
+    expect(viewWeeks('next', 2026, NOW, SNAPSHOTS, ACTUALS)).toEqual([202644])
+    expect(viewWeeks('next5', 2026, NOW, SNAPSHOTS, ACTUALS)).toEqual([202648, 202647, 202646, 202645, 202644])
+    expect(viewWeeks('next5', 2026, 202651, [], [])).toEqual([202703, 202702, 202701, 202653, 202652]) // across New Year (2026 has 53 weeks)
+    expect(viewWeeks('year', 2026, NOW, SNAPSHOTS, ACTUALS)).toEqual([202644, 202643, 202642])
+  })
+
+  it('cards in the coming-week views: projected kg only, never an accuracy', () => {
+    const next = productionHistory(CROPS, SNAPSHOTS, ACTUALS, 2026, NOW, 'next')
+    const all = next.summary.all
+    // W44: Cadalora 16496 (official) + P3 Levente 2993 (official); Silverstone has no kg (AFW), Mathieu no forecast.
+    expect(all.projection).toEqual({ kg: 16496 + 2993, withForecast: 2, expected: 4, weeks: 1 })
+    expect(all.accuracy).toMatchObject({ matched: 0, errorPct: null, expected: 0 })
+    const five = productionHistory(CROPS, SNAPSHOTS, ACTUALS, 2026, NOW, 'next5')
+    expect(five.rows.map((r) => r.phase)).toEqual(['future', 'future', 'future', 'future', 'future'])
+    expect(five.summary.all.projection).toMatchObject({ kg: 16496 + 2993, withForecast: 2, expected: 20 })
   })
 })

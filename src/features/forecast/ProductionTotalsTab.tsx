@@ -14,11 +14,12 @@ import {
   GREENHOUSE_TZ,
   HORIZON_WEEKS,
   productionHistory,
-  type Accuracy,
   type Cell,
   type HistoryCrop,
   type HistoryRow,
   type Phase,
+  type RangeView,
+  type Summary,
   type VarietyWeek,
 } from './productionHistory'
 import fc from './HarvestForecastTab.module.css'
@@ -48,6 +49,9 @@ const PHASE: Record<Phase, string> = { completed: 'Completed', current: 'This we
 
 type View = 'every' | 'all' | string
 
+const RANGE_TITLE: Record<RangeView, string> = { year: 'Whole year', next: 'Next week', next5: 'Next 5 weeks' }
+const defaultColours = (): View => (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 720px)').matches ? 'all' : 'every')
+
 /**
  * Projections › Production Totals: the season's projected kg against actual
  * harvested kg, per week and pepper colour (productionHistory.ts).
@@ -58,7 +62,9 @@ export function ProductionTotalsTab() {
   const [params, setParams] = useSearchParams()
   const today = greenhouseIsoWeek()
   const currentYw = today.year * 100 + today.week
-  const [view, setView] = useState<View>(() => (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 720px)').matches ? 'all' : 'every'))
+  const [view, setView] = useState<View>(defaultColours)
+  // Whole year unless the address says otherwise, so opening the page always starts there.
+  const range: RangeView = params.get('range') === 'next' || params.get('range') === 'next5' ? (params.get('range') as RangeView) : 'year'
 
   const all = useMemo(() => crops.data ?? [], [crops.data])
   const years = useMemo(() => {
@@ -66,16 +72,32 @@ export function ProductionTotalsTab() {
     for (const c of all) for (let y = Number(c.planting_date.slice(0, 4)); y <= Number(c.pullout_date.slice(0, 4)); y++) ys.add(y)
     return [...ys].sort((a, b) => b - a)
   }, [all, today.year])
-  const year = years.includes(Number(params.get('year'))) ? Number(params.get('year')) : today.year
+  // The coming-week views always mean the current greenhouse year.
+  const year = range === 'year' && years.includes(Number(params.get('year'))) ? Number(params.get('year')) : today.year
+  const nextWeeks = range === 'year' ? [] : Array.from({ length: range === 'next' ? 1 : 5 }, (_, i) => greenhouseIsoWeek(new Date(Date.now() + (i + 1) * 7 * 86_400_000)).year)
+  const loadYears = [...new Set([year, ...nextWeeks])].sort()
+  const setRange = (next: RangeView) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p)
+        if (next === 'year') n.delete('range')
+        else {
+          n.set('range', next)
+          n.delete('year')
+        }
+        return n
+      },
+      { replace: true },
+    )
 
   const historyCrops: HistoryCrop[] = useMemo(
     () => all.map((c) => ({ id: c.id, name: c.name, color: c.color, plantingDate: c.planting_date, pulloutDate: c.pullout_date })),
     [all],
   )
-  const data = useProductionHistory(historyCrops.map((c) => c.id), year)
+  const data = useProductionHistory(historyCrops.map((c) => c.id), loadYears)
   const page = useMemo(
-    () => (data.data ? productionHistory(historyCrops, data.data.snapshots, data.data.actuals, year, currentYw) : null),
-    [data.data, historyCrops, year, currentYw],
+    () => (data.data ? productionHistory(historyCrops, data.data.snapshots, data.data.actuals, year, currentYw, range) : null),
+    [data.data, historyCrops, year, currentYw, range],
   )
 
   if (crops.isPending) return <LoadingState />
@@ -96,7 +118,17 @@ export function ProductionTotalsTab() {
             <select
               className="input"
               value={year}
-              onChange={(e) => setParams((p) => { const n = new URLSearchParams(p); n.set('year', e.target.value); return n }, { replace: true })}
+              onChange={(e) =>
+                setParams(
+                  (p) => {
+                    const n = new URLSearchParams(p)
+                    n.set('year', e.target.value)
+                    n.delete('range') // another year: its whole season
+                    return n
+                  },
+                  { replace: true },
+                )
+              }
             >
               {years.map((y) => (
                 <option key={y} value={y}>
@@ -106,6 +138,23 @@ export function ProductionTotalsTab() {
             </select>
           </label>
         </div>
+      </div>
+
+      <div className={styles.rangeBar} role="group" aria-label="Weeks shown">
+        {(['next', 'next5', 'year'] as const).map((r) => (
+          <button
+            key={r}
+            type="button"
+            className={`button button-secondary ${styles.rangeButton}`}
+            aria-pressed={range === r}
+            onClick={() => {
+              setRange(r)
+              if (r === 'year') setView(defaultColours()) // Whole year: back to the default view
+            }}
+          >
+            {r === 'next' ? `Next week (W${nextWeekNumber()})` : RANGE_TITLE[r]}
+          </button>
+        ))}
       </div>
 
       <p className={fc.subtitle}>
@@ -118,15 +167,15 @@ export function ProductionTotalsTab() {
         <LoadingState />
       ) : data.error ? (
         <ErrorState error={data.error} />
-      ) : page && page.rows.length === 0 ? (
+      ) : page && page.rows.length === 0 && range === 'year' ? (
         <EmptyState title={`No forecasts or harvests for ${year}`} description="Weeks appear once a forecast is saved on Harvest Forecast or an actual kg is entered in Weekly Plant Data." />
       ) : page ? (
         <>
           <div className={styles.cards}>
             {groups.map((g) => (
-              <AccuracyCard key={g.color} title={colourName(g.color)} color={g.color} varieties={g.crops.map((c) => c.name)} acc={page.accuracy.byGroup.get(g.color)!} year={year} />
+              <SummaryCard key={g.color} title={colourName(g.color)} color={g.color} varieties={g.crops.map((c) => c.name)} summary={page.summary.byGroup.get(g.color)!} year={year} range={range} rows={page.rows.map((r) => r.yw)} />
             ))}
-            <AccuracyCard title="All colours" color={null} varieties={[`${all.length} varieties`]} acc={page.accuracy.all} year={year} />
+            <SummaryCard title="All colours" color={null} varieties={[`${all.length} varieties`]} summary={page.summary.all} year={year} range={range} rows={page.rows.map((r) => r.yw)} />
           </div>
 
           <div className={styles.viewBar} role="group" aria-label="Colours shown">
@@ -265,7 +314,45 @@ function Cells({ cell, phase, all }: { cell: Cell; phase: Phase; all: boolean })
   )
 }
 
-function AccuracyCard({ title, color, varieties, acc, year }: { title: string; color: string | null; varieties: string[]; acc: Accuracy; year: number }) {
+/** The coming greenhouse week's number. */
+const nextWeekNumber = () => greenhouseIsoWeek(new Date(Date.now() + 7 * 86_400_000)).week
+const weeksLabel = (yws: number[]) => (yws.length === 0 ? '' : yws.length === 1 ? `W${yws[0] % 100}` : `W${yws[yws.length - 1] % 100}–W${yws[0] % 100}`)
+
+function SummaryCard(props: { title: string; color: string | null; varieties: string[]; summary: Summary; year: number; range: RangeView; rows: number[] }) {
+  if (props.range === 'year') return <AccuracyCard {...props} />
+  const { title, color, varieties, summary, rows } = props
+  const p = summary.projection
+  return (
+    <article className={`${styles.card} ${color === null ? styles.allCard : ''}`}>
+      <header className={styles.cardHead}>
+        {color !== null && <span className={styles.swatch} style={{ background: swatch(color) }} aria-hidden="true" />}
+        <h2 className={styles.cardTitle}>{title}</h2>
+      </header>
+      <p className={styles.cardSub}>
+        {varieties.join(', ')} · {weeksLabel(rows)}
+      </p>
+      <dl className={styles.figures}>
+        <div className={styles.singleFigure}>
+          <dt>Projected</dt>
+          <dd>
+            {p.kg === null ? '—' : `${p.withForecast < p.expected ? '≥ ' : ''}${fmt(p.kg)}`} <span>kg</span>
+          </dd>
+        </div>
+      </dl>
+      <p className={p.withForecast === p.expected && p.expected > 0 ? styles.coverage : styles.coverageIncomplete}>
+        {p.expected === 0
+          ? 'No variety in season.'
+          : p.withForecast === p.expected
+            ? `Every variety-week has a forecast.`
+            : `${p.withForecast} of ${p.expected} variety-weeks have a projected kg; the rest have no forecast or AFW yet (not counted as zero).`}{' '}
+        Actual kg and accuracy appear once these weeks are completed.
+      </p>
+    </article>
+  )
+}
+
+function AccuracyCard({ title, color, varieties, summary, year }: { title: string; color: string | null; varieties: string[]; summary: Summary; year: number }) {
+  const acc = summary.accuracy
   const vw = (n: number) => `${n} variety-week${n === 1 ? '' : 's'}`
   const excluded = [
     acc.excluded.forecast ? `${acc.excluded.forecast} without a forecast from before the week` : '',

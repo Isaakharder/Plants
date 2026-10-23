@@ -93,6 +93,29 @@
   vertical-align: -1px;
 }
 
+/* Quick views: the coming week(s) or the whole season (default). */
+.rangeBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rangeButton {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: var(--text-sm);
+}
+
+.rangeButton[aria-pressed='true'] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.singleFigure {
+  grid-column: 1 / -1;
+}
+
 /* Colours shown in the table (one colour fits a phone). */
 .viewBar {
   display: flex;

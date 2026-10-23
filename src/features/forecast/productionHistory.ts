@@ -240,24 +240,57 @@ export function historyWeeks(year: number, currentYw: number, snapshots: Snapsho
   return out
 }
 
-export type ProductionHistory = {
-  groups: Group[]
-  rows: HistoryRow[]
-  accuracy: { byGroup: Map<string, Accuracy>; all: Accuracy }
+/** The quick views: the whole season (default), or the coming week(s). */
+export type RangeView = 'year' | 'next' | 'next5'
+
+/** The weeks of a view, newest first. The coming weeks are listed even without a forecast (shown as missing). */
+export function viewWeeks(view: RangeView, year: number, currentYw: number, snapshots: Snapshot[], actuals: Actual[]): number[] {
+  if (view === 'year') return historyWeeks(year, currentYw, snapshots, actuals)
+  const cur = indexOfYw(currentYw)
+  const n = view === 'next' ? 1 : 5
+  return Array.from({ length: n }, (_, i) => ywOf(cur + n - i))
 }
 
-export function productionHistory(crops: HistoryCrop[], snapshots: Snapshot[], actuals: Actual[], year: number, currentYw: number): ProductionHistory {
+/** Projected kg over a view's weeks: what a card shows when there is nothing to compare yet. */
+export type Projection = { kg: number | null; withForecast: number; expected: number; weeks: number }
+
+export function projectionOf(rows: HistoryRow[], pick: (r: HistoryRow) => Cell): Projection {
+  const cells = rows.map(pick)
+  const parts = cells.flatMap((c) => c.parts)
+  const withKg = parts.filter((p) => p.forecast?.kg != null)
+  return { kg: withKg.length ? withKg.reduce((a, p) => a + p.forecast!.kg!, 0) : null, withForecast: withKg.length, expected: parts.length, weeks: rows.length }
+}
+
+export type Summary = { accuracy: Accuracy; projection: Projection }
+
+export type ProductionHistory = {
+  view: RangeView
+  groups: Group[]
+  rows: HistoryRow[]
+  summary: { byGroup: Map<string, Summary>; all: Summary }
+}
+
+export function productionHistory(
+  crops: HistoryCrop[],
+  snapshots: Snapshot[],
+  actuals: Actual[],
+  year: number,
+  currentYw: number,
+  view: RangeView = 'year',
+): ProductionHistory {
   const groups = colourGroups(crops)
-  const rows: HistoryRow[] = historyWeeks(year, currentYw, snapshots, actuals).map((yw) => {
+  const rows: HistoryRow[] = viewWeeks(view, year, currentYw, snapshots, actuals).map((yw) => {
     const phase = phaseOf(yw, currentYw)
     const parts = new Map(crops.filter((c) => inSeason(c, yw)).map((c) => [c.id, varietyWeek(c, yw, phase, snapshots, actuals)]))
     const pick = (list: HistoryCrop[]) => cellOf(list.flatMap((c) => (parts.has(c.id) ? [parts.get(c.id)!] : [])))
     return { yw, phase, byGroup: new Map(groups.map((g) => [g.color, pick(g.crops)])), all: pick(crops) }
   })
+  const summary = (pick: (r: HistoryRow) => Cell): Summary => ({ accuracy: accuracyOf(rows, pick), projection: projectionOf(rows, pick) })
   return {
+    view,
     groups,
     rows,
-    accuracy: { byGroup: new Map(groups.map((g) => [g.color, accuracyOf(rows, (r) => r.byGroup.get(g.color)!)])), all: accuracyOf(rows, (r) => r.all) },
+    summary: { byGroup: new Map(groups.map((g) => [g.color, summary((r) => r.byGroup.get(g.color)!)])), all: summary((r) => r.all) },
   }
 }
 
