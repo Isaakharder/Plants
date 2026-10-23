@@ -35,6 +35,8 @@ import { DEFAULT_BASIS } from './data'
 import { latestOf, revisable, revisionDeadline } from './revisions'
 import type { ForecastRunRow } from '../../lib/database.types'
 import { ForecastSettings } from './ForecastSettings'
+import { SETS_OUTLOOK_ENABLED } from './setsOutlookData'
+import { SetsPotentialCard } from './SetsPotentialCard'
 import { FORECAST_WEEKS } from './engine/types'
 import { weekLabel, weekStartInstant, weekIndex } from './engine/weeks'
 import {
@@ -338,6 +340,16 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
         </div>
       )}
 
+      {SETS_OUTLOOK_ENABLED && !sampling.isPending && (
+        <SetsPotentialCard
+          crop={crop}
+          originWeek={originWeek}
+          year={now.year}
+          currentWeek={now.week}
+          next={shown?.weeks.find((w) => w.horizon === 1) ?? null}
+          nextSource={shown ? `${STATUS_LABEL[shown.status]} · W${shown.originWeek}` : null}
+        />
+      )}
       {runs.isPending || sampling.isPending || stored.loading || history.isPending ? (
         <LoadingState />
       ) : runs.error || sampling.error || history.error ? (

@@ -801,3 +801,65 @@
   font-size: var(--text-sm);
   color: var(--warning);
 }
+
+/* Sets production potential (experimental planning estimate). */
+.assumptions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 8px 20px;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.assumptions dt {
+  font-weight: 600;
+}
+
+.assumptions dd {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+}
+
+.assumptions dd strong {
+  color: var(--text);
+}
+
+.tagMeasured,
+.tagProvisional {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tagMeasured {
+  background: #e3f1e6;
+  color: #1f6b35;
+}
+
+.tagProvisional {
+  background: #fdf3dc;
+  color: #8a5a00;
+}
+
+.survivalTry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--text);
+}
+
+.subTitle {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.byWeekCell {
+  text-align: left !important;
+  white-space: normal !important;
+  font-size: var(--text-xs);
+}

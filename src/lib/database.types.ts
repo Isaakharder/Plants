@@ -183,6 +183,35 @@ export type WeeklyPlantDataRow = {
   is_provisional: boolean
 }
 
+// ---- Sets production potential inputs (20261108000000_sets_potential_inputs.sql) ----
+
+/** weekly_plant_data()'s Sets/m² with each week's catch-up counts. Missing values are null, never zero. */
+export type WeeklyNewSetsRow = {
+  iso_week: number
+  sets_per_m2: number | null
+  is_sampled: boolean
+  is_baseline: boolean
+  is_provisional: boolean
+  new_sets: number
+  /** New sets first recorded already set at a node position missed earlier. */
+  catchup_sets: number
+  /** New sets first recorded already set (no earlier flower record). */
+  first_seen_set: number
+}
+
+/** One set week's sampled peppers: outcomes by age 0 … 10 weeks after set, later resolutions and those still on the plant. */
+export type SetCohortOutcomeRow = {
+  set_year: number
+  set_week: number
+  is_baseline: boolean
+  sets: number
+  harvested_by_age: number[]
+  aborted_by_age: number[]
+  pruned_by_age: number[]
+  resolved_later: number
+  on_plant: number
+}
+
 // ---- Set → Harvest cohort ladder (20261009000000_cohort_ladder.sql; +10 window: 20261010000000_cohort_window_10.sql) ----
 
 /** One cell of a harvest-week row: the cohort set `delay` (+0 … +10) weeks earlier. */
@@ -1240,6 +1269,14 @@ export type Database = {
       set_harvest_cohorts: {
         Args: { p_crop_id: string; p_year: number; p_as_of?: string }
         Returns: SetHarvestCohortRow[]
+      }
+      weekly_new_sets: {
+        Args: { p_crop_id: string; p_year: number; p_as_of?: string }
+        Returns: WeeklyNewSetsRow[]
+      }
+      set_cohort_outcomes: {
+        Args: { p_crop_id: string; p_year: number }
+        Returns: SetCohortOutcomeRow[]
       }
       weekly_fruit_loss: {
         Args: { p_crop_id: string; p_year: number; p_as_of?: string }

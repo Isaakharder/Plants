@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly VITE_POST_HARVEST_INSPECTIONS?: string
   /** "on" shows "Forgot password?" and the reset page. Off by default until reset emails are delivered (custom SMTP). */
   readonly VITE_PASSWORD_RESET?: string
+  /** "on" shows the experimental multi-week Sets outlook on Harvest Forecast (recalculated, never saved). Off by default until validated. */
+  readonly VITE_SETS_OUTLOOK?: string
 }
 
 interface ImportMeta {
