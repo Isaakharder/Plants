@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import { greenhouseIsoWeek } from '../collector/greenhouseWeek'
@@ -7,50 +7,58 @@ import { colorLabel, type Crop } from '../crops/model'
 import { useOrganization } from '../organization/OrganizationProvider'
 import { ProjectionsTabs } from '../projections/ProjectionsTabs'
 import wpd from '../projections/WeeklyPlantDataTab.module.css'
-import { useProductionSources } from './api'
-import { productionTotals, type CellMissing, type TotalsCell, type TotalsCrop } from './productionTotals'
+import { useProductionHistory } from './api'
+import {
+  errorWord,
+  formatError,
+  GREENHOUSE_TZ,
+  HORIZON_WEEKS,
+  productionHistory,
+  type Accuracy,
+  type Cell,
+  type HistoryCrop,
+  type HistoryRow,
+  type Phase,
+  type VarietyWeek,
+} from './productionHistory'
 import fc from './HarvestForecastTab.module.css'
 import styles from './ProductionTotalsTab.module.css'
-
-const isoWeeksInYear = (year: number) => {
-  const dec28 = new Date(Date.UTC(year, 11, 28))
-  const thursday = new Date(dec28)
-  thursday.setUTCDate(dec28.getUTCDate() + 3 - ((dec28.getUTCDay() + 6) % 7))
-  return Math.ceil(((thursday.getTime() - Date.UTC(thursday.getUTCFullYear(), 0, 1)) / 86_400_000 + 1) / 7)
-}
 
 const fmt = (n: number | null) => (n === null ? '—' : Math.round(n).toLocaleString('en-US'))
 const swatch = (color: string) => `var(--pepper-${['red', 'orange', 'yellow', 'green'].includes(color) ? color : 'other'})`
 const colourName = (color: string) => colorLabel(color as Crop['color'])
+const savedLabel = (iso: string) =>
+  new Date(iso).toLocaleString('en-CA', { timeZone: GREENHOUSE_TZ, weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-const REASON = { no_forecast: 'no forecast', afw_needed: 'AFW needed', no_case_weight: 'no case weight' } as const
+const FORECAST_MISSING = {
+  no_forecast: 'no forecast',
+  saved_after_start: 'saved too late',
+  not_available: 'not available',
+  afw_needed: 'AFW needed',
+} as const
+const FORECAST_MISSING_LONG = {
+  no_forecast: 'no forecast saved for this week',
+  saved_after_start: 'only forecasts saved after the week began (not used)',
+  not_available: 'its forecasts don’t cover this week',
+  afw_needed: 'forecast has no kg (AFW needed)',
+} as const
+const ACTUAL_MISSING = { not_entered: 'not entered', in_progress: 'in progress', future: '' } as const
+const KIND = { official: 'Official', late: 'Late', preliminary: 'Preliminary' } as const
+const PHASE: Record<Phase, string> = { completed: 'Completed', current: 'This week', future: 'Future' }
 
-/** "Silverstone: AFW needed (W43, W44); Cadalora: no forecast (W45)". */
-function missingSummary(missing: { m: CellMissing; yw: number }[]): string {
-  const by = new Map<string, number[]>()
-  for (const { m, yw } of missing) {
-    const key = `${m.cropName}: ${REASON[m.reason]}`
-    by.set(key, [...(by.get(key) ?? []), yw % 100])
-  }
-  return [...by.entries()].map(([k, weeks]) => `${k} (${[...new Set(weeks)].map((w) => `W${w}`).join(', ')})`).join('; ')
-}
-
-const STATUS_TEXT: Record<TotalsCell['status'], string> = {
-  official: 'Official',
-  locked: 'Locked (incl. late)',
-  preliminary: 'Includes preliminary',
-  none: 'No forecast',
-}
+type View = 'every' | 'all' | string
 
 /**
- * Projections › Production Totals: the greenhouse's projected harvest per week
- * by pepper colour and combined, added up from the Harvest Forecast figures.
+ * Projections › Production Totals: the season's projected kg against actual
+ * harvested kg, per week and pepper colour (productionHistory.ts).
  */
 export function ProductionTotalsTab() {
   const organization = useOrganization()
   const crops = useCrops(organization.id)
   const [params, setParams] = useSearchParams()
   const today = greenhouseIsoWeek()
+  const currentYw = today.year * 100 + today.week
+  const [view, setView] = useState<View>(() => (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 720px)').matches ? 'all' : 'every'))
 
   const all = useMemo(() => crops.data ?? [], [crops.data])
   const years = useMemo(() => {
@@ -59,52 +67,24 @@ export function ProductionTotalsTab() {
     return [...ys].sort((a, b) => b - a)
   }, [all, today.year])
   const year = years.includes(Number(params.get('year'))) ? Number(params.get('year')) : today.year
-  const maxWeek = isoWeeksInYear(year)
-  // Default: next week, the week the Friday Breaker forecasts cover (earlier and later weeks via the presets).
-  const nextWeek = year === today.year ? Math.min(today.week + 1, isoWeeksInYear(year)) : 1
-  const defaultFrom = nextWeek
-  const from = Math.min(Math.max(Number(params.get('from')) || defaultFrom, 1), maxWeek)
-  const to = Math.min(Math.max(Number(params.get('to')) || (year === today.year ? nextWeek : maxWeek), from), maxWeek)
-  const set = (changes: Record<string, string | null>) =>
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev)
-        for (const [k, v] of Object.entries(changes)) {
-          if (v === null) p.delete(k)
-          else p.set(k, v)
-        }
-        return p
-      },
-      { replace: true },
-    )
 
-  const totalsCrops: TotalsCrop[] = useMemo(
-    () =>
-      all.map((c) => ({
-        id: c.id,
-        name: c.name,
-        color: c.color,
-        caseWeightKg: c.case_weight_kg === null || c.case_weight_kg === undefined ? null : Number(c.case_weight_kg),
-        plantingDate: c.planting_date,
-        pulloutDate: c.pullout_date,
-      })),
+  const historyCrops: HistoryCrop[] = useMemo(
+    () => all.map((c) => ({ id: c.id, name: c.name, color: c.color, plantingDate: c.planting_date, pulloutDate: c.pullout_date })),
     [all],
   )
-  const sources = useProductionSources(totalsCrops.map((c) => c.id), year)
-  const weeks = useMemo(() => Array.from({ length: to - from + 1 }, (_, i) => year * 100 + from + i), [year, from, to])
-  const totals = useMemo(() => (sources.data ? productionTotals(totalsCrops, sources.data, weeks) : null), [sources.data, totalsCrops, weeks])
+  const data = useProductionHistory(historyCrops.map((c) => c.id), year)
+  const page = useMemo(
+    () => (data.data ? productionHistory(historyCrops, data.data.snapshots, data.data.actuals, year, currentYw) : null),
+    [data.data, historyCrops, year, currentYw],
+  )
 
   if (crops.isPending) return <LoadingState />
   if (crops.error) return <ErrorState error={crops.error} />
   if (all.length === 0) return <EmptyState title="No varieties yet" description="Add a variety in Settings." />
 
-  const preset = (label: string, f: number, t: number) => (
-    <button type="button" className={`button button-secondary ${styles.preset}`} onClick={() => set({ from: String(f), to: String(t) })}>
-      {label}
-    </button>
-  )
-  const weekOptions = Array.from({ length: maxWeek }, (_, i) => i + 1)
-  const next = nextWeek
+  const groups = page?.groups ?? []
+  const shown = view === 'every' ? [...groups.map((g) => g.color), 'all'] : view === 'all' ? ['all'] : [view]
+  const cellOf = (r: HistoryRow, key: string) => (key === 'all' ? r.all : r.byGroup.get(key)!)
 
   return (
     <section className={wpd.section} aria-label="Production Totals">
@@ -113,7 +93,11 @@ export function ProductionTotalsTab() {
         <div className={wpd.selectors}>
           <label className={`field ${wpd.yearControl}`}>
             <span className="field-label">Year</span>
-            <select className="input" value={year} onChange={(e) => set({ year: e.target.value, from: null, to: null })}>
+            <select
+              className="input"
+              value={year}
+              onChange={(e) => setParams((p) => { const n = new URLSearchParams(p); n.set('year', e.target.value); return n }, { replace: true })}
+            >
               {years.map((y) => (
                 <option key={y} value={y}>
                   {y}
@@ -121,67 +105,36 @@ export function ProductionTotalsTab() {
               ))}
             </select>
           </label>
-          <label className={`field ${wpd.yearControl}`}>
-            <span className="field-label">From</span>
-            <select className="input" value={from} onChange={(e) => set({ from: e.target.value, to: String(Math.max(to, Number(e.target.value))) })}>
-              {weekOptions.map((w) => (
-                <option key={w} value={w}>
-                  W{w}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={`field ${wpd.yearControl}`}>
-            <span className="field-label">To</span>
-            <select className="input" value={to} onChange={(e) => set({ to: e.target.value, from: String(Math.min(from, Number(e.target.value))) })}>
-              {weekOptions.map((w) => (
-                <option key={w} value={w}>
-                  W{w}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
-      </div>
-      <div className={styles.presets}>
-        {year === today.year && preset(`Next week (W${next})`, next, next)}
-        {year === today.year && preset('Next 5 weeks', next, Math.min(next + 4, maxWeek))}
-        {year === today.year && preset('This week + 7', today.week, Math.min(today.week + 7, maxWeek))}
-        {preset('Whole year', 1, maxWeek)}
       </div>
 
       <p className={fc.subtitle}>
-        Added up from each variety’s Harvest Forecast: for every variety and week, its locked forecast (Official) if there is one, otherwise its saved
-        Preliminary forecast, from the latest sampling week. Cases use each variety’s own case weight. Weeks a variety has no forecast, AFW or case weight for
-        are marked incomplete, never counted as zero.
+        The season’s projected harvest against the actual kg entered in Weekly Plant Data. Each week uses the forecast that was saved before the week began
+        (the newest sampling week; a locked forecast over a preliminary one), never a recalculation. Error = (projected − actual) ÷ projected: positive
+        means overestimated, negative underestimated. Missing values are shown as missing, never as zero.
       </p>
 
-      {sources.isPending ? (
+      {data.isPending ? (
         <LoadingState />
-      ) : sources.error ? (
-        <ErrorState error={sources.error} />
-      ) : totals ? (
+      ) : data.error ? (
+        <ErrorState error={data.error} />
+      ) : page && page.rows.length === 0 ? (
+        <EmptyState title={`No forecasts or harvests for ${year}`} description="Weeks appear once a forecast is saved on Harvest Forecast or an actual kg is entered in Weekly Plant Data." />
+      ) : page ? (
         <>
           <div className={styles.cards}>
-            {totals.colours.map((g) => (
-              <SummaryCard
-                key={g.color}
-                title={colourName(g.color)}
-                color={g.color}
-                varieties={g.crops.map((c) => c.name)}
-                cell={totals.totals.byColour.get(g.color)!}
-                missing={totals.weeks.flatMap((w) => w.byColour.get(g.color)!.missing.map((m) => ({ m, yw: w.yw })))}
-                weeks={[from, to]}
-              />
+            {groups.map((g) => (
+              <AccuracyCard key={g.color} title={colourName(g.color)} color={g.color} varieties={g.crops.map((c) => c.name)} acc={page.accuracy.byGroup.get(g.color)!} year={year} />
             ))}
-            <SummaryCard
-              title="All colours"
-              color={null}
-              varieties={[`${all.length} varieties`]}
-              cell={totals.totals.all}
-              missing={totals.weeks.flatMap((w) => w.all.missing.map((m) => ({ m, yw: w.yw })))}
-              weeks={[from, to]}
-            />
+            <AccuracyCard title="All colours" color={null} varieties={[`${all.length} varieties`]} acc={page.accuracy.all} year={year} />
+          </div>
+
+          <div className={styles.viewBar} role="group" aria-label="Colours shown">
+            {[['every', 'Every colour'], ...groups.map((g) => [g.color, colourName(g.color)]), ['all', 'All colours']].map(([key, label]) => (
+              <button key={key} type="button" aria-pressed={view === key} className={styles.viewButton} onClick={() => setView(key)}>
+                {label}
+              </button>
+            ))}
           </div>
 
           <div className={styles.tableWrap}>
@@ -191,57 +144,47 @@ export function ProductionTotalsTab() {
                   <th scope="col" rowSpan={2}>
                     Week
                   </th>
-                  {totals.colours.map((g) => (
-                    <th key={g.color} scope="colgroup" colSpan={2} className={styles.colourHead}>
-                      <span className={styles.swatch} style={{ background: swatch(g.color) }} aria-hidden="true" />
-                      {colourName(g.color)}
+                  {shown.map((key) => (
+                    <th key={key} scope="colgroup" colSpan={3} className={`${styles.colourHead} ${key === 'all' ? styles.allHead : ''}`}>
+                      {key !== 'all' && <span className={styles.swatch} style={{ background: swatch(key) }} aria-hidden="true" />}
+                      {key === 'all' ? 'All colours' : colourName(key)}
                     </th>
                   ))}
-                  <th scope="colgroup" colSpan={2} className={`${styles.colourHead} ${styles.allHead}`}>
-                    All colours
-                  </th>
                 </tr>
                 <tr>
-                  {[...totals.colours.map((g) => g.color), 'all'].flatMap((c) => [
-                    <th key={`${c}kg`} scope="col" className={c === 'all' ? styles.allCol : undefined}>
-                      kg
+                  {shown.flatMap((key) => [
+                    <th key={`${key}p`} scope="col" className={key === 'all' ? styles.allCol : undefined}>
+                      Projected
                     </th>,
-                    <th key={`${c}cases`} scope="col" className={c === 'all' ? styles.allCol : undefined}>
-                      Cases
+                    <th key={`${key}a`} scope="col" className={key === 'all' ? styles.allCol : undefined}>
+                      Actual
+                    </th>,
+                    <th key={`${key}e`} scope="col" className={`${styles.groupEnd} ${key === 'all' ? styles.allCol : ''}`}>
+                      Error
                     </th>,
                   ])}
                 </tr>
               </thead>
               <tbody>
-                {totals.weeks.map((w) => (
-                  <tr key={w.yw}>
+                {page.rows.map((r) => (
+                  <tr key={r.yw} className={styles[`row_${r.phase}`]}>
                     <th scope="row">
-                      W{w.yw % 100}
-                      <StatusTag cell={w.all} />
+                      <span className={styles.weekLabel}>W{r.yw % 100}</span>
+                      <PhaseTag row={r} />
                     </th>
-                    {totals.colours.map((g) => (
-                      <Cells key={g.color} cell={w.byColour.get(g.color)!} />
+                    {shown.map((key) => (
+                      <Cells key={key} cell={cellOf(r, key)} phase={r.phase} all={key === 'all'} />
                     ))}
-                    <Cells cell={w.all} all />
                   </tr>
                 ))}
-                <tr className={styles.totalRow}>
-                  <th scope="row">
-                    W{from}–W{to}
-                    <StatusTag cell={totals.totals.all} />
-                  </th>
-                  {totals.colours.map((g) => (
-                    <Cells key={g.color} cell={totals.totals.byColour.get(g.color)!} />
-                  ))}
-                  <Cells cell={totals.totals.all} all />
-                </tr>
               </tbody>
             </table>
           </div>
           <p className={fc.fate}>
-            <span className={styles.legend}>≥</span> partial: some varieties have no forecast, AFW or case weight that week (hover for which). <strong>P</strong>{' '}
-            includes preliminary forecasts; <strong>O</strong> official locked forecasts only; <strong>L</strong> locked, including late ones. Preliminary totals are
-            not official. Forecasts are experimental until validated against actual kg.
+            <strong>Future</strong> weeks (up to {HORIZON_WEEKS} ahead) show the latest saved forecast, Official or Preliminary. <strong>This week</strong> shows the
+            forecast saved before it began; its actual kg is still coming in. <strong>≥</strong> some varieties have no projected or actual kg that week (hover for
+            which); the error then covers only the varieties with both. Accuracy counts completed weeks only. Forecasts are experimental until validated against
+            actual kg.
           </p>
         </>
       ) : null}
@@ -249,98 +192,122 @@ export function ProductionTotalsTab() {
   )
 }
 
-function StatusTag({ cell }: { cell: TotalsCell }) {
-  if (cell.status === 'none') return null
-  const letter = cell.status === 'official' ? 'O' : cell.status === 'locked' ? 'L' : 'P'
-  return (
-    <span
-      className={`${styles.tag} ${styles[`tag_${cell.status}`]}`}
-      title={`${STATUS_TEXT[cell.status]}${cell.anyOutdated ? ' · a preliminary forecast may be outdated (regenerate it on Harvest Forecast)' : ''}`}
-    >
-      {letter}
-      {cell.anyOutdated ? '!' : ''}
-    </span>
-  )
+function PhaseTag({ row }: { row: HistoryRow }) {
+  if (row.phase !== 'future') return <span className={`${styles.phase} ${styles[`phase_${row.phase}`]}`}>{PHASE[row.phase]}</span>
+  const kinds = row.all.kinds
+  const label = kinds.size === 0 ? 'No forecast' : kinds.has('preliminary') ? (kinds.size > 1 ? 'Official + preliminary' : 'Preliminary') : 'Official'
+  return <span className={`${styles.phase} ${styles.phase_future}`}>{`Future · ${label}`}</span>
 }
 
-function cellTitle(cell: TotalsCell): string {
-  const lines = cell.sources.map(
-    (s) => `${s.cropName}: ${fmt(s.kg)} kg · ${s.cases === null ? '— cases' : `${fmt(s.cases)} cases`} (${s.status === 'preliminary' ? 'Preliminary' : s.status === 'official' ? 'Official' : 'Late'}, from W${s.originYw % 100}${s.outdated ? ', may be outdated' : ''})`,
-  )
-  for (const m of cell.missing) lines.push(`${m.cropName}: ${REASON[m.reason]}`)
-  if (cell.expected === 0) lines.push('No variety of this colour in season')
-  return lines.join('\n')
+function partTitle(p: VarietyWeek): string {
+  const f = p.forecast
+  const projected = f
+    ? `${f.kg === null ? 'no kg (AFW needed)' : `${fmt(f.kg)} kg`}, ${KIND[f.kind]} from the W${f.originYw % 100} sampling, saved ${savedLabel(f.savedAt)}`
+    : FORECAST_MISSING_LONG[p.forecastMissing!]
+  const actual = p.actualKg !== null ? `${fmt(p.actualKg)} kg` : p.actualMissing === 'future' ? 'not yet' : ACTUAL_MISSING[p.actualMissing!]
+  return `${p.crop.name}: projected ${projected} · actual ${actual}${p.matched ? '' : p.actualMissing === 'not_entered' || !f?.kg ? ' · not in accuracy' : ''}`
 }
 
-function Cells({ cell, all }: { cell: TotalsCell; all?: boolean }) {
-  const cls = all ? styles.allCol : undefined
-  if (cell.expected === 0 && cell.sources.length === 0) {
+function Cells({ cell, phase, all }: { cell: Cell; phase: Phase; all: boolean }) {
+  const cls = all ? styles.allCol : ''
+  if (cell.expected === 0) {
     return (
       <>
-        <td className={cls} title="No variety of this colour in season">
-          ·
-        </td>
+        <td className={cls} title="No variety of this colour in season">·</td>
         <td className={cls} />
+        <td className={`${cls} ${styles.groupEnd}`} />
       </>
     )
   }
-  const partialKg = !cell.kgComplete
-  const partialCases = !cell.casesComplete
+  const title = cell.parts.map(partTitle).join('\n')
+  const reasons = (list: string[]) => [...new Set(list)].join(', ')
+  const projected =
+    cell.projected === null ? (
+      <span className={styles.missing}>{reasons(cell.parts.map((p) => (p.forecastMissing ? FORECAST_MISSING[p.forecastMissing] : '')).filter(Boolean))}</span>
+    ) : (
+      <>
+        {cell.projectedComplete ? '' : <span className={styles.partialMark}>≥ </span>}
+        {fmt(cell.projected)}
+      </>
+    )
+  const actual =
+    phase === 'future' ? (
+      <span className={styles.notYet}>—</span>
+    ) : cell.actual === null ? (
+      <span className={styles.missing}>{phase === 'current' ? 'in progress' : 'not entered'}</span>
+    ) : (
+      <>
+        {cell.actualComplete ? '' : <span className={styles.partialMark}>≥ </span>}
+        {fmt(cell.actual)}
+        {phase === 'current' && <span className={styles.soFar}> so far</span>}
+      </>
+    )
+  const partialError = cell.errorPct !== null && cell.matchedCount < cell.expected
+  const errTitle =
+    cell.errorPct === null
+      ? phase === 'completed'
+        ? 'No variety has both a projected and an actual kg this week'
+        : 'Counted once the week is over'
+      : `${formatError(cell.errorPct)} (${errorWord(cell.errorPct)}) on ${cell.matchedCount} of ${cell.expected} varieties: ${fmt(cell.matchedProjected)} kg projected, ${fmt(cell.matchedActual)} kg actual`
   return (
     <>
-      <td className={`${cls ?? ''} ${partialKg ? styles.partial : ''}`} title={cellTitle(cell)}>
-        {cell.kg === null ? (partialKg ? <span className={styles.missing}>missing</span> : '—') : `${partialKg ? '≥ ' : ''}${fmt(cell.kg)}`}
+      <td className={`${cls} ${cell.projectedComplete ? '' : styles.partial}`} title={title}>
+        {projected}
       </td>
-      <td className={`${cls ?? ''} ${partialCases ? styles.partial : ''}`} title={cellTitle(cell)}>
-        {cell.cases === null ? (partialCases ? <span className={styles.missing}>missing</span> : '—') : `${partialCases ? '≥ ' : ''}${fmt(cell.cases)}`}
+      <td className={`${cls} ${cell.actualComplete || phase === 'future' ? '' : styles.partial}`} title={title}>
+        {actual}
+      </td>
+      <td className={`${cls} ${styles.groupEnd} ${cell.errorPct === null ? styles.notYet : cell.errorPct > 0 ? styles.over : styles.under}`} title={errTitle}>
+        {formatError(cell.errorPct)}
+        {partialError && <span className={styles.partialMark}>*</span>}
       </td>
     </>
   )
 }
 
-function SummaryCard({
-  title,
-  color,
-  varieties,
-  cell,
-  missing,
-  weeks,
-}: {
-  title: string
-  color: string | null
-  varieties: string[]
-  cell: TotalsCell
-  missing: { m: CellMissing; yw: number }[]
-  weeks: [number, number]
-}) {
-  const complete = cell.kgComplete && cell.casesComplete
+function AccuracyCard({ title, color, varieties, acc, year }: { title: string; color: string | null; varieties: string[]; acc: Accuracy; year: number }) {
+  const vw = (n: number) => `${n} variety-week${n === 1 ? '' : 's'}`
+  const excluded = [
+    acc.excluded.forecast ? `${acc.excluded.forecast} without a forecast from before the week` : '',
+    acc.excluded.actual ? `${acc.excluded.actual} without actual kg` : '',
+  ].filter(Boolean)
   return (
     <article className={`${styles.card} ${color === null ? styles.allCard : ''}`}>
       <header className={styles.cardHead}>
         {color !== null && <span className={styles.swatch} style={{ background: swatch(color) }} aria-hidden="true" />}
         <h2 className={styles.cardTitle}>{title}</h2>
-        {cell.status !== 'none' && <span className={`${fc.badge} ${cell.status === 'preliminary' ? fc.badge_preview : fc.badge_official}`}>{STATUS_TEXT[cell.status]}</span>}
-        {cell.anyOutdated && <span className={`${fc.badge} ${fc.badge_incomplete}`}>Possibly outdated</span>}
       </header>
       <p className={styles.cardSub}>
-        {varieties.join(', ')} · W{weeks[0]}
-        {weeks[1] !== weeks[0] ? `–W${weeks[1]}` : ''}
+        {varieties.join(', ')} · {year}, completed weeks
       </p>
       <dl className={styles.figures}>
         <div>
-          <dt>Projected harvest</dt>
+          <dt>Projected</dt>
           <dd>
-            {cell.kg === null ? '—' : `${cell.kgComplete ? '' : '≥ '}${fmt(cell.kg)}`} <span>kg</span>
+            {acc.matched ? fmt(acc.projected) : '—'} <span>kg</span>
           </dd>
         </div>
         <div>
-          <dt>Projected cases</dt>
+          <dt>Actual</dt>
           <dd>
-            {cell.cases === null ? '—' : `${cell.casesComplete ? '' : '≥ '}${fmt(cell.cases)}`} <span>cases</span>
+            {acc.matched ? fmt(acc.actual) : '—'} <span>kg</span>
+          </dd>
+        </div>
+        <div className={styles.errorFigure}>
+          <dt>Forecast error</dt>
+          <dd className={acc.errorPct === null ? undefined : acc.errorPct > 0 ? styles.over : styles.under}>
+            {formatError(acc.errorPct)}
+            {acc.errorPct !== null && <span> {errorWord(acc.errorPct)}</span>}
           </dd>
         </div>
       </dl>
-      {!complete && <p className={styles.incomplete}>Incomplete: {missingSummary(missing) || 'no forecast yet'}</p>}
+      <p className={acc.matched && acc.matched === acc.expected ? styles.coverage : styles.coverageIncomplete}>
+        {acc.matched === 0
+          ? acc.expected === 0
+            ? 'No completed week yet.'
+            : `No completed week has both a forecast and an actual kg yet (${vw(acc.expected)}: ${excluded.join(', ')}).`
+          : `Both totals cover the same ${acc.matched} of ${vw(acc.expected)}, in ${acc.weeks} week${acc.weeks === 1 ? '' : 's'}${excluded.length ? `; left out: ${excluded.join(', ')}` : ''}.`}
+      </p>
     </article>
   )
 }

@@ -7,7 +7,8 @@ import type { ForecastBasisSettingRow, ForecastRunRow, ForecastRunWeekRow, Sampl
 import type { Crop } from '../crops/model'
 import { createForecastData } from './data'
 import { ENGINE_VERSION } from './engine/types'
-import type { SourceWeek } from './productionTotals'
+import { latestActuals, type Actual, type Snapshot } from './productionHistory'
+import { fetchAll } from '../collector/fetchAll'
 import { greenhouseWeekIndex, indexYw, weekOfIndex } from './engine/weeks'
 
 export type { HistoricalReplay, LiveAccuracyResult, Preview, SamplingCompletion, SavedPreview, ValidatedByBasis } from './data'
@@ -177,85 +178,80 @@ export function currentWeek() {
 // ── Production Totals ─────────────────────────────────────────────────────
 
 /**
- * Every stored forecast week of the varieties that can target `year`: locked
- * forecasts (their stored weeks) and saved preliminary forecasts (their newest
- * version per sampling week, flagged when its data changed since). Production
- * Totals picks one per variety and week (productionTotals.ts).
+ * Production Totals: every saved forecast whose target week is in `year`
+ * (locked forecasts and every saved preliminary version, with when each was
+ * saved) and the actual kg entered per variety and week. Read as stored; no
+ * forecast is recalculated (productionHistory.ts chooses which one counts).
  */
-export function useProductionSources(cropIds: string[], year: number) {
+export function useProductionHistory(cropIds: string[], year: number) {
   return useQuery({
-    queryKey: ['forecast', 'productionSources', [...cropIds].sort().join(','), year],
+    queryKey: ['forecast', 'productionHistory', [...cropIds].sort().join(','), year],
     enabled: cropIds.length > 0,
-    queryFn: async (): Promise<SourceWeek[]> => {
+    queryFn: async (): Promise<{ snapshots: Snapshot[]; actuals: Actual[] }> => {
       const origins = [year - 1, year]
       const runs = check(
-        await supabase.from('forecast_runs').select('id, crop_id, origin_year, origin_week, kind').in('crop_id', cropIds).in('origin_year', origins),
+        await supabase.from('forecast_runs').select('id, crop_id, origin_year, origin_week, kind, locked_at').in('crop_id', cropIds).in('origin_year', origins),
       )
       const runWeeks = runs.length
         ? check(
             await supabase
               .from('forecast_run_weeks')
-              .select('run_id, target_year, target_week, available, crop_fruit, kg, cases')
+              .select('run_id, target_year, target_week, available, kg')
               .in('run_id', runs.map((r) => r.id))
               .eq('target_year', year),
           )
         : []
       const runById = new Map(runs.map((r) => [r.id, r]))
-      const locked: SourceWeek[] = runWeeks.map((w) => {
+      const locked: Snapshot[] = runWeeks.map((w) => {
         const r = runById.get(w.run_id)!
         return {
           cropId: r.crop_id,
           targetYw: w.target_year * 100 + w.target_week,
           originYw: r.origin_year * 100 + r.origin_week,
-          status: r.kind,
+          kind: r.kind,
+          savedAt: r.locked_at,
           available: w.available,
-          cropFruit: num(w.crop_fruit),
-          kg: num(w.kg),
-          cases: num(w.cases),
+          kg: w.available ? num(w.kg) : null,
         }
       })
 
-      // Saved preliminary forecasts: only their weeks are read, then the newest version per variety and sampling week.
-      type PreviewWeek = { targetYw: number; available?: boolean; cropFruit: number; kg: number | null }
-      const previews = check(
-        await supabase
+      // Every saved preliminary version (only the weeks of each, a JSON path), read in full.
+      type PreviewWeek = { targetYw: number; available?: boolean; kg: number | null }
+      type PreviewRow = { id: string; crop_id: string; origin_year: number; origin_week: number; created_at: string; weeks: PreviewWeek[] | null }
+      const previews = (await fetchAll((after, limit, withCount) => {
+        let q = supabase
           .from('forecast_previews')
-          // Only the weeks of the saved preview are read (a JSON path); typed below.
-          .select('id, crop_id, origin_year, origin_week, created_at, input_signature, engine_version, weeks:preview->result->weeks' as '*')
+          .select('id, crop_id, origin_year, origin_week, created_at, weeks:preview->result->weeks' as '*', withCount ? { count: 'exact' } : undefined)
           .in('crop_id', cropIds)
           .in('origin_year', origins)
-          .order('created_at', { ascending: false }),
-      ) as unknown as { id: string; crop_id: string; origin_year: number; origin_week: number; created_at: string; input_signature: string; engine_version: string; weeks: PreviewWeek[] | null }[]
-      const newest = new Map<string, (typeof previews)[number]>()
-      for (const p of previews) {
-        const key = `${p.crop_id}:${p.origin_year}:${p.origin_week}`
-        if (!newest.has(key)) newest.set(key, p)
-      }
-      const latest = [...newest.values()]
-      // Whether each one's data changed since it was generated (as on the Harvest Forecast page).
-      const outdated = await Promise.all(
-        latest.map(async (p) => p.engine_version !== ENGINE_VERSION || (await inputSignature(p.crop_id, p.origin_year, p.origin_week)) !== p.input_signature),
-      )
-      const preliminary: SourceWeek[] = latest.flatMap((p, i) =>
+        if (after) q = q.gt('id', after)
+        return q.order('id').limit(limit)
+      }, (r) => (r as unknown as PreviewRow).id)) as unknown as PreviewRow[]
+      const preliminary: Snapshot[] = previews.flatMap((p) =>
         (p.weeks ?? [])
           .filter((w) => Math.floor(w.targetYw / 100) === year)
-          .map((w) => {
-            const available = w.available !== false
-            return {
-              cropId: p.crop_id,
-              targetYw: w.targetYw,
-              originYw: p.origin_year * 100 + p.origin_week,
-              status: 'preliminary' as const,
-              available,
-              cropFruit: available ? w.cropFruit : null,
-              kg: available ? w.kg : null,
-              cases: null,
-              outdated: outdated[i],
-              createdAt: p.created_at,
-            }
-          }),
+          .map((w) => ({
+            cropId: p.crop_id,
+            targetYw: w.targetYw,
+            originYw: p.origin_year * 100 + p.origin_week,
+            kind: 'preliminary' as const,
+            savedAt: p.created_at,
+            available: w.available !== false,
+            kg: w.available !== false ? num(w.kg) : null,
+          })),
       )
-      return [...locked, ...preliminary]
+
+      // Every actual-kg entry of the year; the newest per variety and week counts.
+      const entries = await fetchAll((after, limit, withCount) => {
+        let q = supabase
+          .from('weekly_harvest_actuals')
+          .select('id, crop_id, year, week, actual_kg, entered_at', withCount ? { count: 'exact' } : undefined)
+          .in('crop_id', cropIds)
+          .eq('year', year)
+        if (after) q = q.gt('id', after)
+        return q.order('id').limit(limit)
+      }, (r) => String(r.id))
+      return { snapshots: [...locked, ...preliminary], actuals: latestActuals(entries) }
     },
   })
 }
