@@ -121,24 +121,8 @@
   letter-spacing: 0.03em;
 }
 
-.ahead {
-  margin-left: 8px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
 .kg {
   font-weight: 600;
-}
-
-.groupRow th {
-  padding-top: 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  text-align: left;
 }
 
 .groupNote {
@@ -148,37 +132,7 @@
   letter-spacing: 0;
 }
 
-.totalRow th,
-.totalRow td {
-  background: #eef6ef;
-  font-weight: 700;
-  border-top: 2px solid #b9d9bd;
-  border-bottom: 2px solid #b9d9bd;
-}
-
 /* Outlook weeks: visibly secondary to the marketing window. */
-.outlookGroup th {
-  border-top: 1px dashed var(--border);
-}
-.outlookRow th,
-.outlookRow td {
-  color: var(--text-muted);
-  font-style: italic;
-  background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(0, 0, 0, 0.02) 6px 12px);
-}
-
-.lowConfidence {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: var(--radius-full);
-  background: #fdf3dc;
-  color: #8a5a00;
-  font-size: 11px;
-  font-weight: 600;
-  font-style: normal;
-  line-height: 15px;
-  vertical-align: 1px;
-}
 
 .fate {
   margin: 0;
@@ -190,7 +144,6 @@
 .shownRow td {
   background: #f5f8fc;
 }
-
 
 .auditDialog {
   max-width: 720px;
@@ -221,53 +174,6 @@
 }
 
 /* Stage 4: observed side and accuracy. */
-.observedHead,
-.observed {
-  background: #f6f9fc;
-}
-.grower {
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  background: #e7f0fb;
-  color: #2a5d8f;
-  font-size: 10px;
-  font-weight: 600;
-  font-style: normal;
-  text-transform: uppercase;
-}
-.weekStatus {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: var(--radius-full);
-  font-size: 11px;
-  font-weight: 600;
-  font-style: normal;
-}
-.ws_pending,
-.ws_in_progress,
-.ws_provisional {
-  background: var(--surface-muted);
-  color: var(--text-muted);
-}
-.ws_settled {
-  background: #e3f2e5;
-  color: #22652a;
-}
-.ws_unreliable {
-  background: #fdecec;
-  color: #a12b2b;
-}
-.validated {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: var(--radius-full);
-  background: #e3f2e5;
-  color: #22652a;
-  font-size: 11px;
-  font-weight: 600;
-  font-style: normal;
-}
 .replayTitle {
   margin: 0;
   font-size: 14px;
@@ -285,10 +191,6 @@
 .badge_incomplete {
   background: var(--danger-soft);
   color: var(--danger);
-}
-
-.unavailableRow th {
-  color: var(--text-muted);
 }
 
 .unavailable {
@@ -393,27 +295,8 @@
   font-weight: 600;
 }
 
-.warnings {
-  margin: 0;
-  padding: 8px 12px 8px 28px;
-  border-radius: var(--radius-md);
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-size: var(--text-sm);
-}
-
-.warnings li + li {
-  margin-top: 2px;
-}
-
 .dash {
   color: var(--text-muted);
-}
-
-.footnote {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
 }
 
 .details {
@@ -442,12 +325,6 @@
   .card > .table td {
     padding: 6px 4px;
     font-size: 13px;
-  }
-
-  .card > .table .ahead,
-  .card > .table .grower,
-  .hideNarrow {
-    display: none;
   }
 
   .card {
@@ -770,10 +647,6 @@
   width: 140px;
 }
 
-.tbWeek .tbControl {
-  width: 72px;
-}
-
 .tbNumber .tbControl {
   width: 56px;
 }
@@ -840,4 +713,91 @@
   .tbVariety {
     grid-column: 1 / -1;
   }
+}
+
+/* ── Forecast history (newest week first) ── */
+.historyWrap {
+  overflow-x: auto;
+}
+
+.historyTable th[scope='row'] {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.weekName {
+  font-weight: 600;
+}
+
+/* Week status, as on Production Totals. */
+.phaseTag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 7px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.phase_completed {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+.phase_current {
+  background: #e7f0fb;
+  color: #1f4f86;
+}
+
+.phase_future {
+  background: #f3e8fb;
+  color: #6b3a8c;
+}
+
+.hist_future th,
+.hist_future td {
+  background: #fbf8fd;
+}
+
+.hist_current th,
+.hist_current td {
+  background: #f6f9fd;
+}
+
+/* The current forecast's row: its Ready % can be tried (What-if) or revised. */
+.currentRow th[scope='row'] {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.historyTable td.sourceCell {
+  text-align: left;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.missingText {
+  font-style: italic;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.soFar {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.over {
+  color: #8a5a00;
+}
+
+.under {
+  color: #1f4f86;
+}
+
+.inlineNotes {
+  margin: 0 0 var(--space-2);
+  padding-left: 18px;
+  font-size: var(--text-sm);
+  color: var(--warning);
 }

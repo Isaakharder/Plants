@@ -177,3 +177,22 @@ describe('revised official forecasts', () => {
     expect(page.rows.find((r) => r.yw === 202644)!.all.projected).toBe(18853)
   })
 })
+
+describe('one variety’s history across New Year (Harvest Forecast)', () => {
+  it('spans years when no year is given, newest first, with the same selection rules', () => {
+    const c = { id: 'X', name: 'X', color: 'red', plantingDate: '2026-01-05', pulloutDate: '2027-03-31' }
+    const snaps = [
+      snap('X', 202652, 202653, '2026-12-25T21:00:00Z', 100),
+      snap('X', 202653, 202701, '2027-01-01T21:00:00Z', 65),
+      snap('X', 202653, 202701, '2027-01-05T12:00:00Z', 999), // saved after 2027-W01 began: never counts for it
+      snap('X', 202701, 202702, '2027-01-08T21:00:00Z', 110),
+    ]
+    const page = productionHistory([c], snaps, [{ cropId: 'X', yw: 202653, kg: 90, enteredAt: '2027-01-04T10:00:00Z' }], null, 202701)
+    expect(page.rows.map((r) => [r.yw, r.phase, r.all.parts[0].forecast?.kg ?? null])).toEqual([
+      [202702, 'future', 110],
+      [202701, 'current', 65],
+      [202653, 'completed', 100],
+    ])
+    expect(formatError(page.summary.all.accuracy.errorPct)).toBe('+10.0%') // (100 − 90) / 100
+  })
+})

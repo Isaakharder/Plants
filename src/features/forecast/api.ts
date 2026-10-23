@@ -201,13 +201,17 @@ export function useProductionHistory(cropIds: string[], years: number[]) {
       const origins = [Math.min(...years) - 1, ...years]
       const inYears = (yw: number) => years.includes(Math.floor(yw / 100))
       const runs = check(
-        await supabase.from('forecast_runs').select('id, crop_id, origin_year, origin_week, kind, locked_at').in('crop_id', cropIds).in('origin_year', origins),
+        await supabase
+          .from('forecast_runs')
+          .select('id, crop_id, origin_year, origin_week, kind, locked_at, revision, harvest_ready_share, basis')
+          .in('crop_id', cropIds)
+          .in('origin_year', origins),
       )
       const runWeeks = runs.length
         ? check(
             await supabase
               .from('forecast_run_weeks')
-              .select('run_id, target_year, target_week, available, kg')
+              .select('run_id, target_year, target_week, available, kg, crop_fruit, afw_g, cases')
               .in('run_id', runs.map((r) => r.id))
               .in('target_year', years),
           )
@@ -223,16 +227,32 @@ export function useProductionHistory(cropIds: string[], years: number[]) {
           savedAt: r.locked_at,
           available: w.available,
           kg: w.available ? num(w.kg) : null,
+          sourceId: r.id,
+          revision: r.revision,
+          readyShare: num(r.harvest_ready_share),
+          cropFruit: w.available ? num(w.crop_fruit) : null,
+          afwG: w.available ? num(w.afw_g) : null,
+          cases: w.available ? num(w.cases) : null,
+          basis: r.basis,
         }
       })
 
       // Every saved preliminary version (only the weeks of each, a JSON path), read in full.
-      type PreviewWeek = { targetYw: number; available?: boolean; kg: number | null }
-      type PreviewRow = { id: string; crop_id: string; origin_year: number; origin_week: number; created_at: string; weeks: PreviewWeek[] | null }
+      type PreviewWeek = { targetYw: number; available?: boolean; kg: number | null; cropFruit?: number | null; afwG?: number | null }
+      type PreviewRow = {
+        id: string
+        crop_id: string
+        origin_year: number
+        origin_week: number
+        created_at: string
+        basis: 'lifecycle' | 'breaker_only'
+        share: number | null
+        weeks: PreviewWeek[] | null
+      }
       const previews = (await fetchAll((after, limit, withCount) => {
         let q = supabase
           .from('forecast_previews')
-          .select('id, crop_id, origin_year, origin_week, created_at, weeks:preview->result->weeks' as '*', withCount ? { count: 'exact' } : undefined)
+          .select('id, crop_id, origin_year, origin_week, created_at, basis, share:preview->result->harvestReadyShare, weeks:preview->result->weeks' as '*', withCount ? { count: 'exact' } : undefined)
           .in('crop_id', cropIds)
           .in('origin_year', origins)
         if (after) q = q.gt('id', after)
@@ -249,6 +269,11 @@ export function useProductionHistory(cropIds: string[], years: number[]) {
             savedAt: p.created_at,
             available: w.available !== false,
             kg: w.available !== false ? num(w.kg) : null,
+            sourceId: p.id,
+            readyShare: num(p.share),
+            cropFruit: w.available !== false ? num(w.cropFruit ?? null) : null,
+            afwG: w.available !== false ? num(w.afwG ?? null) : null,
+            basis: p.basis,
           })),
       )
 

@@ -39,6 +39,16 @@ export type Snapshot = {
   available: boolean
   /** Null: no AFW, so no kg. */
   kg: number | null
+  /** Details shown on Harvest Forecast (Production Totals uses kg only). */
+  sourceId?: string
+  /** Official forecasts: the version (1 = locked at completion). */
+  revision?: number
+  readyShare?: number | null
+  cropFruit?: number | null
+  afwG?: number | null
+  /** Locked forecasts store cases (case weight at locking); else computed from kg. */
+  cases?: number | null
+  basis?: 'lifecycle' | 'breaker_only'
 }
 
 /** The actual kg in effect for a variety and week (the newest entry; null = cleared). */
@@ -218,12 +228,13 @@ export function colourGroups(crops: HistoryCrop[]): Group[] {
 }
 
 /**
- * The weeks shown for a year: from the earliest week with a saved projection
- * or an actual kg to the latest of the current week and the furthest future
- * week with an available forecast (at most HORIZON_WEEKS ahead), newest first.
+ * The weeks shown for a year (null: every year loaded): from the earliest week
+ * with a saved projection or an actual kg to the latest of the current week and
+ * the furthest future week with an available forecast (at most HORIZON_WEEKS
+ * ahead), newest first.
  */
-export function historyWeeks(year: number, currentYw: number, snapshots: Snapshot[], actuals: Actual[]): number[] {
-  const inYear = (yw: number) => Math.floor(yw / 100) === year
+export function historyWeeks(year: number | null, currentYw: number, snapshots: Snapshot[], actuals: Actual[]): number[] {
+  const inYear = (yw: number) => year === null || Math.floor(yw / 100) === year
   const cur = indexOfYw(currentYw)
   const past = [
     ...snapshots.filter((s) => s.available && inYear(s.targetYw) && indexOfYw(s.targetYw) <= cur).map((s) => s.targetYw),
@@ -244,7 +255,7 @@ export function historyWeeks(year: number, currentYw: number, snapshots: Snapsho
 export type RangeView = 'year' | 'next' | 'next5'
 
 /** The weeks of a view, newest first. The coming weeks are listed even without a forecast (shown as missing). */
-export function viewWeeks(view: RangeView, year: number, currentYw: number, snapshots: Snapshot[], actuals: Actual[]): number[] {
+export function viewWeeks(view: RangeView, year: number | null, currentYw: number, snapshots: Snapshot[], actuals: Actual[]): number[] {
   if (view === 'year') return historyWeeks(year, currentYw, snapshots, actuals)
   const cur = indexOfYw(currentYw)
   const n = view === 'next' ? 1 : 5
@@ -274,7 +285,7 @@ export function productionHistory(
   crops: HistoryCrop[],
   snapshots: Snapshot[],
   actuals: Actual[],
-  year: number,
+  year: number | null,
   currentYw: number,
   view: RangeView = 'year',
 ): ProductionHistory {
