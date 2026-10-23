@@ -1,7 +1,9 @@
 // Forecast settings of a variety: what the forecast rests on from a week on
-// (full lifecycle, or Breakers only with its harvest-ready share). Settings
-// are append-only: a change is a new entry; the timeline shows which entry is
-// in effect from which week, and the history keeps every entry.
+// (full lifecycle, or Breakers only). The harvest-ready share (Ready %) of an
+// entry applies to its own sampling week only: every new week starts at 100%
+// (engine/basis.ts). Settings are append-only: a change is a new entry; the
+// timeline shows which entry is in effect from which week, and the history
+// keeps every entry.
 
 import { useState } from 'react'
 import { Dialog } from '../../components/Dialog'
@@ -17,7 +19,7 @@ const BASIS_LABEL = { lifecycle: 'Full lifecycle (8 weeks)', breaker_only: 'Brea
 
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { timeZone: 'America/Toronto', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
 const describe = (r: ForecastBasisSettingRow) =>
-  `${BASIS_LABEL[r.basis]}${r.basis === 'breaker_only' && r.harvest_ready_share !== null ? ` · ${Math.round(100 * r.harvest_ready_share)}% harvest-ready` : ''}`
+  `${BASIS_LABEL[r.basis]}${r.basis === 'breaker_only' && r.harvest_ready_share !== null ? ` · Ready % ${Math.round(100 * r.harvest_ready_share)}% for W${r.from_week}` : ''}`
 
 const weekBefore = (r: Pick<ForecastBasisSettingRow, 'from_year' | 'from_week'>) => {
   const w = weekOfIndex(weekIndex(r.from_year, r.from_week) - 1)
@@ -32,7 +34,7 @@ export function ForecastSettings({ crop, open, onClose }: { crop: Crop; open: bo
   const [year, setYear] = useState(String(now.year))
   const [week, setWeek] = useState(String(now.week))
   const [basis, setBasis] = useState<'lifecycle' | 'breaker_only'>('breaker_only')
-  const [share, setShare] = useState('85')
+  const [share, setShare] = useState('100')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -49,15 +51,16 @@ export function ForecastSettings({ crop, open, onClose }: { crop: Crop; open: bo
       <p className={styles.subtitle}>
         What this variety’s forecast rests on, from a week on. <strong>Full lifecycle</strong>: the eight-week forecast from SetFruit, MatureGreen and Breaker
         records. <strong>Breakers only</strong>: the Friday walkthrough records Breakers only, so the forecast covers next week: this Friday’s Breakers × the
-        harvest-ready share (experimental 85% from Mathieu 2026). To adjust the share for a week, edit <strong>Ready %</strong> in the forecast table; here you
-        choose the basis, from which week, and a starting share when switching to Breakers only. Changes are added as new entries; nothing is overwritten.
+        harvest-ready share (<strong>Ready %</strong>). Ready % is chosen per sampling week: every new week starts at 100%, and a value chosen for a week
+        (here, in the <strong>Ready %</strong> field before Generate forecast, or saved from a What-if) applies to that week only. Here you choose the basis
+        from a week on. Changes are added as new entries; nothing is overwritten, and forecasts already saved or locked keep the Ready % they were made with.
       </p>
 
       <h3 className={styles.replayTitle}>In effect</h3>
       {settings.isPending ? (
         <p className={styles.fate}>Loading…</p>
       ) : timeline.length === 0 ? (
-        <p className={styles.fate}>No setting yet: the next-week forecast from Breakers is shown with the experimental 85% share.</p>
+        <p className={styles.fate}>No setting yet: the next-week forecast from Breakers, with Ready % 100% unless a week has its own.</p>
       ) : (
         <ul className={styles.settingsTimeline}>
           {timeline.map((r, i) => (
@@ -109,7 +112,7 @@ export function ForecastSettings({ crop, open, onClose }: { crop: Crop; open: bo
           </label>
           {basis === 'breaker_only' && (
             <label className="field">
-              <span className="field-label">Starting Ready %</span>
+              <span className="field-label">Ready % for that week</span>
               <input className="input" inputMode="decimal" value={share} onChange={(e) => setShare(e.target.value)} aria-invalid={!(pct >= 0 && pct <= 100)} />
             </label>
           )}

@@ -93,7 +93,7 @@ export type EngineInput = {
 }
 
 /** Identifies the engine's rules and defaults in every stored forecast. Change it with any change to how forecasts are computed. */
-export const ENGINE_VERSION = 'stage-8w-2026.10.2'
+export const ENGINE_VERSION = 'stage-8w-2026.10.3'
 
 export type AfwMethod = 'last' | 'mean3' | 'trend6'
 

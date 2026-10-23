@@ -24,10 +24,14 @@ import {
   useInvalidateForecasts,
   useSamplingYear,
   useSavedPreview,
+  useBasisSettings,
   type HistoricalReplay,
 } from './api'
 import { MAX_ABS_BIAS, MIN_COVERAGE, MIN_SETTLED, type ActualAccuracy, type ActualScoredRun, type LiveAccuracy, type ScoredRun, type WeekStatus } from './engine/live'
 import { LOW_COVERAGE } from './engine/breaker'
+import { basisAt } from './engine/basis'
+import { DEFAULT_HARVEST_READY_SHARE } from './engine/forecast'
+import { DEFAULT_BASIS } from './data'
 import { ForecastSettings } from './ForecastSettings'
 import { FORECAST_WEEKS, MARKETING_WEEKS } from './engine/types'
 import { weekLabel, weekStartInstant, weekIndex } from './engine/weeks'
@@ -121,6 +125,23 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
   const shown = view && trialShare !== null ? withReadyShare(view, trialShare) : view
   const experimenting = trialShare !== null && view !== null && Math.abs(trialShare - (view.harvestReadyShare ?? 0)) > 1e-9
 
+  // Ready % of the sampling week a forecast is generated from: chosen for that week (Forecast settings history), else 100%.
+  // It never carries over from earlier weeks (engine/basis.ts); Generate uses what is typed here.
+  const basisSettings = useBasisSettings(crop.id)
+  const originInEffect = basisAt(
+    (basisSettings.data ?? []).map((r) => ({ fromYear: r.from_year, fromWeek: r.from_week, basis: r.basis, harvestReadyShare: r.harvest_ready_share, createdAt: r.created_at })),
+    weekIndex(now.year, originWeek),
+    Date.now(),
+    DEFAULT_BASIS,
+  )
+  const weekShare = originInEffect.harvestReadyShare ?? DEFAULT_HARVEST_READY_SHARE
+  const weekShareKey = `${crop.id}:${now.year}:${originWeek}:${weekShare}`
+  const [readyDraft, setReadyDraft] = useState<{ key: string; text: string } | null>(null)
+  const readyText = readyDraft?.key === weekShareKey ? readyDraft.text : String(Math.round(1000 * weekShare) / 10)
+  const readyParsed = Number(readyText.replace(',', '.'))
+  const readyValid = readyText.trim() !== '' && Number.isFinite(readyParsed) && readyParsed >= 5 && readyParsed <= 100
+  const showWeekReady = basisSettings.isSuccess && originInEffect.basis === 'breaker_only'
+
   const lockedThisWeek = runs.data?.find((r) => r.origin_year === now.year && r.origin_week === now.week)
   const firstTargetStarts = weekStartInstant(now.index + 1)
 
@@ -128,6 +149,22 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
     setBusy('preview')
     setError(null)
     try {
+      // A Ready % typed for this sampling week is saved for that week only, then used by the forecast.
+      if (showWeekReady && !lockedForOrigin) {
+        if (!readyValid) throw new Error('Ready % must be between 5 and 100.')
+        if (Math.abs(readyParsed / 100 - weekShare) > 1e-9) {
+          await addBasisSetting({
+            organizationId: crop.organization_id,
+            cropId: crop.id,
+            fromYear: now.year,
+            fromWeek: originWeek,
+            basis: 'breaker_only',
+            share: Math.round(readyParsed * 10) / 1000,
+            note: `Ready % for W${originWeek} set to ${Math.round(readyParsed * 10) / 10}% before generating`,
+          })
+          await basisSettings.refetch()
+        }
+      }
       // Saved for this variety and week: it stays across navigation, refreshes and sessions.
       await generatePreview(crop, now.year, originWeek, live.data?.validatedByBasis)
       await invalidate()
@@ -199,10 +236,10 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
 
   return (
     <section className={wpd.section} aria-label="Harvest Forecast">
-      <div className={wpd.toolbar}>
+      <div className={`${wpd.toolbar} ${styles.forecastToolbar}`}>
         <ProjectionsTabs />
-        <div className={wpd.selectors}>
-          <label className={`field ${wpd.control}`}>
+        <div className={`${wpd.selectors} ${styles.forecastSelectors}`}>
+          <label className={`field ${wpd.control} ${styles.varietyField}`}>
             <span className="field-label">Variety</span>
             <select className="input" value={crop.id} onChange={(e) => onSelect(e.target.value)}>
               {crops.map((c) => (
@@ -232,10 +269,33 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
               </select>
             </label>
           )}
+          {showWeekReady && (
+            <label className={`field ${styles.weekReady}`}>
+              <span className="field-label">Ready % (W{originWeek})</span>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={lockedForOrigin ? String(Math.round(1000 * Number(lockedForOrigin.harvest_ready_share ?? weekShare)) / 10) : readyText}
+                aria-invalid={!lockedForOrigin && !readyValid}
+                disabled={Boolean(lockedForOrigin) || busy !== null}
+                onChange={(e) => setReadyDraft({ key: weekShareKey, text: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && readyValid) void runPreview()
+                }}
+                title={
+                  lockedForOrigin
+                    ? `W${originWeek}’s official forecast is locked with this Ready %. Try other values in the table below (What-if).`
+                    : `Share of W${originWeek}’s Breakers expected to be harvested the week after (5–100). Every sampling week starts at 100%; ${
+                        originInEffect.harvestReadyShare !== null ? 'this one was chosen for this week' : 'nothing chosen for this week yet'
+                      }. Generate forecast saves a changed value for this week only and uses it.`
+                }
+              />
+            </label>
+          )}
           {/* Re-mounts when the saved value changes, so the field shows it. */}
           <CaseWeight key={String(crop.case_weight_kg)} crop={crop} />
         </div>
-        <div className={wpd.controlButtons}>
+        <div className={`${wpd.controlButtons} ${styles.forecastButtons}`}>
           <button type="button" className={`button button-secondary ${wpd.helpButton}`} onClick={() => setShowSettings(true)} aria-haspopup="dialog">
             Forecast settings
           </button>
@@ -298,9 +358,9 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
                     className="button button-link"
                     disabled={busy !== null}
                     onClick={() => void saveReadyShare(Math.round(1000 * trialShare!) / 10, view.originYear, view.originWeek)}
-                    title={`Saves ${formatPercent(trialShare)} as ${crop.name}’s Ready % from W${view.originWeek} on (Forecast settings history) and generates a new preliminary version`}
+                    title={`Saves ${formatPercent(trialShare)} as ${crop.name}’s Ready % for the W${view.originWeek} sampling (Forecast settings history) and generates a new preliminary version`}
                   >
-                    {busy === 'preview' ? 'Saving…' : `Save as ${crop.name}’s Ready % from W${view.originWeek} and regenerate`}
+                    {busy === 'preview' ? 'Saving…' : `Save as ${crop.name}’s Ready % for W${view.originWeek} and regenerate`}
                   </button>
                 )}
               </span>
@@ -579,7 +639,7 @@ function ForecastTable({
         <ul className={styles.warnings}>
           {outdated && (
             <li>
-              May be outdated: W{view.originWeek} data changed since it was generated.{' '}
+              May be outdated: W{view.originWeek} data or the forecast rules changed since it was generated.{' '}
               {onRegenerate && (
                 <button type="button" className="button button-link" onClick={onRegenerate} disabled={regenerating}>
                   {regenerating ? 'Generating…' : 'Regenerate'}

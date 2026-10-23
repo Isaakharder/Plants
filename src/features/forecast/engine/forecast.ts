@@ -308,5 +308,5 @@ export function forecastForWeek(
   })
 }
 
-/** The experimental share used when Breakers only applies by default (no setting yet). */
-export const DEFAULT_HARVEST_READY_SHARE = 0.85
+/** Ready % for a sampling week nobody chose one for: every new week starts at 100% (approved 2026-10-23). */
+export const DEFAULT_HARVEST_READY_SHARE = 1

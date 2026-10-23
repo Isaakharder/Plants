@@ -152,14 +152,46 @@ describe('forecast basis', () => {
     { fromYear: 2026, fromWeek: 1, basis: 'lifecycle', harvestReadyShare: null, createdAt: '2026-10-16T00:00:00Z' },
     { fromYear: 2026, fromWeek: 42, basis: 'breaker_only', harvestReadyShare: 0.85, createdAt: '2026-10-16T00:00:00Z' },
   ]
-  it('applies the setting with the latest start week at or before the week; the newest entry wins a tie; settings stored later don’t apply', () => {
+  it('the basis carries forward; the newest entry wins a tie; settings stored later don’t apply', () => {
     const cutoff = Date.parse('2026-10-20T00:00:00Z')
     expect(basisAt(settings, W(41), cutoff).basis).toBe('lifecycle')
     expect(basisAt(settings, W(42), cutoff)).toMatchObject({ basis: 'breaker_only', harvestReadyShare: 0.85 })
     const corrected = [...settings, { fromYear: 2026, fromWeek: 42, basis: 'breaker_only' as const, harvestReadyShare: 0.8, createdAt: '2026-10-18T00:00:00Z' }]
-    expect(basisAt(corrected, W(44), cutoff).harvestReadyShare).toBe(0.8)
-    expect(basisAt(corrected, W(44), Date.parse('2026-10-17T00:00:00Z')).harvestReadyShare).toBe(0.85)
+    expect(basisAt(corrected, W(42), cutoff).harvestReadyShare).toBe(0.8)
+    expect(basisAt(corrected, W(42), Date.parse('2026-10-17T00:00:00Z')).harvestReadyShare).toBe(0.85) // the correction wasn't stored yet
+    expect(basisAt(corrected, W(44), cutoff)).toMatchObject({ basis: 'breaker_only', source: { kind: 'setting', fromWeek: 42 } })
     expect(basisAt([], W(44), cutoff, 'breaker_only')).toEqual({ basis: 'breaker_only', harvestReadyShare: null, source: { kind: 'default' } })
+  })
+
+  it('Ready % is chosen per sampling week: a new week starts at 100% whatever the week before used', () => {
+    const cutoff = Date.parse('2026-12-31T00:00:00Z')
+    const chosen = [
+      ...settings,
+      { fromYear: 2026, fromWeek: 42, basis: 'breaker_only' as const, harvestReadyShare: 0.7, createdAt: '2026-10-16T20:00:00Z' },
+      { fromYear: 2026, fromWeek: 44, basis: 'breaker_only' as const, harvestReadyShare: 0.6, createdAt: '2026-10-30T12:00:00Z' },
+      { fromYear: 2026, fromWeek: 44, basis: 'breaker_only' as const, harvestReadyShare: 0.75, createdAt: '2026-10-30T13:00:00Z' }, // changed again: the newest counts
+    ]
+    expect(basisAt(chosen, W(42), cutoff).harvestReadyShare).toBe(0.7)
+    expect(basisAt(chosen, W(43), cutoff)).toMatchObject({ basis: 'breaker_only', harvestReadyShare: null }) // nothing chosen: default
+    expect(basisAt(chosen, W(44), cutoff).harvestReadyShare).toBe(0.75)
+    expect(basisAt(chosen, W(45), cutoff).harvestReadyShare).toBeNull()
+    expect(basisAt(chosen, W(44), Date.parse('2026-10-30T12:30:00Z')).harvestReadyShare).toBe(0.6) // as it stood then
+    const input = { ...crop({ stems: ['a'], records: [[43, 'a.1', 'BreakerFruit'], [44, 'a.1', 'BreakerFruit']], checks: [[43, 'a'], [44, 'a']] }), basisSettings: chosen }
+    expect(forecastForWeek(input, { originIndex: W(43), cutoff: FAR, defaultBasis: 'breaker_only' }).harvestReadyShare).toBe(1)
+    expect(forecastForWeek(input, { originIndex: W(44), cutoff: FAR, defaultBasis: 'breaker_only' }).harvestReadyShare).toBe(0.75)
+  })
+
+  it('across New Year: 2026-W53’s Ready % does not carry into 2027-W01; the basis does', () => {
+    const cutoff = Date.parse('2027-02-01T00:00:00Z')
+    const yearEnd = [
+      { fromYear: 2026, fromWeek: 42, basis: 'breaker_only' as const, harvestReadyShare: 0.85, createdAt: '2026-10-16T00:00:00Z' },
+      { fromYear: 2026, fromWeek: 53, basis: 'breaker_only' as const, harvestReadyShare: 0.65, createdAt: '2026-12-31T12:00:00Z' },
+      { fromYear: 2027, fromWeek: 2, basis: 'breaker_only' as const, harvestReadyShare: 0.9, createdAt: '2027-01-15T12:00:00Z' },
+    ]
+    expect(basisAt(yearEnd, W(53), cutoff).harvestReadyShare).toBe(0.65)
+    expect(basisAt(yearEnd, weekIndex(2027, 1), cutoff)).toMatchObject({ basis: 'breaker_only', harvestReadyShare: null })
+    expect(basisAt(yearEnd, weekIndex(2027, 2), cutoff).harvestReadyShare).toBe(0.9)
+    expect(basisAt(yearEnd, weekIndex(2027, 3), cutoff).harvestReadyShare).toBeNull()
   })
 
   it('Mathieu: the full eight-week forecast through W41, next week from Breakers from W42', () => {
