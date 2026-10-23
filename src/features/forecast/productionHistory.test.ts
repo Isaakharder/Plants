@@ -159,3 +159,21 @@ describe('quick views', () => {
     expect(five.summary.all.projection).toMatchObject({ kg: 16496 + 2993, withForecast: 2, expected: 20 })
   })
 })
+
+describe('revised official forecasts', () => {
+  // W43's official forecast for W44, locked Thu 22 Oct at 70%, revised Sat 24 Oct to 80% (a new version; both are kept).
+  const original = snap('Cadalora', 202643, 202644, '2026-10-22T20:20:41Z', 16496, 'official')
+  const revised = snap('Cadalora', 202643, 202644, '2026-10-24T15:00:00Z', 18853, 'official')
+  it('the latest official version saved before the target week begins counts, for future and completed weeks alike', () => {
+    expect(chooseForecast([original, revised], 202644, 'future').forecast?.kg).toBe(18853)
+    expect(chooseForecast([original, revised], 202644, 'completed').forecast?.kg).toBe(18853) // W44 began Mon 26 Oct
+    // A version saved after the week began never counts (the server refuses such a revision anyway).
+    const tooLate = snap('Cadalora', 202643, 202644, '2026-10-26T12:00:00Z', 99999, 'official')
+    expect(chooseForecast([original, revised, tooLate], 202644, 'completed').forecast?.kg).toBe(18853)
+  })
+
+  it('a revision is never added to the original: one forecast per variety and week', () => {
+    const page = productionHistory([crop('Cadalora', 'red')], [original, revised], [], 2026, 202643)
+    expect(page.rows.find((r) => r.yw === 202644)!.all.projected).toBe(18853)
+  })
+})

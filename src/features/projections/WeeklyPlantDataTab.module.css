@@ -16,7 +16,7 @@
 
 .subtabs {
   display: flex;
-  gap: var(--space-6);
+  gap: var(--space-4);
   /* Three tabs: on a narrow screen they scroll sideways instead of widening the page. */
   max-width: 100%;
   overflow-x: auto;

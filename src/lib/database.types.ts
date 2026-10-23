@@ -533,6 +533,11 @@ export type ForecastRunRow = {
   breaker_breakdown: BreakerBreakdownJson | null
   /** Stems checked or recorded that week ÷ stems in the sample. */
   coverage: number | null
+  /** 20261107: version of the week's official forecast (1 = locked at completion; 2+ = Ready % revised before the week ended). The latest counts. */
+  revision: number
+  /** The version this revision replaces (null for revision 1). */
+  revises_run_id: string | null
+  revision_note: string | null
 }
 
 export type BreakerBreakdownJson = { total: number; carriedOver: number; new: number; firstSeen: number; notRecordedAgain: number; possibleLaterCrop: number }
@@ -1317,6 +1322,10 @@ export type Database = {
       lock_forecast_run: {
         Args: LockForecastArgs
         Returns: { run_id: string; kind: 'official' | 'late'; stored_now: boolean; locked_at: string }[]
+      }
+      revise_official_forecast: {
+        Args: { p_run_id: string; p_harvest_ready_share: number; p_note?: string | null }
+        Returns: { run_id: string; revision: number; locked_at: string; stored_now: boolean }[]
       }
     }
     Enums: Record<string, never>

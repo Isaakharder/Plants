@@ -11,10 +11,10 @@ import { latestActuals, type Actual, type Snapshot } from './productionHistory'
 import { fetchAll } from '../collector/fetchAll'
 import { greenhouseWeekIndex, indexYw, weekOfIndex } from './engine/weeks'
 
-export type { HistoricalReplay, LiveAccuracyResult, Preview, SamplingCompletion, SavedPreview, ValidatedByBasis } from './data'
+export type { LiveAccuracyResult, Preview, SamplingCompletion, SavedPreview, ValidatedByBasis } from './data'
 
 const data = createForecastData(supabase)
-export const { loadEngineInput, latestCompletion, computePreview, generatePreview, latestPreview, inputSignature, lockForecast, loadLiveAccuracy, runHistoricalReplay } = data
+export const { loadEngineInput, latestCompletion, computePreview, generatePreview, latestPreview, inputSignature, lockForecast, loadLiveAccuracy } = data
 
 /**
  * The newest saved preliminary forecast of a variety and sampling week, and
@@ -78,13 +78,13 @@ export const forecastKeys = {
   sampling: (cropId: string | undefined, year: number) => ['forecast', 'sampling', cropId, year] as const,
 }
 
-/** The crop's locked forecasts, newest sampling week first. */
+/** The crop's locked forecasts (every version), newest sampling week first, its latest revision first. */
 export function useForecastRuns(cropId: string | undefined) {
   return useQuery({
     queryKey: forecastKeys.runs(cropId),
     enabled: Boolean(cropId),
     queryFn: async (): Promise<ForecastRunRow[]> =>
-      check(await supabase.from('forecast_runs').select('*').eq('crop_id', cropId!).order('origin_year', { ascending: false }).order('origin_week', { ascending: false })).map(
+      check(await supabase.from('forecast_runs').select('*').eq('crop_id', cropId!).order('origin_year', { ascending: false }).order('origin_week', { ascending: false }).order('revision', { ascending: false })).map(
         (r) => ({
           ...r,
           scale: Number(r.scale),
@@ -144,6 +144,16 @@ export function useBasisSettings(cropId: string | undefined) {
         harvest_ready_share: r.harvest_ready_share === null ? null : Number(r.harvest_ready_share),
       })),
   })
+}
+
+/**
+ * Publishes a revised official forecast with another Ready % (a new version;
+ * the earlier ones are kept). The server recomputes it from the locked
+ * numbers and refuses once the sampling week has ended.
+ */
+export async function reviseOfficialForecast(runId: string, percent: number, note: string | null) {
+  const rows = check(await supabase.rpc('revise_official_forecast', { p_run_id: runId, p_harvest_ready_share: Math.round(percent * 10) / 1000, p_note: note }))
+  return rows[0] ?? null
 }
 
 /** Adds a basis setting (from a week on); earlier settings stay in the history. */

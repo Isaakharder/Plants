@@ -8,8 +8,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, NodeStatus } from '../../lib/database.types'
 import { fetchAll } from '../collector/fetchAll'
 import type { Crop } from '../crops/model'
-import { runBacktest, originCutoff, type CandidateReport } from './engine/backtest'
 import { forecastForWeek } from './engine/forecast'
+import { latestRevisions } from './revisions'
 import { buildHistory } from './engine/history'
 import { actualsInEffect, liveAccuracy, type ActualAccuracy, type LiveAccuracy, type LiveRun, type ScoredRun, type SamplingWeek } from './engine/live'
 import type { EngineAfw, EngineBasisSetting, EngineFlag, EngineInput, ForecastBasis, ForecastResult } from './engine/types'
@@ -22,7 +22,6 @@ export type SamplingCompletion = { id: string; year: number; week: number; obser
 export type Preview = { result: ForecastResult; afwHistory: 'log' | 'current'; origin: { year: number; week: number }; completion: SamplingCompletion | null; computedAt: string }
 /** A preliminary forecast as saved (forecast_previews), with the data signature it was computed from. */
 export type SavedPreview = { id: string; preview: Preview; inputSignature: string; engineVersion: string; createdAt: string }
-export type HistoricalReplay = { reports: CandidateReport[]; unreliable: number[]; origins: number[]; lastScoreable: number }
 /** Weeks ahead validated so far, per basis (lifecycle: against Harvested records; Breakers only: against actual kg). */
 export type ValidatedByBasis = Record<ForecastBasis, number[]>
 export type LiveAccuracyResult = { accuracy: LiveAccuracy; scored: ScoredRun[]; actual: ActualAccuracy; validatedByBasis: ValidatedByBasis }
@@ -318,7 +317,8 @@ export function createForecastData(supabase: Db) {
   async function loadLiveAccuracy(crop: Crop): Promise<LiveAccuracyResult> {
     const now = new Date().toISOString()
     const current = greenhouseWeekIndex(new Date())
-    const runs = check(await supabase.from('forecast_runs').select('*').eq('crop_id', crop.id))
+    // Each sampling week is scored by the version that counts: its latest revision (earlier ones are kept, not scored).
+    const runs = latestRevisions(check(await supabase.from('forecast_runs').select('*').eq('crop_id', crop.id)))
     const weeks = runs.length ? check(await supabase.from('forecast_run_weeks').select('*').in('run_id', runs.map((r) => r.id))) : []
     const liveRuns: LiveRun[] = runs.map((r) => ({
       id: r.id,
@@ -372,38 +372,6 @@ export function createForecastData(supabase: Db) {
   }
 
 
-
-  /**
-   * Re-runs past weeks as if forecasting then (records and flags as they stood
-   * at each week's end), against what was recorded later. On the crop's
-   * unverified history this shows behaviour, not validated accuracy.
-   */
-  async function runHistoricalReplay(crop: Crop): Promise<HistoricalReplay | null> {
-    const now = new Date().toISOString()
-    const current = greenhouseWeekIndex(new Date())
-    const input = await loadEngineInput(crop, now)
-    const year = weekOfIndex(current).year
-    const sampling = await loadSampling(crop.id, [year - 1, year])
-    // Scoreable: well-covered weeks followed by a visit; origins: from 8 weeks after sampling began.
-    const sampled = [...sampling.entries()].filter(([, s]) => s.visited > 0).map(([i]) => i).sort((a, b) => a - b)
-    if (sampled.length < 12) return null
-    const lastScoreable = Math.max(...sampled.filter((i) => i < current && (sampling.get(i + 1)?.visited ?? 0) > 0 && sampling.get(i)!.visited >= 0.9 * sampling.get(i)!.expected))
-    const origins = sampled.filter((i) => i >= sampled[0] + 7 && i < lastScoreable)
-    const flagsAsOf = new Map<number, EngineFlag[]>()
-    for (const o of origins) {
-      const rows = check(await supabase.rpc('crop_quality_flags', { p_crop_id: crop.id, p_as_of: originCutoff(o) }))
-      flagsAsOf.set(o, rows.map((f) => ({ flagKey: f.flag_key, ruleId: f.rule_id, scope: f.scope, yw: f.yw, stemId: f.measurement_stem_id, nodeId: f.plant_node_id, reviewDecision: f.review_decision })))
-    }
-    const { flags, afwHistory: _h, ...raw } = input
-    const result = runBacktest({ input: raw, flagsAsOf, finalFlags: flags, origins, lastScoreable }, [
-      { id: 'stage', label: 'Stage model', kind: 'model', params: {} },
-      { id: 'mean3', label: 'Mean of last 3 weeks', kind: 'baseline', baseline: 'mean3' },
-      { id: 'last', label: 'Last week repeated', kind: 'baseline', baseline: 'lastWeek' },
-    ])
-    return { reports: result.reports, unreliable: result.unreliable, origins, lastScoreable }
-  }
-
-
   return {
     loadEngineInput,
     loadBasisSettings,
@@ -415,7 +383,6 @@ export function createForecastData(supabase: Db) {
     latestPreview,
     lockForecast,
     loadLiveAccuracy,
-    runHistoricalReplay,
   }
 }
 

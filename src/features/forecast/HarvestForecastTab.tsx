@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Dialog } from '../../components/Dialog'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
@@ -15,7 +15,6 @@ import {
   latestCompletion,
   lockForecast,
   lockReadiness,
-  runHistoricalReplay,
   saveCaseWeight,
   useForecastRunWeeks,
   useLiveAccuracy,
@@ -25,13 +24,15 @@ import {
   useSamplingYear,
   useSavedPreview,
   useBasisSettings,
-  type HistoricalReplay,
+  reviseOfficialForecast,
 } from './api'
-import { MAX_ABS_BIAS, MIN_COVERAGE, MIN_SETTLED, type ActualAccuracy, type ActualScoredRun, type LiveAccuracy, type ScoredRun, type WeekStatus } from './engine/live'
+import { type ActualAccuracy, type ActualScoredRun, type LiveAccuracy, type ScoredRun, type WeekStatus } from './engine/live'
 import { LOW_COVERAGE } from './engine/breaker'
 import { basisAt } from './engine/basis'
 import { DEFAULT_HARVEST_READY_SHARE } from './engine/forecast'
 import { DEFAULT_BASIS } from './data'
+import { latestOf, revisable, revisionDeadline } from './revisions'
+import type { ForecastRunRow } from '../../lib/database.types'
 import { ForecastSettings } from './ForecastSettings'
 import { FORECAST_WEEKS, MARKETING_WEEKS } from './engine/types'
 import { weekLabel, weekStartInstant, weekIndex } from './engine/weeks'
@@ -135,17 +136,31 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
     DEFAULT_BASIS,
   )
   const weekShare = originInEffect.harvestReadyShare ?? DEFAULT_HARVEST_READY_SHARE
-  const weekShareKey = `${crop.id}:${now.year}:${originWeek}:${weekShare}`
+  // A locked week shows its official Ready % (latest version); it can be revised until the sampling week ends.
+  const allRuns = runs.data ?? []
+  const clock = new Date()
+  const originRevisable = lockedForOrigin ? revisable(allRuns, lockedForOrigin, clock) : false
+  const fieldShare = lockedForOrigin ? (lockedForOrigin.harvest_ready_share ?? weekShare) : weekShare
+  const weekShareKey = `${crop.id}:${now.year}:${originWeek}:${lockedForOrigin?.id ?? 'open'}:${fieldShare}`
   const [readyDraft, setReadyDraft] = useState<{ key: string; text: string } | null>(null)
-  const readyText = readyDraft?.key === weekShareKey ? readyDraft.text : String(Math.round(1000 * weekShare) / 10)
+  const readyText = readyDraft?.key === weekShareKey ? readyDraft.text : String(Math.round(1000 * fieldShare) / 10)
   const readyParsed = Number(readyText.replace(',', '.'))
   const readyValid = readyText.trim() !== '' && Number.isFinite(readyParsed) && readyParsed >= 5 && readyParsed <= 100
-  const showWeekReady = basisSettings.isSuccess && originInEffect.basis === 'breaker_only'
+  const readyChanged = readyValid && Math.abs(readyParsed / 100 - fieldShare) > 1e-9
+  const showWeekReady = basisSettings.isSuccess && (lockedForOrigin ? lockedForOrigin.basis === 'breaker_only' : originInEffect.basis === 'breaker_only')
+
+  // A revised official forecast is published only after confirming it (never from the What-if alone).
+  const [revising, setRevising] = useState<{ run: ForecastRunRow; percent: number } | null>(null)
+  const shownRevisable = shownRun ? revisable(allRuns, shownRun, clock) : false
 
   const lockedThisWeek = runs.data?.find((r) => r.origin_year === now.year && r.origin_week === now.week)
   const firstTargetStarts = weekStartInstant(now.index + 1)
 
   async function runPreview() {
+    if (lockedForOrigin && originRevisable && readyChanged) {
+      setRevising({ run: latestOf(allRuns, lockedForOrigin), percent: Math.round(readyParsed * 10) / 10 })
+      return
+    }
     setBusy('preview')
     setError(null)
     try {
@@ -236,12 +251,25 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
 
   return (
     <section className={wpd.section} aria-label="Harvest Forecast">
-      <div className={`${wpd.toolbar} ${styles.forecastToolbar}`}>
-        <ProjectionsTabs />
-        <div className={`${wpd.selectors} ${styles.forecastSelectors}`}>
-          <label className={`field ${wpd.control} ${styles.varietyField}`}>
-            <span className="field-label">Variety</span>
-            <select className="input" value={crop.id} onChange={(e) => onSelect(e.target.value)}>
+      {/* One row: tabs and actions on the left, the forecast's fields on the right (they wrap below on narrow screens). */}
+      <div className={styles.tbBar}>
+        <div className={styles.tbLeft}>
+          <ProjectionsTabs />
+          <div className={styles.tbButtons}>
+          <button type="button" className={`button button-secondary ${styles.tbButton}`} onClick={() => setShowSettings(true)} aria-haspopup="dialog">
+            Forecast settings
+          </button>
+          <button type="button" className={`button button-secondary ${styles.tbButton}`} onClick={() => setShowAudit(true)} disabled={!view} aria-haspopup="dialog">
+            How it was made
+          </button>
+          <button type="button" className={`button button-primary ${styles.tbButton}`} onClick={() => void runPreview()} disabled={busy !== null}>
+            {busy === 'preview' ? 'Generating…' : 'Generate forecast'}
+          </button>
+          </div>
+        </div>
+        <div className={styles.tbFields}>
+          <label className={`${styles.tbField} ${styles.tbVariety}`}>
+            <select className={`input ${styles.tbControl}`} value={crop.id} onChange={(e) => onSelect(e.target.value)} aria-label="Variety" title="Variety">
               {crops.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -250,10 +278,10 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
             </select>
           </label>
           {sampledWeeks.length > 1 && (
-            <label className={`field ${wpd.yearControl}`}>
-              <span className="field-label">Preview from</span>
+            <label className={`${styles.tbField} ${styles.tbWeek}`}>
+              <span className={styles.tbLabel} title="Preview from: the sampling week a forecast starts from">From</span>
               <select
-                className="input"
+                className={`input ${styles.tbControl}`}
                 value={originWeek}
                 onChange={(e) => {
                   setPickedWeek(Number(e.target.value) === sampledWeeks[0] ? null : Number(e.target.value))
@@ -270,21 +298,27 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
             </label>
           )}
           {showWeekReady && (
-            <label className={`field ${styles.weekReady}`}>
-              <span className="field-label">Ready % (W{originWeek})</span>
+            <label className={`${styles.tbField} ${styles.tbNumber}`}>
+              <span className={styles.tbLabel}>Ready %</span>
               <input
-                className="input"
+                className={`input ${styles.tbControl}`}
+                aria-label={`Ready % for the W${originWeek} sampling`}
                 inputMode="decimal"
-                value={lockedForOrigin ? String(Math.round(1000 * Number(lockedForOrigin.harvest_ready_share ?? weekShare)) / 10) : readyText}
-                aria-invalid={!lockedForOrigin && !readyValid}
-                disabled={Boolean(lockedForOrigin) || busy !== null}
+                value={readyText}
+                aria-invalid={!readyValid}
+                disabled={(Boolean(lockedForOrigin) && !originRevisable) || busy !== null}
                 onChange={(e) => setReadyDraft({ key: weekShareKey, text: e.target.value })}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && readyValid) void runPreview()
+                  if (e.key !== 'Enter' || !readyValid) return
+                  // Otherwise the same keypress lands on the confirmation dialog's first button and closes it.
+                  e.preventDefault()
+                  void runPreview()
                 }}
                 title={
                   lockedForOrigin
-                    ? `W${originWeek}’s official forecast is locked with this Ready %. Try other values in the table below (What-if).`
+                    ? originRevisable
+                      ? `W${originWeek}’s official Ready %. You can revise it until the sampling week ends (${dateTime(lockedForOrigin.first_target_starts)}): type a value and press Enter or Generate forecast to publish a revised official forecast. The original version is kept.`
+                      : `W${originWeek}’s official forecast is final (its sampling week has ended). Try other values in the table below (What-if).`
                     : `Share of W${originWeek}’s Breakers expected to be harvested the week after (5–100). Every sampling week starts at 100%; ${
                         originInEffect.harvestReadyShare !== null ? 'this one was chosen for this week' : 'nothing chosen for this week yet'
                       }. Generate forecast saves a changed value for this week only and uses it.`
@@ -294,17 +328,6 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
           )}
           {/* Re-mounts when the saved value changes, so the field shows it. */}
           <CaseWeight key={String(crop.case_weight_kg)} crop={crop} />
-        </div>
-        <div className={`${wpd.controlButtons} ${styles.forecastButtons}`}>
-          <button type="button" className={`button button-secondary ${wpd.helpButton}`} onClick={() => setShowSettings(true)} aria-haspopup="dialog">
-            Forecast settings
-          </button>
-          <button type="button" className={`button button-secondary ${wpd.helpButton}`} onClick={() => setShowAudit(true)} disabled={!view} aria-haspopup="dialog">
-            How it was made
-          </button>
-          <button type="button" className={`button button-primary ${wpd.helpButton}`} onClick={() => void runPreview()} disabled={busy !== null}>
-            {busy === 'preview' ? 'Generating…' : 'Generate forecast'}
-          </button>
         </div>
       </div>
 
@@ -345,13 +368,26 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
               <span className={styles.experimentTag}>What-if</span>
               <span>
                 Ready % {formatPercent(trialShare)} instead of the saved {formatPercent(view.harvestReadyShare)}: next week’s peppers, kg and cases are recalculated
-                on this page only. The {view.source === 'locked' ? `${STATUS_LABEL[view.status]} forecast locked` : 'preliminary forecast saved'} {dateTime(view.at)} is
-                unchanged, and stays what Production Totals and accuracy use.
+                on this page only. The {view.source === 'locked'
+                  ? `${STATUS_LABEL[view.status]} forecast${shownRun && shownRun.revision > 1 ? ` (version ${shownRun.revision}, revised` : ' (locked'}`
+                  : 'preliminary forecast (saved'}{' '}
+                {dateTime(view.at)}) is unchanged{view.source === 'locked' ? '' : ', and stays what Production Totals uses'}.
               </span>
               <span className={styles.experimentActions}>
                 <button type="button" className="button button-secondary" onClick={resetTrial} disabled={busy !== null}>
                   Reset to saved forecast
                 </button>
+                {view.source === 'locked' && shownRevisable && shownRun && (
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={busy !== null}
+                    onClick={() => setRevising({ run: shownRun, percent: Math.round(1000 * trialShare!) / 10 })}
+                    title={`Publishes a revised official W${view.originWeek} forecast with this Ready %. The current version is kept. Possible until ${dateTime(shownRun.first_target_starts)}.`}
+                  >
+                    Publish as revised official forecast…
+                  </button>
+                )}
                 {showPreliminary && (
                   <button
                     type="button"
@@ -367,6 +403,16 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
             </div>
           )}
           <ForecastTable
+            version={
+              shownRun && view.source === 'locked'
+                ? {
+                    revision: shownRun.revision,
+                    latest: latestOf(allRuns, shownRun).revision,
+                    revisableUntil: shownRevisable ? shownRun.first_target_starts : null,
+                    onShowLatest: latestOf(allRuns, shownRun).id !== shownRun.id ? () => setSelectedRun(latestOf(allRuns, shownRun).id) : undefined,
+                  }
+                : undefined
+            }
             readyShare={
               adjustable
                 ? {
@@ -407,9 +453,23 @@ function CropForecast({ crop, crops, onSelect }: { crop: Crop; crops: Crop[]; on
       </details>
 
       {view && <Snapshots runs={runs.data ?? []} shown={view.runId} onShow={(id) => setSelectedRun(id)} />}
-      {!runs.isPending && <AccuracyPanel crop={crop} accuracy={live.data?.accuracy} actual={live.data?.actual} />}
       {live.error && <div className={styles.error}>Couldn’t score forecasts: {live.error.message}</div>}
       {view && <AuditDialog open={showAudit} onClose={() => setShowAudit(false)} view={view} />}
+      {revising && (
+        <ReviseDialog
+          run={revising.run}
+          percent={revising.percent}
+          view={view && view.runId === revising.run.id ? view : null}
+          onClose={() => setRevising(null)}
+          onPublished={async (runId) => {
+            setRevising(null)
+            await invalidate()
+            setSelectedRun(runId)
+            resetTrial()
+            setReadyDraft(null)
+          }}
+        />
+      )}
       {showSettings && <ForecastSettings crop={crop} open onClose={() => setShowSettings(false)} />}
     </section>
   )
@@ -480,8 +540,11 @@ function ForecastTable({
   experimental,
   regenerating,
   onBackToLocked,
+  version,
 }: {
   view: ForecastView
+  /** A locked forecast's version: 1 = locked at completion; later ones revised its Ready % before the week ended. */
+  version?: { revision: number; latest: number; revisableUntil: string | null; onShowLatest?: () => void }
   /** Ready % can be tried on this forecast (saved: its own share; value: the one shown). Absent: read-only. */
   readyShare?: { saved: number; value: number; fieldKey: string; onChange: (share: number) => void }
   /** What-if: next week shows a Ready % typed in, not the saved forecast. */
@@ -627,7 +690,32 @@ function ForecastTable({
               <span className={styles.statusExperimental}>Experimental</span>
             </>
           )}
+          {version && version.latest > 1 && (
+            <>
+              <span className={styles.titleSep}>·</span>
+              <span className={styles.versionTag}>
+                Version {version.revision} of {version.latest}
+                {version.revision === 1 ? ' (original)' : ' (revised Ready %)'}
+              </span>
+            </>
+          )}
         </h2>
+        {version && (
+          <span className={styles.versionNote}>
+            {version.onShowLatest ? (
+              <>
+                Replaced by version {version.latest}.{' '}
+                <button type="button" className="button button-link" onClick={version.onShowLatest}>
+                  Show the version that counts
+                </button>
+              </>
+            ) : version.revisableUntil ? (
+              `Ready % revisable until ${dateTime(new Date(new Date(version.revisableUntil).getTime() - 60_000).toISOString())}`
+            ) : (
+              'Final'
+            )}
+          </span>
+        )}
         {onBackToLocked && (
           <button type="button" className="button button-link" onClick={onBackToLocked}>
             Back to locked forecasts
@@ -815,7 +903,6 @@ function ForecastExplanation({ view }: { view: ForecastView }) {
   )
 }
 
-const pct = (x: number | null) => (x === null ? '—' : `${Math.round(100 * x)}%`)
 
 /** How a Breakers-only forecast counted this week's Breakers (each pepper once). */
 function BreakerSummary({ view }: { view: ForecastView }) {
@@ -844,219 +931,23 @@ function BreakerSummary({ view }: { view: ForecastView }) {
 
 const BASIS_NAME = { lifecycle: 'Full lifecycle', breaker_only: 'Breakers only' } as const
 
-/** Live accuracy by week ahead (official forecasts only) and, separately, the historical replay. */
-function AccuracyPanel({ crop, accuracy, actual }: { crop: Crop; accuracy: LiveAccuracy | undefined; actual: ActualAccuracy | undefined }) {
-  const [replay, setReplay] = useState<HistoricalReplay | null | 'none'>(null)
-  const [running, setRunning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const statusLabel = { collecting: 'Collecting', validated: 'Validated', not_validated: 'Not validated' } as const
-  const metricCell = (m: { wape: number | null; bias: number | null; n: number }) => (m.n === 0 ? '—' : `${pct(m.wape)} · ${pctSigned(m.bias)}`)
-
-  return (
-    <div className={styles.card}>
-      <h2 className={styles.title}>Forecast accuracy</h2>
-      {actual && <ActualAccuracyTable actual={actual} metricCell={(m) => (m.n === 0 ? '—' : `${pct(m.wape)} · ${pctSigned(m.bias)}`)} />}
-      <h3 className={styles.replayTitle}>Against recorded harvests (full lifecycle forecasts)</h3>
-      {accuracy && accuracy.officialRuns + accuracy.lateRuns === 0 && (
-        <p className={styles.fate}>No full lifecycle forecast locked yet for {crop.name}: Breakers-only forecasts are scored against actual kg above.</p>
-      )}
-      {(!accuracy || accuracy.officialRuns + accuracy.lateRuns > 0) && (
-      <>
-      <p className={styles.subtitle}>
-        Live: each official forecast against the peppers later recorded Harvested on its sampled stems. Error = WAPE · bias (positive = forecast too high).
-        Unsampled or flagged weeks are scored together with the following week, never as zero. Late forecasts aren’t counted
-        {accuracy ? ` (${accuracy.officialRuns} official, ${accuracy.lateRuns} late so far).` : '.'}
-      </p>
-      {accuracy && (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th scope="col">Week ahead</th>
-              <th scope="col" title="Improvement goal for the peppers error (WAPE); meeting it alone doesn’t validate a week ahead">
-                Goal
-              </th>
-              <th scope="col">Peppers error</th>
-              <th scope="col">kg error</th>
-              <th scope="col" title="Scored weeks or blocks">
-                Scored
-              </th>
-              <th scope="col" title="Stems visited in the scored weeks">
-                Coverage
-              </th>
-              <th scope="col">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className={styles.groupRow}>
-              <th colSpan={7}>Marketing forecast</th>
-            </tr>
-            {accuracy.horizons.map((h) => (
-              <Fragment key={h.horizon}>
-                {h.horizon === MARKETING_WEEKS + 1 && (
-                  <>
-                    <tr className={styles.totalRow}>
-                      <th scope="row">Weeks 1–{MARKETING_WEEKS} total</th>
-                      <td />
-                      <td>{metricCell(accuracy.marketing.fruit)}</td>
-                      <td>{metricCell(accuracy.marketing.kg)}</td>
-                      <td>{accuracy.marketing.fruit.n}</td>
-                      <td />
-                      <td />
-                    </tr>
-                    <tr className={`${styles.groupRow} ${styles.outlookGroup}`}>
-                      <th colSpan={7}>Longer-range outlook</th>
-                    </tr>
-                  </>
-                )}
-                <tr className={h.window === 'outlook' ? styles.outlookRow : undefined}>
-                  <th scope="row">+{h.horizon}</th>
-                  <td>{pct(h.goal)}</td>
-                  <td>{metricCell(h.fruit)}</td>
-                  <td>{metricCell(h.kg)}</td>
-                  <td>
-                    {h.fruit.n}
-                    {h.blocks > 0 && <span className={styles.ahead}>{h.blocks} block{h.blocks === 1 ? '' : 's'}</span>}
-                  </td>
-                  <td>{pct(h.coverage)}</td>
-                  <td>
-                    <span className={h.status === 'validated' ? styles.validated : styles.lowConfidence} title={h.reasons.join('; ') || undefined}>
-                      {statusLabel[h.status]}
-                    </span>
-                  </td>
-                </tr>
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <p className={styles.fate}>
-        A week ahead is validated only with at least {MIN_SETTLED} settled official forecasts, bias within ±{Math.round(100 * MAX_ABS_BIAS)}%, sampling coverage of at
-        least {Math.round(100 * MIN_COVERAGE)}% and error within its goal.
-      </p>
-      </>
-      )}
-
-      <div className={styles.replay}>
-        <h3 className={styles.replayTitle}>
-          Historical replay <span className={`${styles.badge} ${styles.badge_experimental}`}>Unverified records · not validation</span>
-        </h3>
-        <p className={styles.subtitle}>
-          Re-runs past weeks of {crop.name} as if forecasting then, using only what had been recorded by each week’s end. The history was recorded before
-          explicit stem checks and may contain node mix-ups, so this shows how the model behaves on it, not how accurate it is. It never counts toward
-          validation.
-        </p>
-        {replay === null ? (
-          <button
-            type="button"
-            className="button button-secondary"
-            disabled={running}
-            onClick={async () => {
-              setRunning(true)
-              setError(null)
-              try {
-                setReplay((await runHistoricalReplay(crop)) ?? 'none')
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err))
-              } finally {
-                setRunning(false)
-              }
-            }}
-          >
-            {running ? 'Replaying…' : 'Run historical replay'}
-          </button>
-        ) : replay === 'none' ? (
-          <p className={styles.fate}>Not enough sampled history to replay.</p>
-        ) : (
-          <table className={`${styles.table} ${styles.replayTable}`}>
-            <thead>
-              <tr>
-                <th scope="col">Peppers error</th>
-                {Array.from({ length: FORECAST_WEEKS }, (_, k) => (
-                  <th key={k} scope="col">
-                    +{k + 1}
-                  </th>
-                ))}
-                <th scope="col">Weeks 1–5</th>
-              </tr>
-            </thead>
-            <tbody>
-              {replay.reports.map((r) => (
-                <tr key={r.candidate.id}>
-                  <th scope="row">{r.candidate.label}</th>
-                  {r.fruitByHorizon.map((m, k) => (
-                    <td key={k}>{metricCell(m)}</td>
-                  ))}
-                  <td>{metricCell(r.marketingFruit)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {error && <div className={styles.error}>{error}</div>}
-      </div>
-    </div>
-  )
-}
-
-/** Official forecasts against the actual kg entered, by basis and week ahead; the implied harvest-ready share for Breakers only. */
-function ActualAccuracyTable({ actual, metricCell }: { actual: ActualAccuracy; metricCell: (m: { wape: number | null; bias: number | null; n: number }) => string }) {
-  const statusLabel = { collecting: 'Collecting', validated: 'Validated', not_validated: 'Not validated' } as const
-  const shares = actual.runs
-    .filter((r) => r.run.kind === 'official' && r.run.basis === 'breaker_only')
-    .flatMap((r) => r.weeks.filter((w) => w.status === 'scored' && w.impliedShare !== null).map((w) => w.impliedShare!))
-  const shown = actual.horizons.filter((h) => h.basis === 'breaker_only' || h.kg.n > 0)
-  return (
-    <>
-      <h3 className={styles.replayTitle}>Against actual harvested kg</h3>
-      <p className={styles.subtitle}>
-        Each official forecast’s kg against the actual kg entered in Weekly Plant Data for that week (the newest entry; corrections count, the forecast never
-        changes). Error = WAPE · bias (positive = forecast too high). Weeks without an actual entry wait; forecasts without kg (no AFW) aren’t scored.
-      </p>
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th scope="col">Basis</th>
-            <th scope="col">Week ahead</th>
-            <th scope="col">Goal</th>
-            <th scope="col">kg error</th>
-            <th scope="col">Scored</th>
-            <th scope="col" title="Mean share of sampled stems checked in the forecasts’ sampling weeks">Coverage</th>
-            <th scope="col">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((h) => (
-            <tr key={`${h.basis}:${h.horizon}`}>
-              <th scope="row">{BASIS_NAME[h.basis]}</th>
-              <td>+{h.horizon}</td>
-              <td>{pct(h.goal)}</td>
-              <td>{metricCell(h.kg)}</td>
-              <td>{h.kg.n}</td>
-              <td>{pct(h.coverage)}</td>
-              <td>
-                <span className={h.status === 'validated' ? styles.validated : styles.lowConfidence} title={h.reasons.join('; ') || undefined}>
-                  {statusLabel[h.status]}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className={styles.fate}>
-        {shares.length
-          ? `Implied harvest-ready share (Breakers only, ${shares.length} scored week${shares.length === 1 ? '' : 's'}): mean ${pct(shares.reduce((a, b) => a + b, 0) / shares.length)}, range ${pct(Math.min(...shares))}–${pct(Math.max(...shares))}. A diagnostic: the share changes only when you change it in Forecast settings.`
-          : 'Implied harvest-ready share: appears once Breakers-only forecasts are scored against actual kg.'}
-      </p>
-    </>
-  )
-}
-
 function Snapshots({
   runs,
   shown,
   onShow,
 }: {
-  runs: { id: string; origin_year: number; origin_week: number; kind: string; locked_at: string; marketing_kg: number | null; confidence: string; basis: 'lifecycle' | 'breaker_only' }[]
+  runs: {
+    id: string
+    origin_year: number
+    origin_week: number
+    kind: string
+    locked_at: string
+    marketing_kg: number | null
+    confidence: string
+    basis: 'lifecycle' | 'breaker_only'
+    revision: number
+    harvest_ready_share: number | null
+  }[]
   shown: string | null
   onShow: (id: string) => void
 }) {
@@ -1064,11 +955,15 @@ function Snapshots({
   return (
     <div className={styles.card}>
       <h2 className={styles.title}>Locked forecasts</h2>
-      <p className={styles.subtitle}>Every forecast locked for this variety. They are never recalculated: each is compared with the actual kg entered (and full lifecycle forecasts also with recorded harvests).</p>
+      <p className={styles.subtitle}>
+        Every forecast locked for this variety, and every revised version: none is ever changed or recalculated. A sampling week’s newest version counts
+        (Production Totals, accuracy); earlier versions stay for auditing.
+      </p>
       <table className={styles.table}>
         <thead>
           <tr>
             <th scope="col">Sampling week</th>
+            <th scope="col">Version</th>
             <th scope="col">Status</th>
             <th scope="col">Basis</th>
             <th scope="col">Locked</th>
@@ -1078,11 +973,17 @@ function Snapshots({
           </tr>
         </thead>
         <tbody>
-          {runs.map((r) => (
-            <tr key={r.id} className={r.id === shown ? styles.shownRow : undefined}>
+          {runs.map((r) => {
+            const latest = !runs.some((o) => o.origin_year === r.origin_year && o.origin_week === r.origin_week && o.revision > r.revision)
+            const versions = runs.filter((o) => o.origin_year === r.origin_year && o.origin_week === r.origin_week).length
+            return (
+            <tr key={r.id} className={`${r.id === shown ? styles.shownRow : ''} ${latest ? '' : styles.replacedRow}`}>
               <th scope="row">
                 W{r.origin_week} {r.origin_year}
               </th>
+              <td title={latest ? 'The version that counts' : 'Replaced by a later version (kept for auditing)'}>
+                {versions === 1 ? '—' : `${r.revision}${r.revision === 1 ? ' · original' : ''}${r.basis === 'breaker_only' ? ` · ${formatPercent(r.harvest_ready_share)}` : ''}${latest ? ' · counts' : ''}`}
+              </td>
               <td>{r.kind === 'official' ? 'Official' : 'Late'}</td>
               <td>{BASIS_NAME[r.basis]}</td>
               <td>{dateTime(r.locked_at)}</td>
@@ -1094,10 +995,82 @@ function Snapshots({
                 </button>
               </td>
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>
+  )
+}
+
+/**
+ * Confirms publishing a revised official forecast: same data, another Ready %.
+ * The server recomputes it from the locked numbers, keeps every earlier
+ * version and refuses once the sampling week has ended.
+ */
+function ReviseDialog({
+  run,
+  percent,
+  view,
+  onClose,
+  onPublished,
+}: {
+  run: ForecastRunRow
+  percent: number
+  /** The run as shown, to preview next week's kg (null: not on screen). */
+  view: ForecastView | null
+  onClose: () => void
+  onPublished: (runId: string) => Promise<void>
+}) {
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const before = view?.weeks.find((w) => w.horizon === 1)
+  const after = view ? withReadyShare(view, percent / 100).weeks.find((w) => w.horizon === 1) : undefined
+  const deadline = revisionDeadline(run)
+  return (
+    <Dialog open title={`Revise the official W${run.origin_week} forecast?`} onClose={onClose} className={styles.auditDialog}>
+      <p className={styles.subtitle}>
+        Ready % <strong>{percent}%</strong> instead of {formatPercent(run.harvest_ready_share)}
+        {before && after && before.kg !== null && after.kg !== null && (
+          <>
+            : W{before.week} becomes <strong>{formatCount(after.kg)} kg</strong> ({formatCount(after.cases)} cases) instead of {formatCount(before.kg)} kg
+          </>
+        )}
+        . This publishes version {run.revision + 1} of the official forecast, from the same W{run.origin_week} data. Version {run.revision}
+        {run.revision === 1 ? ' (the original, locked ' + dateTime(run.locked_at) + ')' : ''} stays saved for auditing. The newest version is the one Production
+        Totals and accuracy use. You can revise until the W{run.origin_week} sampling week ends ({dateTime(deadline.toISOString())}).
+      </p>
+      <label className="field">
+        <span className="field-label">Why (optional)</span>
+        <input className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="e.g. picking crew reports more ripe fruit" />
+      </label>
+      {error && <div className={styles.error}>{error}</div>}
+      <div className={styles.dialogActions}>
+        <button type="button" className="button button-secondary" onClick={onClose} disabled={saving}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="button button-primary"
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true)
+            setError(null)
+            try {
+              const res = await reviseOfficialForecast(run.id, percent, note.trim() || null)
+              if (!res) throw new Error('The revised forecast wasn’t saved')
+              await onPublished(res.run_id)
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err))
+              setSaving(false)
+            }
+          }}
+        >
+          {saving ? 'Publishing…' : `Publish version ${run.revision + 1}`}
+        </button>
+      </div>
+    </Dialog>
   )
 }
 
@@ -1175,10 +1148,10 @@ function CaseWeight({ crop }: { crop: Crop }) {
   const parsed = text.trim() === '' ? null : Number(text.replace(',', '.'))
   const valid = parsed === null || (Number.isFinite(parsed) && parsed > 0 && parsed <= 100)
   return (
-    <label className={`field ${wpd.yearControl} ${styles.caseWeight}`}>
-      <span className="field-label">Case kg</span>
+    <label className={`${styles.tbField} ${styles.tbNumber}`}>
+      <span className={styles.tbLabel}>Case kg</span>
       <input
-        className="input"
+        className={`input ${styles.tbControl}`}
         inputMode="decimal"
         value={text}
         placeholder="—"
