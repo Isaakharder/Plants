@@ -207,12 +207,61 @@ export function useImportFiles(sourceId: string | undefined, filter: FileFilter,
   })
 }
 
-export function useImportAttempts(sourceId: string | undefined) {
+export type LogFilter = { channel: 'all' | ClimateImportAttemptRow['channel']; outcome: 'all' | ClimateImportAttemptRow['outcome'] }
+
+/** The upload log, newest first: the first `limit` uploads matching the filter. */
+export function useImportAttempts(sourceId: string | undefined, filter: LogFilter, limit: number) {
   return useQuery({
-    queryKey: climateKeys.attempts(sourceId ?? ''),
+    queryKey: [...climateKeys.attempts(sourceId ?? ''), filter.channel, filter.outcome, limit],
     enabled: Boolean(sourceId),
-    queryFn: async () =>
-      check(await supabase.from('climate_import_attempts').select('*').eq('source_id', sourceId!).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(50)) as ClimateImportAttemptRow[],
+    placeholderData: (previous) => previous,
+    queryFn: async () => {
+      let q = supabase.from('climate_import_attempts').select('*').eq('source_id', sourceId!)
+      if (filter.channel !== 'all') q = q.eq('channel', filter.channel)
+      if (filter.outcome !== 'all') q = q.eq('outcome', filter.outcome)
+      return check(await q.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(limit)) as ClimateImportAttemptRow[]
+    },
+  })
+}
+
+export type UploadHealth = {
+  /** The most recent upload of any outcome, and the hour of the file it was stored as or matched. */
+  lastUpload: (Pick<ClimateImportAttemptRow, 'created_at' | 'filename' | 'channel' | 'outcome'> & { hour_utc: string | null; hour_local: string | null }) | null
+  /** The file in use for the newest hour, and when it arrived. */
+  latestFile: Pick<ClimateImportFileRow, 'hour_utc' | 'received_at' | 'channel'> | null
+}
+
+/** What the status cards need beyond climate_import_status: the last upload's hour and the newest hour's arrival. */
+export function useUploadHealth(sourceId: string | undefined) {
+  return useQuery({
+    queryKey: [...climateKeys.status(sourceId ?? ''), 'health'],
+    enabled: Boolean(sourceId),
+    refetchInterval: 5 * 60_000,
+    queryFn: async (): Promise<UploadHealth> => {
+      const [last, latest] = await Promise.all([
+        supabase
+          .from('climate_import_attempts')
+          .select('created_at, filename, channel, outcome, file:climate_import_files(hour_utc, hour_local)')
+          .eq('source_id', sourceId!)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('climate_import_files')
+          .select('hour_utc, received_at, channel')
+          .eq('source_id', sourceId!)
+          .eq('hour_state', 'active')
+          .order('hour_utc', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ])
+      const a = check(last) as unknown as (Pick<ClimateImportAttemptRow, 'created_at' | 'filename' | 'channel' | 'outcome'> & { file: { hour_utc: string | null; hour_local: string | null } | null }) | null
+      return {
+        lastUpload: a && { created_at: a.created_at, filename: a.filename, channel: a.channel, outcome: a.outcome, hour_utc: a.file?.hour_utc ?? null, hour_local: a.file?.hour_local ?? null },
+        latestFile: check(latest) as UploadHealth['latestFile'],
+      }
+    },
   })
 }
 

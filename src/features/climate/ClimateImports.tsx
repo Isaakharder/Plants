@@ -6,14 +6,26 @@ import { useSearchParams } from 'react-router-dom'
 import { EmptyState, ErrorState, LoadingState } from '../../components/States'
 import type { ClimateImportStatus } from '../../lib/database.types'
 import { useOrganization } from '../organization/OrganizationProvider'
-import { PAGE, useClimateSource, useImportAttempts, useImportFiles, useImportStatus, useMissingHours, type ClimateFile, type FileFilter } from './api'
+import {
+  PAGE,
+  useClimateSource,
+  useImportAttempts,
+  useImportFiles,
+  useImportStatus,
+  useMissingHours,
+  useUploadHealth,
+  type ClimateFile,
+  type FileFilter,
+  type LogFilter,
+  type UploadHealth,
+} from './api'
 import { ClimateTabs } from './ClimateTabs'
 import { FileDialog } from './FileDialog'
 import { ManualImportDialog } from './ManualImportDialog'
 import { importMessage, type MatchedFile } from './importMessages'
 import { StateBadge } from './StateBadge'
 import { useNow } from './useNow'
-import { formatLocalHour, missingWarning } from './model'
+import { formatDelay, formatLocalHour, isBacklogUpload, missingWarning } from './model'
 import styles from './Climate.module.css'
 
 const ago = (iso: string | null | undefined, now: number) => {
@@ -26,17 +38,21 @@ const ago = (iso: string | null | undefined, now: number) => {
 }
 
 const localTime = (iso: string) => formatLocalHour(Math.floor(Date.parse(iso) / 1000))
+const receivedTime = (iso: string) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 export function ClimateImports() {
   const organization = useOrganization()
   const source = useClimateSource(organization.id)
   const status = useImportStatus(source.data?.id)
+  const health = useUploadHealth(source.data?.id)
   const [params, setParams] = useSearchParams()
   const filter = (params.get('filter') ?? 'all') as FileFilter
   const [limit, setLimit] = useState(PAGE)
   const [openFile, setOpenFile] = useState<string | null>(params.get('file'))
   const [importing, setImporting] = useState(false)
   const [view, setView] = useState<'files' | 'log'>('files')
+  const [logFilter, setLogFilter] = useState<LogFilter>({ channel: 'all', outcome: 'all' })
+  const [logLimit, setLogLimit] = useState(PAGE)
 
   const now = useNow()
   const nowH = Math.floor(now / 3_600_000) * 3_600_000
@@ -45,7 +61,7 @@ export function ClimateImports() {
   const missingFrom = firstHour && firstHour > from30 ? firstHour : from30
   const missing = useMissingHours(source.data?.id, missingFrom, new Date(nowH).toISOString())
   const files = useImportFiles(source.data?.id, filter, limit)
-  const attempts = useImportAttempts(view === 'log' ? source.data?.id : undefined)
+  const attempts = useImportAttempts(view === 'log' ? source.data?.id : undefined, logFilter, logLimit)
 
   const frame = (body: React.ReactNode) => (
     <section className={styles.section} aria-label="Climate imports">
@@ -64,7 +80,7 @@ export function ClimateImports() {
 
   return frame(
     <>
-      <StatusCards status={status.data ?? null} now={now} />
+      <StatusCards status={status.data ?? null} health={health.data ?? null} now={now} />
       {gapWarning && (
         <ul className={styles.warnings}>
           <li className={styles.warning}>
@@ -106,6 +122,38 @@ export function ClimateImports() {
                 <option value="none">Quarantined</option>
                 <option value="superseded">Not used</option>
               </select>
+            )}
+            {view === 'log' && (
+              <>
+                <select
+                  className={`input ${styles.compactSelect}`}
+                  value={logFilter.channel}
+                  aria-label="Uploaded by"
+                  onChange={(e) => {
+                    setLogLimit(PAGE)
+                    setLogFilter((f) => ({ ...f, channel: e.target.value as LogFilter['channel'] }))
+                  }}
+                >
+                  <option value="all">Agent and manual</option>
+                  <option value="agent">Agent</option>
+                  <option value="manual">Manual</option>
+                </select>
+                <select
+                  className={`input ${styles.compactSelect}`}
+                  value={logFilter.outcome}
+                  aria-label="Result"
+                  onChange={(e) => {
+                    setLogLimit(PAGE)
+                    setLogFilter((f) => ({ ...f, outcome: e.target.value as LogFilter['outcome'] }))
+                  }}
+                >
+                  <option value="all">All results</option>
+                  <option value="created">Created</option>
+                  <option value="duplicate">Already imported</option>
+                  <option value="conflict">Conflict</option>
+                  <option value="quarantined">Held for review</option>
+                </select>
+              </>
             )}
           </div>
           {owner && (
@@ -169,7 +217,7 @@ export function ClimateImports() {
               <tbody>
                 {attempts.data.map((a) => (
                   <tr key={a.id} className={a.file_id ? styles.rowButton : undefined} onClick={() => a.file_id && setOpenFile(a.file_id)}>
-                    <td>{new Date(a.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td>{receivedTime(a.created_at)}</td>
                     <td className={`${styles.left} ${styles.wrap}`}>
                       {a.filename}
                       {a.outcome !== 'created' && (
@@ -186,7 +234,14 @@ export function ClimateImports() {
                 ))}
               </tbody>
             </table>
-            {attempts.data.length === 0 && <p className={styles.empty}>No uploads yet.</p>}
+            {attempts.data.length === 0 && <p className={styles.empty}>No uploads{logFilter.channel !== 'all' || logFilter.outcome !== 'all' ? ' in this view' : ' yet'}.</p>}
+            {attempts.data.length >= logLimit && (
+              <div className={styles.actions}>
+                <button type="button" className="button button-secondary" disabled={attempts.isFetching} onClick={() => setLogLimit((l) => l + PAGE)}>
+                  {attempts.isFetching ? 'Loading…' : 'Show more'}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -215,24 +270,43 @@ function FileRow({ f, onOpen }: { f: ClimateFile; onOpen: () => void }) {
   )
 }
 
-function StatusCards({ status, now }: { status: ClimateImportStatus | null; now: number }) {
+function StatusCards({ status, health, now }: { status: ClimateImportStatus | null; health: UploadHealth | null; now: number }) {
   if (!status) return null
-  const last = status.last_success
+  const last = health?.lastUpload ?? null
+  const latest = health?.latestFile ?? null
+  const backlog = last ? isBacklogUpload(last.hour_utc, status.latest_hour) : false
   const behindH = status.latest_hour ? Math.round((now - Date.parse(status.latest_hour)) / 3_600_000) : null
   return (
     <div className={styles.statusGrid}>
       <div className={styles.stat}>
-        <div className={styles.statLabel}>Last successful import</div>
-        <div className={styles.statValue}>{last ? ago(last.received_at, now) : 'None yet'}</div>
+        <div className={styles.statLabel}>Last upload received</div>
+        <div className={styles.statValue}>{last ? ago(last.created_at, now) : 'None yet'}</div>
         {last && (
-          <div className={styles.statSub}>
-            {last.hour_local?.slice(0, 16)} · {last.channel === 'agent' ? 'agent' : 'manual'}
-          </div>
+          <>
+            <div className={styles.statSub}>
+              {receivedTime(last.created_at)} · {last.channel === 'agent' ? 'agent' : 'manual'}
+              {last.outcome !== 'created' && <> · <StateBadge state={last.outcome} /></>}
+            </div>
+            <div className={styles.statSub}>
+              Hour {last.hour_local ? last.hour_local.slice(0, 16) : 'not decided'}
+              {backlog && (
+                <span className={styles.partial} title="Older than the latest hour with data: a backlog file arriving late">
+                  {' '}
+                  · backlog
+                </span>
+              )}
+            </div>
+          </>
         )}
       </div>
       <div className={styles.stat}>
         <div className={styles.statLabel}>Latest hour with data</div>
         <div className={`${styles.statValue} ${behindH !== null && behindH > 2 ? styles.stale : ''}`}>{status.latest_hour ? localTime(status.latest_hour) : '—'}</div>
+        {latest && (
+          <div className={styles.statSub}>
+            Arrived {receivedTime(latest.received_at)} · {formatDelay(Date.parse(latest.received_at) - Date.parse(latest.hour_utc!))} after the hour
+          </div>
+        )}
         {behindH !== null && behindH > 2 && <div className={styles.statSub}>{behindH} h behind</div>}
       </div>
       <div className={styles.stat}>

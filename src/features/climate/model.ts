@@ -117,6 +117,30 @@ export function missingWarning(gaps: [string, string, number][], timeZone = GREE
 }
 
 // ---------------------------------------------------------------------------
+// Upload health (Imports status cards)
+// ---------------------------------------------------------------------------
+
+/** How long after its hour a file arrived: "8 s", "4 min", "2 h 5 min", "3 days". Early arrivals (clock drift) count as 0. */
+export function formatDelay(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s} s`
+  const min = Math.round(s / 60)
+  if (min < 60) return `${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 48) return min % 60 ? `${h} h ${min % 60} min` : `${h} h`
+  return `${Math.round(h / 24)} days`
+}
+
+/**
+ * The upload was for an hour older than the newest stored hour: a backlog file
+ * arriving late, not the current hour. An upload without an hour (quarantined)
+ * is never a backlog.
+ */
+export function isBacklogUpload(uploadHourUtc: string | null, latestHourUtc: string | null): boolean {
+  return Boolean(uploadHourUtc && latestHourUtc) && Date.parse(uploadHourUtc!) < Date.parse(latestHourUtc!)
+}
+
+// ---------------------------------------------------------------------------
 // Area shares (planting form)
 // ---------------------------------------------------------------------------
 

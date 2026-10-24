@@ -56,3 +56,25 @@ describe('the five measurements', () => {
     expect(['drain_percentage', 'ec', 'ph', 'group_activation_time', 'unknown'].some((m) => isUsedMeasurement(m, 'Zone 1'))).toBe(false)
   })
 })
+
+describe('upload health', () => {
+  it('formats how long after its hour a file arrived', () => {
+    expect(model.formatDelay(7_400)).toBe('7 s')
+    expect(model.formatDelay(-30_000)).toBe('0 s')
+    expect(model.formatDelay(4 * 60_000)).toBe('4 min')
+    expect(model.formatDelay(125 * 60_000)).toBe('2 h 5 min')
+    expect(model.formatDelay(3 * 3_600_000)).toBe('3 h')
+    // 21 Oct 14:00 received in the 24 Oct backlog
+    expect(model.formatDelay(Date.parse('2026-10-24T16:09:14Z') - Date.parse('2026-10-21T18:00:00Z'))).toBe('3 days')
+  })
+
+  it('marks an upload as backlog only when its hour is older than the newest stored hour', () => {
+    const latest = '2026-10-24T16:00:00Z'
+    // out of order: 23 Oct 08:00 arrived last
+    expect(model.isBacklogUpload('2026-10-23T12:00:00Z', latest)).toBe(true)
+    expect(model.isBacklogUpload(latest, latest)).toBe(false)
+    // a quarantined upload has no hour
+    expect(model.isBacklogUpload(null, latest)).toBe(false)
+    expect(model.isBacklogUpload('2026-10-23T12:00:00Z', null)).toBe(false)
+  })
+})
