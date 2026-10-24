@@ -13,7 +13,7 @@ export function useWeeklyPlantData(cropId: string | undefined, year: number | un
     enabled: Boolean(cropId && year),
     queryFn: async (): Promise<WeeklyPlantDataRow[]> => {
       const { data, error } = await supabase.rpc('weekly_plant_data', { p_crop_id: cropId!, p_year: year! })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return data.map(normalizeWeek)
     },
   })
@@ -29,7 +29,7 @@ export function useSetHarvestCohorts(cropId: string | undefined, year: number | 
     enabled: Boolean(cropId && year),
     queryFn: async (): Promise<SetHarvestCohortRow[]> => {
       const { data, error } = await supabase.rpc('set_harvest_cohorts', { p_crop_id: cropId!, p_year: year! })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return data
     },
   })
@@ -42,7 +42,7 @@ export function useWeeklyFruitLoss(cropId: string | undefined, year: number | un
     enabled: Boolean(cropId && year),
     queryFn: async (): Promise<WeeklyFruitLossRow[]> => {
       const { data, error } = await supabase.rpc('weekly_fruit_loss', { p_crop_id: cropId!, p_year: year! })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return data.map(normalizeFruitLoss)
     },
   })
@@ -55,7 +55,7 @@ export function useWeeklyHarvestable(cropId: string | undefined, year: number | 
     enabled: Boolean(cropId && year),
     queryFn: async (): Promise<Map<number, WeeklyHarvestableRow>> => {
       const { data, error } = await supabase.rpc('weekly_harvestable', { p_crop_id: cropId!, p_year: year! })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return new Map(data.map((r) => [r.iso_week, r]))
     },
   })
@@ -68,7 +68,7 @@ export function useSamplingWeeks(cropId: string | undefined, year: number | unde
     enabled: Boolean(cropId && year),
     queryFn: async (): Promise<SamplingWeekRow[]> => {
       const { data, error } = await supabase.rpc('sampling_weeks', { p_crop_id: cropId!, p_year: year! })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return data.map(normalizeSamplingWeek)
     },
   })
@@ -86,7 +86,7 @@ export function useWeeklyHarvestAfw(cropId: string | undefined, year: number | u
     enabled: Boolean(cropId && year),
     queryFn: async (): Promise<Map<number, number>> => {
       const { data, error } = await supabase.from('weekly_harvest_afw').select('week, afw_g').eq('crop_id', cropId!).eq('year', year!)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return new Map(data.map((r) => [r.week, Number(r.afw_g)]))
     },
   })
@@ -139,7 +139,7 @@ export function useWeeklyHarvestActuals(cropId: string | undefined, year: number
         .eq('year', year!)
         .order('entered_at', { ascending: false })
         .order('id', { ascending: false })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       const weeks = new Map<number, ActualWeek>()
       for (const r of data) {
         let w = weeks.get(r.week)
@@ -167,7 +167,7 @@ export function useSaveWeeklyHarvestActual(organizationId: string, cropId: strin
       const { error } = await supabase
         .from('weekly_harvest_actuals')
         .insert({ organization_id: organizationId, crop_id: cropId!, year: year!, week: entry.week, actual_kg: entry.kg, note: entry.note })
-      if (error) throw error
+      if (error) throw new Error(error.message)
     },
     onSuccess: () => Promise.all([queryClient.invalidateQueries({ queryKey: actualsKey(cropId, year) }), queryClient.invalidateQueries({ queryKey: ['forecast'] })]),
   })
@@ -187,7 +187,7 @@ export function useHarvestWeekFlags(cropId: string | undefined, year: number | u
     enabled: Boolean(cropId && year),
     queryFn: async (): Promise<Map<number, string>> => {
       const { data, error } = await supabase.rpc('crop_quality_flags', { p_crop_id: cropId! })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       const out = new Map<number, string>()
       for (const f of data) {
         if (f.scope !== 'week' || Math.floor(f.yw / 100) !== year || f.review_decision === 'legitimate') continue
