@@ -8,11 +8,14 @@ import {
   SHOOT_FIRST,
   SHOOT_STEP,
   buildTwin,
+  formatStemUpdated,
   isStale,
   isoWeekIndex,
+  lastUpdatedByStem,
   latestStatusByNode,
   nodeY,
   placeGrowth,
+  rowHeadGrowth,
   statusCategory,
   stemCurve,
   weeksBetween,
@@ -282,5 +285,54 @@ describe('duplicate records', () => {
     const t = twinOf([n3, d12a, d12b, removed, { ...dupB, is_active: false }, dupA])
     expect(t.problems).toEqual([{ key: 'main:stem-d:12', kind: 'main', label: '12', nodeIds: ['d12a', 'd12b'] }])
     expect(t.duplicateShootLabels).toEqual([])
+  })
+})
+
+describe('stem last updated', () => {
+  const nodeA = { ...main('n1', s1.id, 1, '2026-10-20T12:00:00Z'), updated_at: '2026-10-30T09:00:00Z' }
+  const removed = main('n2', s1.id, 2, '2026-10-28T12:00:00Z')
+  removed.is_active = false
+  const nodeB = main('m1', s2.id, 1)
+  const base: RowCanvasData = { row: null, stems: [s1, s2, s10], nodes: [nodeA, removed, nodeB], statuses: [], growth: [], visits: [] }
+
+  it('takes the latest of node additions, statuses, growth, marks, answers and stem checks', () => {
+    const at = lastUpdatedByStem({
+      ...base,
+      statuses: [status('n1', 'Flower', 43, '2026-10-22T19:54:00+00:00')],
+      growth: [{ ...reading('g1', s2.id, 43, 7, 1), observed_at: '2026-10-21T10:00:00Z', updated_at: '2026-10-30T10:00:00Z' }],
+      harvestable: [{ id: 'h', plant_node_id: 'n1', year: 2026, week_number: 44, harvestable: true, observed_at: '2026-10-29T19:54:00Z' }],
+      visits: [{ id: 'v', measurement_stem_id: s2.id, year: 2026, week_number: 44, checked: true, observed_at: '2026-10-29T13:00:00Z', harvest_event_id: null, all_fruit_checked: null }],
+    })
+    expect(at.get(s1.id)).toBe(Date.parse('2026-10-29T19:54:00Z'))
+    expect(at.get(s2.id)).toBe(Date.parse('2026-10-29T13:00:00Z'))
+  })
+
+  it('ignores updated_at, removed nodes and their records; nothing for a stem without records', () => {
+    const at = lastUpdatedByStem({ ...base, statuses: [status('n2', 'Flower', 44, '2026-10-29T12:00:00Z')] })
+    expect(at.get(s1.id)).toBe(Date.parse('2026-10-20T12:00:00Z'))
+    expect(at.get(s10.id)).toBeNull()
+  })
+
+  it('formats in Toronto time, e.g. Oct 29 3:54 PM (EDT) and after the switch to EST', () => {
+    expect(formatStemUpdated(Date.parse('2026-10-29T19:54:00Z'))).toBe('Oct 29 3:54 PM')
+    expect(formatStemUpdated(Date.parse('2026-11-02T04:05:00Z'))).toBe('Nov 1 11:05 PM')
+  })
+})
+
+describe('row head growth', () => {
+  const twinWith = (growth: StemGrowthMeasurement[]) => buildTwin({ ...data, growth }, NOW).stems
+
+  it('averages the stems’ readings in the latest week with readings', () => {
+    const g = rowHeadGrowth(twinWith([reading('r1', s1.id, 39, 9, 30), reading('r2', s1.id, 40, 6, 31), reading('r3', s2.id, 40, 8, null)]), NOW)
+    expect(g).toEqual({ year: 2026, week: 40, cm: 7, readings: 2, stems: 3, weeksOld: 1 })
+  })
+
+  it('says how old the latest week is: 0 for the current week, counted across ISO years', () => {
+    expect(rowHeadGrowth(twinWith([reading('r1', s1.id, 41, 5, 31)]), NOW)?.weeksOld).toBe(0)
+    expect(rowHeadGrowth(twinWith([reading('r1', s1.id, 52, 5, 31)]), { year: 2027, week: 2 })?.weeksOld).toBe(3)
+  })
+
+  it('is null without readings', () => {
+    expect(rowHeadGrowth(twinWith([]), NOW)).toBeNull()
   })
 })

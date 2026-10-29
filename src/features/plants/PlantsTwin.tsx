@@ -13,7 +13,7 @@ import { ReviewPanel } from './ReviewPanel'
 import { DuplicateBadge, LegendGlyph, StaleBadge } from './Glyphs'
 import type { NodeHandler } from './PlantSvg'
 import { PlantSvg } from './PlantSvg'
-import { STALE_AFTER_WEEKS, STEM_WIDTH, buildTwin, type TwinNode, type TwinStem } from './twin'
+import { STALE_AFTER_WEEKS, STEM_WIDTH, buildTwin, formatStemUpdated, lastUpdatedByStem, rowHeadGrowth, type RowHeadGrowth, type TwinNode, type TwinStem } from './twin'
 import styles from './PlantsTwin.module.css'
 
 const STATUS_NAMES: Record<string, string> = {
@@ -76,7 +76,12 @@ export function PlantsTwin() {
     return () => observer.disconnect()
   }, [plants.data])
 
-  const twin = useMemo(() => (plants.data ? buildTwin(plants.data, currentGreenhouseWeek()) : null), [plants.data])
+  // The greenhouse week is re-read with each fetch, so it rolls over on Refresh.
+  const { now, twin } = useMemo(() => {
+    const week = currentGreenhouseWeek()
+    return { now: week, twin: plants.data ? buildTwin(plants.data, week) : null }
+  }, [plants.data])
+  const stemUpdated = useMemo(() => (plants.data ? lastUpdatedByStem(plants.data) : null), [plants.data])
   const variety = crop ? cropColorVar(crop.color) : COLORS.matureGreen
   const stemCount = twin?.stems.length ?? 0
   // Each column has a 1px divider; leave room for it so Fit width never scrolls sideways.
@@ -113,6 +118,7 @@ export function PlantsTwin() {
   if (!crop) return <EmptyState title="No varieties yet" description="Add a variety in Settings, then record plants with the mobile collector." />
 
   const summary = twin ? summarize(twin.stems) : null
+  const headGrowth = twin?.stems.length ? rowHeadGrowth(twin.stems, now) : undefined
   const pinnedStem = twin?.stems.find((s) => s.id === pinned?.stemId) ?? null
   const pinnedNode = pinnedStem && pinned?.nodeId ? allNodes(pinnedStem).find((n) => n.id === pinned.nodeId) ?? null : null
   const updated = plants.dataUpdatedAt ? new Date(plants.dataUpdatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : null
@@ -130,7 +136,7 @@ export function PlantsTwin() {
   return (
     <section className={styles.section} aria-label="Plants digital twin">
       <div className={styles.controls}>
-        <div className={styles.controlsSpacer} aria-hidden="true" />
+        <div className={styles.headGrowthCell}>{headGrowth !== undefined && <HeadGrowth growth={headGrowth} />}</div>
         <div className={styles.selectorsCenter}>
           <div className={styles.selectorGroup}>
             <div className={`field ${styles.control}`}>
@@ -250,10 +256,6 @@ export function PlantsTwin() {
           </svg>
           Duplicate record — click to review
         </li>
-        <li>
-          <span className={styles.growthSample}>7.0 cm · W32</span> weekly head growth
-        </li>
-        <li className={styles.faint}>Leaves are decorative · hover a node for details, click a node or stem heading to pin them</li>
       </ul>
 
       {rows.isPending || (row && plants.isPending) ? (
@@ -279,6 +281,7 @@ export function PlantsTwin() {
                     <small>
                       {stem.mainNodes.length} nodes · {stem.shootCount} shoots
                     </small>
+                    <StemUpdated at={stemUpdated?.get(stem.id) ?? null} />
                   </button>
                   <PlantSvg
                     stem={stem}
@@ -341,6 +344,53 @@ export function PlantsTwin() {
         </div>
       )}
     </section>
+  )
+}
+
+/**
+ * The row's latest weekly head growth, in the growth labels' blue (the stems
+ * show each reading). The week is always shown; an older week says how old it
+ * is, and incomplete coverage says how many stems it covers.
+ */
+function HeadGrowth({ growth }: { growth: RowHeadGrowth | null }) {
+  if (!growth) {
+    return (
+      <span className={styles.headGrowth} title="No head growth readings in this row yet">
+        <span className={styles.headGrowthLabel}>Head growth</span> —
+      </span>
+    )
+  }
+  const partial = growth.readings < growth.stems
+  const old = growth.weeksOld > 0
+  return (
+    <span
+      className={styles.headGrowth}
+      title={`Week ${growth.week} ${growth.year}${old ? ` (${growth.weeksOld} week${growth.weeksOld > 1 ? 's' : ''} ago; no newer readings)` : ''}: mean weekly head growth of ${growth.readings} of ${growth.stems} stems in this row`}
+    >
+      <span className={styles.headGrowthLabel}>Head growth</span>
+      <span className={`${styles.headGrowthValue} ${old ? styles.headGrowthOld : ''}`}>
+        {growth.cm.toFixed(1)} cm · W{growth.week}
+      </span>
+      {old && <span className={styles.headGrowthAge}>{growth.weeksOld} wk ago</span>}
+      {partial && (
+        <span className={styles.headGrowthStems}>
+          {growth.readings}/{growth.stems} stems
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** The stem's latest recorded change, or a dash when none is recorded. */
+function StemUpdated({ at }: { at: number | null }) {
+  return at == null ? (
+    <small className={styles.stemUpdated} aria-label="No updates recorded">
+      —
+    </small>
+  ) : (
+    <small className={styles.stemUpdated} title="Last update recorded on this stem (Toronto time)">
+      {formatStemUpdated(at)}
+    </small>
   )
 }
 

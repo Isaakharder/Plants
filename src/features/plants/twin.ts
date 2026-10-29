@@ -12,7 +12,7 @@
 //   the stem tip             just above the stem's highest main node
 
 import type { NodeStatus } from '../../lib/database.types'
-import type { GreenhouseWeek } from '../collector/greenhouseWeek'
+import { GREENHOUSE_TZ, type GreenhouseWeek } from '../collector/greenhouseWeek'
 import type { LatestNodeStatus, MeasurementStem, PlantNode, RowCanvasData, StemGrowthMeasurement } from '../collector/types'
 import { duplicatesByNode, findDuplicateGroups, statusCategory, type DuplicateInfo, type StatusCategory } from '../collector/attention'
 
@@ -391,3 +391,56 @@ export function placeGrowth(readings: StemGrowthMeasurement[], baseY: number): {
 }
 
 const f = (n: number) => n.toFixed(1)
+
+// ── Stem freshness & row growth (header text; no effect on the drawing) ─────
+
+/**
+ * Each stem's most recent recorded change, as an instant (ms), or null when
+ * the stem has none. Counts only what people record on the plant, at the time
+ * the phone recorded it: an active node being added, a status, a Harvestable
+ * mark, an inspection answer, a growth reading and a “✓ Stem checked”.
+ * updated_at columns don't count (they move when the server writes a row, e.g.
+ * on sync), nor do stem/row setup edits or fetch times.
+ */
+export function lastUpdatedByStem(data: RowCanvasData): Map<string, number | null> {
+  const latest = new Map<string, number | null>(data.stems.map((s) => [s.id, null]))
+  const bump = (stemId: string | undefined, at: string | null | undefined) => {
+    if (!stemId || !at || !latest.has(stemId)) return
+    const ms = Date.parse(at)
+    if (Number.isNaN(ms)) return
+    const current = latest.get(stemId)
+    if (current == null || ms > current) latest.set(stemId, ms)
+  }
+  const stemOfNode = new Map(data.nodes.filter((n) => n.is_active).map((n) => [n.id, n.measurement_stem_id]))
+  for (const n of data.nodes) if (n.is_active) bump(n.measurement_stem_id, n.created_at)
+  for (const s of data.statuses) bump(stemOfNode.get(s.plant_node_id), s.observed_at)
+  for (const h of data.harvestable ?? []) bump(stemOfNode.get(h.plant_node_id), h.observed_at)
+  for (const a of data.answers ?? []) bump(stemOfNode.get(a.plant_node_id), a.observed_at)
+  for (const g of data.growth) bump(g.measurement_stem_id, g.observed_at)
+  for (const v of data.visits) bump(v.measurement_stem_id, v.observed_at)
+  return latest
+}
+
+const updatedFormat = new Intl.DateTimeFormat('en-US', { timeZone: GREENHOUSE_TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+/** "Oct 29 3:54 PM", greenhouse (Toronto) time. */
+export function formatStemUpdated(ms: number): string {
+  const p = Object.fromEntries(updatedFormat.formatToParts(new Date(ms)).map((x) => [x.type, x.value]))
+  return `${p.month} ${p.day} ${p.hour}:${p.minute} ${p.dayPeriod}`
+}
+
+export type RowHeadGrowth = { year: number; week: number; cm: number; readings: number; stems: number; weeksOld: number }
+
+/**
+ * The row's weekly head growth: the mean of the stems' readings in the latest
+ * week any stem has one (one reading per stem per week), and how many weeks
+ * before the current greenhouse week that is. Null without readings.
+ */
+export function rowHeadGrowth(stems: TwinStem[], current: GreenhouseWeek): RowHeadGrowth | null {
+  const readings = stems.flatMap((s) => [...s.growth, ...s.unplacedGrowth])
+  if (!readings.length) return null
+  const last = readings.reduce((a, b) => (b.year > a.year || (b.year === a.year && b.week > a.week) ? b : a))
+  const week = readings.filter((r) => r.year === last.year && r.week === last.week)
+  const cm = week.reduce((sum, r) => sum + r.cm, 0) / week.length
+  return { year: last.year, week: last.week, cm, readings: week.length, stems: stems.length, weeksOld: Math.max(0, weeksBetween(last, current)) }
+}
