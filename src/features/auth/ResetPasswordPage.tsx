@@ -23,10 +23,10 @@ export function ResetPasswordPage() {
 
   if (done) {
     return (
-      <CenteredPanel title="Plants" subtitle="Password changed">
+      <CenteredPanel title="CropLink" subtitle="Password changed">
         <p className="form-notice" role="status">Your password has been changed. Use it the next time you sign in.</p>
         <button className="button button-primary button-block" type="button" onClick={() => leave()}>
-          Continue to Plants
+          Continue to CropLink
         </button>
       </CenteredPanel>
     )
@@ -37,7 +37,7 @@ export function ResetPasswordPage() {
 
   if (recovery?.kind === 'error' || !session) {
     return (
-      <CenteredPanel title="Plants" subtitle="Reset your password">
+      <CenteredPanel title="CropLink" subtitle="Reset your password">
         <p className="form-error" role="alert">{recovery?.kind === 'error' ? recovery.message : EXPIRED_LINK}</p>
         <button className="button button-primary button-block" type="button" onClick={() => leave({ forgot: true })}>
           Request a new link
@@ -62,7 +62,7 @@ export function ResetPasswordPage() {
   }
 
   return (
-    <CenteredPanel title="Plants" subtitle="Choose a new password">
+    <CenteredPanel title="CropLink" subtitle="Choose a new password">
       <form className="form" onSubmit={handleSubmit} noValidate>
         <p className="field-hint" style={{ margin: 0 }}>
           For {session.user.email}. Use at least {MIN_PASSWORD_LENGTH} characters.

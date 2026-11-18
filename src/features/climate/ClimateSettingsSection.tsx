@@ -245,7 +245,7 @@ function AgentKeys({ sourceId }: { sourceId: string }) {
       <Dialog open={shown !== null} title="Copy the new key now" onClose={() => setShown(null)}>
         <div className={styles.form}>
           <p className={styles.small}>
-            This is the only time the key is shown; Plants keeps only a fingerprint of it. Paste it into the agent’s Synopta tab ({shown?.label}).
+            This is the only time the key is shown; CropLink keeps only a fingerprint of it. Paste it into the agent’s Synopta tab ({shown?.label}).
           </p>
           <div className={`${styles.keyBox} ${styles.mono}`}>{shown?.key}</div>
           <div className={styles.actions}>

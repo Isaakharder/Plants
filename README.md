@@ -1,6 +1,12 @@
-# Plants
+# CropLink
 
 Commercial greenhouse pepper crop projection.
+
+> **Naming.** The product is **CropLink**. It was developed as "Plants", so the repository, Railway
+> and Supabase projects, package names, database, phone storage keys and service-worker caches still
+> use `plants` and must stay that way (renaming phone storage would strand unsynced records). The
+> **Plants** page (`/plants`) is a section of CropLink, not the product name. Records imported from
+> the retired application are labelled **Legacy CropLink (original app, pre-Oct 2026)**.
 
 | Page            | Question it answers               |
 | --------------- | --------------------------------- |
@@ -78,7 +84,8 @@ Schema changes go in a new file in `supabase/migrations/`. After changing the sc
 
 ## Mobile collector (`/mobile`)
 
-The greenhouse data-entry screens from CropLink, rebuilt on Plants' data layer. Open `/mobile` on a
+The greenhouse data-entry screens from Legacy CropLink (original app, pre-Oct 2026), rebuilt on this
+app's data layer. Open `/mobile` on a
 phone (or install it: the manifest's start URL is `/mobile`). Routes: `/mobile`, `/mobile/measurements`
 (alias), `/mobile/row/:rowId`. They sit inside the auth/organization gate but outside the desktop
 layout. Varieties shown are the organization's **active** crops (between planting and pullout dates).
@@ -153,7 +160,7 @@ supabase/
 
 ## Breaker photos
 
-When a worker records a node as **Breaker** in the mobile collector, Plants asks for two photos with
+When a worker records a node as **Breaker** in the mobile collector, CropLink asks for two photos with
 the rear camera: the **front** and the **back** of the pepper (preview and Retake on each). **Record
 without photos** keeps the manual workflow. Photos are saved on the phone first (in the offline queue,
 with a ~640 px preview made on the phone) and upload after the Breaker record when there is a

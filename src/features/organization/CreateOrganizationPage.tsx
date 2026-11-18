@@ -24,7 +24,7 @@ export function CreateOrganizationPage() {
   }
 
   return (
-    <CenteredPanel title="Welcome to Plants" subtitle="What's the name of your greenhouse operation?">
+    <CenteredPanel title="Welcome to CropLink" subtitle="What's the name of your greenhouse operation?">
       <form className="form" onSubmit={handleSubmit}>
         <label className="field">
           <span className="field-label">Greenhouse name</span>

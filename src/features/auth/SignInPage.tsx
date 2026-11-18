@@ -51,7 +51,7 @@ export function SignInPage() {
 
   if (mode === 'forgot') {
     return (
-      <CenteredPanel title="Plants" subtitle="Reset your password">
+      <CenteredPanel title="CropLink" subtitle="Reset your password">
         <form className="form" onSubmit={handleForgot}>
           <p className="field-hint" style={{ margin: 0 }}>Enter the email you sign in with and we’ll send you a link to choose a new password.</p>
           <label className="field">
@@ -72,7 +72,7 @@ export function SignInPage() {
   }
 
   return (
-    <CenteredPanel title="Plants" subtitle={mode === 'sign-in' ? 'Sign in to your greenhouse' : 'Create your account'}>
+    <CenteredPanel title="CropLink" subtitle={mode === 'sign-in' ? 'Sign in to your greenhouse' : 'Create your account'}>
       <form className="form" onSubmit={handleSubmit}>
         <label className="field">
           <span className="field-label">Email</span>
@@ -102,7 +102,7 @@ export function SignInPage() {
         </button>
       </form>
       <button className="button button-link" type="button" onClick={() => setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in')}>
-        {mode === 'sign-in' ? 'New to Plants? Create an account' : 'Already have an account? Sign in'}
+        {mode === 'sign-in' ? 'New to CropLink? Create an account' : 'Already have an account? Sign in'}
       </button>
     </CenteredPanel>
   )
