@@ -88,7 +88,7 @@ async function navigationHandler(request) {
     // All routes are the same single-page app
     const cached = await cache.match(SHELL_URL, { ignoreVary: true })
     if (cached) return cached
-    return new Response('<h1>Plants — offline</h1><p>Open Plants once with a connection to use it offline.</p>', {
+    return new Response('<h1>CropLink — offline</h1><p>Open CropLink once with a connection to use it offline.</p>', {
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
     })
   }

@@ -120,7 +120,7 @@ function Study({ fruits, climateFrom, climateTo }: { fruits: Fruit[]; climateFro
         <h3 className={styles.chartTitle}>What the data allows</h3>
         <ul className={styles.small}>
           <li>
-            {fruits.length} fruit recorded at Breaker and later Harvested ({legacyFruits} using legacy CropLink observations). Usable: {all.usable}. With enough temperature data: {all.withTemperature}; with complete radiation: {all.withRadiation}.
+            {fruits.length} fruit recorded at Breaker and later Harvested ({legacyFruits} using Legacy CropLink (original app, pre-Oct 2026) observations). Usable: {all.usable}. With enough temperature data: {all.withTemperature}; with complete radiation: {all.withRadiation}.
           </li>
           {Object.entries(all.excluded).map(([k, v]) => (
             <li key={k} className={styles.muted}>
@@ -148,7 +148,7 @@ function Study({ fruits, climateFrom, climateTo }: { fruits: Fruit[]; climateFro
               <tr>
                 <th className={styles.left}>Central estimate</th>
                 <th>All observations</th>
-                <th>Excluding legacy CropLink</th>
+                <th>Excluding Legacy CropLink (original app, pre-Oct 2026)</th>
               </tr>
             </thead>
             <tbody>
@@ -188,7 +188,7 @@ function Study({ fruits, climateFrom, climateTo }: { fruits: Fruit[]; climateFro
                   <td>{x.central?.radiation != null && x.central.days > 0 ? f(x.central.radiation) : '—'}</td>
                   <td>{pct(x.central?.tempCoverage ?? null)}</td>
                   <td className={`${styles.left} ${styles.small} ${styles.muted}`}>
-                    {[x.legacy ? 'legacy' : null, x.excluded ? `excluded: ${EXCLUSION_TEXT[x.excluded]}` : null, x.central && x.central.degreeDays === null ? 'not enough climate' : null]
+                    {[x.legacy ? 'Legacy CropLink' : null, x.excluded ? `excluded: ${EXCLUSION_TEXT[x.excluded]}` : null, x.central && x.central.degreeDays === null ? 'not enough climate' : null]
                       .filter(Boolean)
                       .join(' · ')}
                   </td>

@@ -1,6 +1,6 @@
 {
-  "name": "Plants",
-  "short_name": "Plants",
+  "name": "CropLink",
+  "short_name": "CropLink",
   "description": "Greenhouse plant measurements",
   "id": "/mobile",
   "start_url": "/mobile",

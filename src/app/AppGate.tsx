@@ -18,7 +18,7 @@ export function AppGate({ children }: { children: ReactNode }) {
 
   if (!isSupabaseConfigured) {
     return (
-      <CenteredPanel title="Plants" subtitle="Supabase is not configured.">
+      <CenteredPanel title="CropLink" subtitle="Supabase is not configured.">
         <p className="form-notice">
           Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> (see <code>.env.example</code>) and rebuild.
         </p>
@@ -40,7 +40,7 @@ export function AppGate({ children }: { children: ReactNode }) {
 function OrganizationGate({ children }: { children: ReactNode }) {
   const { organization, loading, error } = useOrganizationState()
   if (loading) return <FullPageLoading />
-  if (error) return <CenteredPanel title="Plants"><ErrorState error={error} /></CenteredPanel>
+  if (error) return <CenteredPanel title="CropLink"><ErrorState error={error} /></CenteredPanel>
   if (!organization) return <CreateOrganizationPage />
   return <>{children}</>
 }

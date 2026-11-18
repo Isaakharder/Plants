@@ -28,7 +28,7 @@ export function AppLayout() {
             <span className={styles.brandIcon}>
               <LeafIcon size={18} />
             </span>
-            <span className={styles.brandName}>Plants</span>
+            <span className={styles.brandName}>CropLink</span>
             <span className={styles.orgName}>{organization.name}</span>
           </div>
           <nav className={styles.nav} aria-label="Main">
